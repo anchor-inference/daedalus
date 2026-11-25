@@ -353,8 +353,6 @@
 /* A shared dialog is only the conversation. The column stays a readable width: in the app the
    conversation widens because it shares the window with a panel, and here there is no panel. */
 .chat-head button.chip { font: inherit; cursor: pointer; min-height: var(--ctl-h-sm); }
-.share-note { margin: 10px 0 0; }
-.share-warn { color: var(--warn); margin: 8px 0; }
 .shared { min-height: 100dvh; display: flex; flex-direction: column; background: var(--wash, var(--bg)); color: var(--fg); }
 .shared-column { width: min(760px, 100%); margin: 0 auto; flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .shared-head { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 8px 16px; border-bottom: 1px solid var(--line); }

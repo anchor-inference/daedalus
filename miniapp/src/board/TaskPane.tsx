@@ -3,13 +3,13 @@
 // pane rather than a dialog, so the board stays in view and another card opens in its place; on a
 // phone the same contents fill a sheet. A chat's own board mounts it in its panel at the panel's width.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { copyText } from "../ui/components";
 import { absTime, relTimeLong } from "../format";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { navigate, projectPagePath } from "../router";
-import { useQuery } from "../store";
+import { invalidate, useQuery } from "../store";
 import { Button, IconButton, OverflowMenu, Select, Sheet, useLayer, type MenuItem } from "../ui/primitives";
 import { ChatFinish } from "./ChatFinish";
 import { closeCard, closeItems } from "./operatorClose";
@@ -28,6 +28,12 @@ export type TaskPaneProps = {
   chats: ChatInfo;
   writes: TaskWrites;
   onClose: () => void;
+  /** Standing in a narrow panel in place of its list: the head leads back to the list instead of
+   *  closing the pane, and the pane takes the panel's width. */
+  back?: { label: string; onBack: () => void };
+  /** The chat the pane stands in, when it is a chat's own panel: the way to that chat is not offered
+   *  on its own cards. */
+  here?: string;
   onChanged: () => void;
   onOpenSession: (sessionId: string) => void;
   /** Another card of the board, by id: a dependency opens in the pane's place. */
@@ -41,17 +47,18 @@ export type TaskPaneProps = {
 
 /** The pane beside the board, 420 px on the Board page and the panel's width in a chat's panel. */
 export function TaskPane(props: TaskPaneProps) {
-  const { task, onClose } = props;
+  const { task, onClose, back } = props;
   // Escape closes the pane, unless a menu or a list opened from it is on top.
   useLayer(onClose, true);
   return (
-    <aside className="task-pane" aria-label={t("board.pane")} data-task={task.id}>
+    <aside className={`task-pane ${back ? "in-panel" : ""}`} aria-label={t("board.pane")} data-task={task.id}>
       <div className="task-pane-head">
+        {back && <IconButton icon="back" label={back.label} onClick={back.onBack} className="task-pane-back" />}
         <span className="task-pane-kind">{t("board.pane")}</span>
         <span className="task-pane-code mono">{shortId(task.id)}</span>
         <span className="grow" />
         <OverflowMenu label={t("board.actions")} items={menuItems(props)} />
-        <IconButton icon="close" label={t("board.pane.close")} onClick={onClose} />
+        {!back && <IconButton icon="close" label={t("board.pane.close")} onClick={onClose} />}
       </div>
       <div className="task-pane-body">
         <TaskBody {...props} />
@@ -79,8 +86,14 @@ function chatOf(task: BoardTask): string | null {
   return task.origin_session_id ?? task.session_id;
 }
 
-function menuItems({ task, writes, onChanged, onOpenSession, toast, onRemoved }: TaskPaneProps): MenuItem[] {
+/** The card's chat, unless that is the one the pane stands in: opening it would go nowhere. */
+function otherChat(task: BoardTask, here?: string): string | null {
   const chat = chatOf(task);
+  return chat && chat !== here ? chat : null;
+}
+
+function menuItems({ task, writes, onChanged, onOpenSession, toast, onRemoved, here }: TaskPaneProps): MenuItem[] {
+  const chat = otherChat(task, here);
   return [
     ...(chat ? [{ label: t("board.open.chat"), icon: "chat" as const, onSelect: () => onOpenSession(chat) }] : []),
     { label: t("board.copyid"), icon: "copy", ticks: true, onSelect: async () => { const ok = await copyText(task.id); if (!ok) toast(task.id); return ok; } },
@@ -90,12 +103,12 @@ function menuItems({ task, writes, onChanged, onOpenSession, toast, onRemoved }:
 }
 
 function TaskBody(props: TaskPaneProps) {
-  const { task, chats, writes, onOpenSession, onChanged, toast, onOpenTask, others = [] } = props;
+  const { task, chats, writes, onOpenSession, onChanged, toast, onOpenTask, others = [], here } = props;
   const finished = isFinished(task);
   const state = cardState(task, chats.running);
   const text = taskText(task);
   const done = task.checklist.filter((c) => c.done).length;
-  const chat = chatOf(task);
+  const chat = otherChat(task, here);
   const chatName = chat ? chats.title(chat) : undefined;
   const blocked = writes.blocked(task);
   const moves = movesFor(task);
@@ -264,7 +277,15 @@ function DuePick({ task, writes, disabled }: { task: BoardTask; writes: TaskWrit
 }
 
 function History({ task, live }: { task: BoardTask; live: boolean }) {
-  const { data, error } = useQuery<TaskEvent[]>(`/api/board/${encodeURIComponent(task.id)}/events?limit=50&at=${encodeURIComponent(task.updated_at)}`, { staleMs: 5000 });
+  const key = `/api/board/${encodeURIComponent(task.id)}/events?limit=50`;
+  const { data, error } = useQuery<TaskEvent[]>(key, { staleMs: 5000 });
+  // A card that changed has a new line to show. The change used to ride in the address as a
+  // parameter the host does not read, which the route contract refuses; the list is asked again instead.
+  const seen = useRef(`${key} ${task.updated_at}`);
+  useEffect(() => {
+    const now = `${key} ${task.updated_at}`;
+    if (seen.current !== now) { seen.current = now; invalidate(key); }
+  }, [key, task.updated_at]);
   const events = [...(data ?? [])].reverse();
   const old = Date.now() - Date.parse(task.created_at) > HISTORY_DAYS * 86400_000;
   // The host keeps events a week: an older card's earliest lines are gone, and the list says so.
@@ -295,9 +316,9 @@ function History({ task, live }: { task: BoardTask; live: boolean }) {
 }
 
 /** The pane's foot: the way to the card's chat, and the one way to end it or take it back to work. */
-function TaskFoot({ task, writes, onOpenSession, onChanged, toast, bare = false }: TaskPaneProps & { bare?: boolean }) {
+function TaskFoot({ task, writes, onOpenSession, onChanged, toast, here, bare = false }: TaskPaneProps & { bare?: boolean }) {
   const [busy, setBusy] = useState(false);
-  const chat = chatOf(task);
+  const chat = otherChat(task, here);
   const blocked = writes.blocked(task);
   const reopenable = (task.status === "done" && task.finished_by) || task.status === "dropped";
   const open = !isFinished(task);

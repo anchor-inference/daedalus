@@ -46,23 +46,9 @@
 /* ── the microphone ────────────────────────────────────────────────────────────────────── */
 .roundbtn:disabled { opacity: .4; cursor: default; }
 
-/* ── memory ────────────────────────────────────────────────────────────────────────────── */
-.memory-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
-.memory-toolbar select.field { flex: 1 1 200px; width: auto; }
-.memory-toolbar input.field { flex: 2 1 160px; width: auto; }
-.memory-bulk { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 8px; min-height: 36px; }
-.memory-row { display: flex; gap: 10px; align-items: flex-start; }
-.memory-row.selected { border-color: var(--line-strong); background: var(--surface-2); }
-.memory-check { width: 18px; height: 18px; margin: 4px 0 0; accent-color: var(--primary); flex: none; }
-.memory-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; font-size: var(--fs-12); color: var(--fg-3); }
-.memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
-.memory-actions { display: flex; gap: 4px; flex: none; }
 .badge.kind-decision { color: var(--warn); }
 .badge.kind-preference { color: var(--info); }
 .badge.kind-reflection { color: var(--ok); }
-@media (max-width: 480px) {
-  .memory-actions { flex-direction: column; }
-}
 
 /* ── settings: models and clients as rows that expand ───────────────────────────────────
    Rows of one list, parted by hairlines. The default model is named by its tag: the stripe down the
@@ -246,41 +232,10 @@
 .needs-you .notice-body { font-family: var(--mono); font-size: var(--fs-mono); color: var(--fg-2); }
 .linkbtn.accent { color: var(--accent); font-size: var(--fs-12); }
 .linkbtn.accent:disabled { color: var(--fg-3); cursor: default; }
-.notice-toasts .iconbtn.quiet { background: transparent; color: var(--fg-2); }
-.notice-toasts .iconbtn.quiet:hover { background: var(--surface-3); color: var(--fg); }
-.notice-toasts { position: fixed; z-index: 44; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-.notice-toasts > * { pointer-events: auto; }
-.notice-toasts.stack { right: 16px; bottom: 16px; width: 360px; }
-/* A toast is a floating surface a step above a menu: the raised colour with the large ring and drop,
-   12 px corners, and its first answer the one filled button (ui/phone.css evens them on a phone). */
-/* On a phone the banner and its foot are one strip over the top of the page, on the page's own colour:
-   as two floating cards the 8 px between them let the page show through, the half of a heading cut
-   across the foot's upper edge. */
-.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 6px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px; background: var(--bg); border-bottom: 1px solid var(--line); pointer-events: auto; }
-.notice-toasts.banner .notice-foot { padding: 3px 4px; box-shadow: none; }
-.notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); cursor: pointer; touch-action: pan-x; animation: notice-in var(--t-base) var(--ease-out); }
-.notice-toast-head { display: flex; align-items: flex-start; gap: 10px; }
-.notice-toast-head .kind { width: var(--avatar); height: var(--avatar); }
-.notice-toast-head .notice-title { font-size: var(--fs-14); font-weight: 500; padding-top: 2px; }
-.notice-toast > .notice-body { padding-left: calc(var(--avatar) + 10px); }
-.notice-toast > .notice-actions { padding-left: calc(var(--avatar) + 10px); }
-.notice-toast .notice-actions { margin-top: 6px; }
-.notice-foot { display: flex; align-items: center; gap: 4px; padding: 2px; background: var(--surface-1); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
-.notice-foot .grow { flex: 1; }
-.notice-foot .btn.small { padding: 2px 8px; font-size: var(--fs-12); color: var(--fg-3); }
-.notice-more { padding: 2px 8px; border: 0; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-11); font-weight: 500; cursor: pointer; }
-.notice-more:hover { color: var(--fg); }
-@keyframes notice-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-/* A toast about a setting says by its square whether the work was done another way (amber) or not at
-   all (red): a wash of the tone under its glyph. It was a tinted border and a stripe down the edge. */
-.notice-toast.tone-warning { --toast-tone: var(--warn); }
-.notice-toast.tone-error { --toast-tone: var(--bad); }
-.notice-toast:is(.tone-warning, .tone-error) .kind { color: var(--toast-tone); background: color-mix(in srgb, var(--toast-tone) 12%, transparent); }
 /* The row a link brought the operator to: two soft pulses of ink, then nothing. */
 .setting-flash { animation: setting-flash 1.2s var(--ease-out) 2; border-radius: var(--radius-md); }
 @keyframes setting-flash { 0%, 100% { background: transparent; box-shadow: none; } 35% { background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .setting-flash { animation: none; background: color-mix(in srgb, var(--fg) 8%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 40%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .notice-toast { animation: none; } }
 .inbox-text { margin: 0; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); font-family: var(--mono); font-size: var(--fs-mono); white-space: pre-wrap; word-break: break-word; line-height: 1.45; max-height: 50vh; overflow: auto; color: var(--fg-2); }
 .erow.proposal { grid-template-columns: minmax(0, 1fr); }
 .erow.proposal .pill { flex: none; }
@@ -303,32 +258,27 @@
 .service-line .btn.open { flex: none; min-height: var(--ctl-h-sm); }
 .service-group .section-title .linkbtn { color: var(--fg-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-13); font-weight: 500; }
 .service-group .section-title .linkbtn:hover { color: var(--fg); }
-/* A choice of one is a list's rows, the chosen one filled: as bordered tiles each option was a card
-   inside the sheet or the card that asks. */
+/* A choice of one is a list's rows, the chosen one filled and its ring violet: the radio is drawn here
+   because the browser's own is a blue disc that belongs to no theme. The input stays a real radio, so
+   the arrow keys, the name and the checks that ask for one keep working. */
 .access-options { display: flex; flex-direction: column; gap: 2px; }
-.access-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; transition: background var(--t-fast); }
-.access-option:hover { background: var(--surface-2); }
-.access-option.on { background: var(--surface-3); }
-.access-option input { margin-top: 3px; accent-color: var(--primary); }
-.access-option b { display: block; font-weight: 500; }
-.access-option .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); }
-/* A live link: whoever holds it drives the agent, so the warning comes first and is not quiet. */
-.live-links { display: grid; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--line); }
-.live-title { margin: 0; font-size: var(--fs-14); font-weight: 600; }
-.live-warning, .live-reach { display: flex; align-items: flex-start; gap: var(--space-2); padding: 8px 10px; border-radius: var(--radius-sm); font-size: var(--fs-12); }
-.live-warning { color: var(--fg); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.live-warning .ic, .live-reach .ic { flex: none; margin-top: 1px; }
-.live-warning .ic { color: var(--bad); }
-.live-reach.ok .ic { color: var(--ok); }
-.live-reach.warn .ic { color: var(--warn); }
-.live-reach.ok { color: var(--fg); background: color-mix(in srgb, var(--ok) 12%, transparent); }
-.live-reach.warn { color: var(--fg); background: color-mix(in srgb, var(--warn) 12%, transparent); }
-.live-link { display: grid; gap: 4px; }
-.live-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--fs-12); color: var(--fg-3); }
-.live-visitors { margin: 0; padding-left: 18px; font-size: var(--fs-12); color: var(--fg-2); }
-.live-create { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.live-create select.field { width: auto; }
-.live-ended { display: grid; gap: 2px; font-size: var(--fs-12); color: var(--fg-3); }
-.live-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.access-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; transition: background var(--t-fast); }
+.access-option:hover { background: var(--hover); }
+.access-option.on { background: var(--selected); }
+.access-option input[type="radio"] { appearance: none; display: grid; place-content: center; width: 16px; height: 16px; margin: 2px 0 0; border: 1.5px solid var(--line-strong); border-radius: 50%; background: transparent; cursor: pointer; }
+.access-option input[type="radio"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); transform: scale(0); transition: transform var(--t-fast); }
+.access-option input[type="radio"]:checked { border-color: var(--primary); }
+.access-option input[type="radio"]:checked::before { transform: scale(1); }
+.access-option input[type="radio"]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.access-option input[type="radio"]:disabled { opacity: .5; cursor: default; }
+.access-option b { display: block; font-size: var(--fs-14); font-weight: 500; }
+.access-option .sub { display: block; margin-top: 2px; line-height: 1.4; }
+/* A label over a field or a row of controls: the settings' small heading, not a form's bold one. */
+.link-label { display: block; margin: 16px 0 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+/* A tick, drawn as the radio is: a 16 px box that fills violet with a white mark when ticked. */
+input.check { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent center / 12px no-repeat; cursor: pointer; transition: background-color var(--t-fast), border-color var(--t-fast); }
+input.check:checked { border-color: var(--primary); background-color: var(--primary); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E"); }
+input.check:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+input.check:disabled { opacity: .5; cursor: default; }
 .preview-line { margin-top: 10px; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); color: var(--fg-2); }
 .kind.muted { color: var(--fg-3); }

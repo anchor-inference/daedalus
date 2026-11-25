@@ -25,6 +25,8 @@ type Common = {
   types: TypeDef[];
   aggregates: Map<Day, AggregateItem[]>;
   dense: boolean;
+  /** The key of the item open in the pane, drawn as chosen. */
+  openKey?: string | null;
   onOpen: (item: Item) => void;
   onToggleTask: (task: Task) => void;
   onStatus: (item: Item, status: EventStatus) => void;
@@ -114,7 +116,7 @@ function DayRows({ day, items, ...common }: Common & { day: Day }) {
 
 const SWIPE_AT = 72;
 
-function Row({ item, day, zone, now, calendars, types, dense, onOpen, onToggleTask, onStatus }: Omit<Common, "items" | "aggregates"> & { item: Item; day: Day }) {
+function Row({ item, day, zone, now, calendars, types, dense, openKey, onOpen, onToggleTask, onStatus }: Omit<Common, "items" | "aggregates"> & { item: Item; day: Day }) {
   const event = item.event;
   const type = event?.type ? types.find((x) => x.id === event.type) : undefined;
   const calendar = event ? calendars.find((c) => c.id === event.calendar_id) : null;
@@ -176,7 +178,7 @@ function Row({ item, day, zone, now, calendars, types, dense, onOpen, onToggleTa
           {status === reveal ? t("cal.status.back") : statusLabel(reveal)}
         </span>
       )}
-      <div className={`cal-row ${item.kind} ${item.done || status === "done" ? "done" : ""} ${status === "skipped" || status === "cancelled" ? "skipped" : ""} ${!item.allDay && item.end < now ? "past" : ""} ${dense ? "dense" : ""}`}
+      <div className={`cal-row ${item.kind} ${item.done || status === "done" ? "done" : ""} ${status === "skipped" || status === "cancelled" ? "skipped" : ""} ${!item.allDay && item.end < now ? "past" : ""} ${openKey === item.key ? "open" : ""} ${dense ? "dense" : ""}`}
         style={{ "--c": item.typeColor ?? item.color, transform: dx ? `translateX(${dx}px)` : undefined } as CSSProperties}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={() => { start.current = null; setDx(0); }}>
         <span className="cal-row-time">{time.includes(" – ") ? <>{time.split(" – ")[0]}<small>{time.split(" – ")[1]}</small></> : time}</span>

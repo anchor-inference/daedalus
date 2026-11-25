@@ -8,6 +8,7 @@
 import { FLOW_OPEN_RE, type Flow, type FlowNode, flowIcon, parseFlow } from "./flow";
 import { t } from "./i18n";
 import { HIGHLIGHT_MAX_LINES, highlight, langOfLabel } from "./highlight";
+import { fileTileIcon } from "./filetile";
 import { iconSvg } from "./icons";
 import { CARD_CLOSE_RE, CARD_OPEN_RE, CITE_RUN_RE, type Card, type Citation, citationsIn, parseCard, siteOf, webUrl } from "./rich";
 
@@ -72,7 +73,7 @@ function unescapeLabel(label: string): string {
   return label.replace(/\\([\[\]\\])/g, "$1");
 }
 
-/** The family a file belongs to, for the colour of its square (the `--file-*` tokens). */
+/** The family a file belongs to, for the glyph in its grey square (`filetile.tsx`). */
 export function fileFamily(info: Pick<NoteFileInfo, "name" | "mime">): string {
   const n = info.name.toLowerCase();
   if (/\.pdf$/.test(n)) return "pdf";
@@ -85,12 +86,6 @@ export function fileFamily(info: Pick<NoteFileInfo, "name" | "mime">): string {
   if (/\.(py|ts|tsx|js|go|rs|java|c|cpp|sh|json|ya?ml|toml)$/.test(n)) return "code";
   if (info.mime.startsWith("text/") || /\.(md|txt)$/.test(n)) return "text";
   return "other";
-}
-
-/** A file's kind as the chip names it: the extension, upper-cased, or the mime's own word. */
-function fileKind(info: NoteFileInfo): string {
-  const ext = /\.([A-Za-z0-9]{1,5})$/.exec(info.name)?.[1];
-  return (ext ?? info.mime.split("/")[1] ?? "file").slice(0, 4).toUpperCase();
 }
 
 function sizeWords(n: number): string {
@@ -112,7 +107,7 @@ function noteLink(label: string, id: string): string {
   const text = unescapeLabel(label) || info?.name || "";
   if (!info) return noteMissing(text);
   if (info.mime.startsWith("image/") && !label) return noteImage(label, id);
-  return `<button type="button" class="note-file" data-note-file="${escape(id)}" title="${escape(info.name)}"><span class="note-file-kind" data-kind="${fileFamily(info)}" aria-hidden="true">${escape(fileKind(info))}</span><span class="note-file-name">${escape(text)}</span><span class="note-file-size">${sizeWords(info.size)}</span></button>`;
+  return `<button type="button" class="note-file" data-note-file="${escape(id)}" title="${escape(info.name)}"><span class="file-tile sm" data-family="${fileFamily(info)}" aria-hidden="true">${iconSvg(fileTileIcon(fileFamily(info)), 14)}</span><span class="note-file-name">${escape(text)}</span><span class="note-file-size">${sizeWords(info.size)}</span></button>`;
 }
 
 function noteMissing(name: string): string {

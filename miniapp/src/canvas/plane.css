@@ -1,0 +1,128 @@
+/* The board's plane: what is drawn on it. A card's words, a link, a live page's frame and an edge's label
+   are the drawing itself, sized in the board's own units and scaled with its zoom, so they follow the
+   canvas's scale and not the interface's. The interface around the board (the list, the bar, the tools,
+   the history, the sharing panel) is canvas.css and is held to the scale. */
+
+/* -- the board --------------------------------------------------------------------------------- */
+/* The dot grid is the board's own background, moved and scaled with the view, so the plane reads as
+   endless and a pan is visible even on an empty board. */
+.cv-board { position: relative; overflow: hidden; min-height: 0; min-width: 0; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; background-color: var(--bg); background-image: radial-gradient(circle, var(--cv-dot) 1px, transparent 1.3px); }
+.cv-board:active { cursor: grabbing; }
+.cv-board:focus-visible { box-shadow: inset 0 0 0 2px var(--line-strong); }
+.cv-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+.cv-edges { position: absolute; overflow: visible; pointer-events: none; }
+
+.cv-node { position: absolute; box-sizing: border-box; cursor: default; --cv-ink: var(--line-strong); }
+.cv-text, .cv-link, .cv-file { border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--cv-card); color: var(--fg); box-shadow: var(--drop-xs); }
+.cv-node.tinted.cv-text, .cv-node.tinted.cv-link, .cv-node.tinted.cv-file { border-color: var(--cv-ink); background: color-mix(in srgb, var(--cv-ink) 12%, var(--cv-card)); }
+.cv-node.shape-ellipse { border-radius: 999px; }
+.cv-node.shape-ellipse .cv-card-body { padding-inline: 22px; }
+.cv-node.shape-diamond { border-style: dashed; }
+/* A free label from a converted drawing: words on the board, no card around them. */
+.cv-node.shape-text { border-color: transparent; background: transparent; box-shadow: none; }
+/* Mixed with the theme's ink: a converted drawing's labels carry the hex colours they were drawn in on
+   white, and near-black words in their own colour would vanish on a dark board. */
+.cv-node.shape-text.tinted { border-color: transparent; background: transparent; color: color-mix(in srgb, var(--cv-ink) 55%, var(--fg)); }
+.cv-node.shape-text.selected { border-color: var(--line-strong); }
+.cv-group { border: 1.5px dashed color-mix(in srgb, var(--fg-3) 70%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--fg-3) 5%, transparent); }
+.cv-group.tinted { border-color: var(--cv-ink); background: color-mix(in srgb, var(--cv-ink) 7%, transparent); }
+.cv-group-label { position: absolute; left: 0; bottom: 100%; max-width: 100%; margin-bottom: 6px; padding: 2px 10px; border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-group-label:empty { display: none; }
+.cv-group.tinted .cv-group-label { background: color-mix(in srgb, var(--cv-ink) 22%, var(--surface-1)); }
+.cv-node.selected { outline: 2px solid var(--ring); outline-offset: 2px; }
+.cv-node.marked { outline: 2px dashed var(--bad); outline-offset: 4px; }
+
+.cv-card-body { width: 100%; height: 100%; box-sizing: border-box; padding: 10px 14px; overflow: auto; font-size: 15px; line-height: 1.45; overscroll-behavior: contain; scrollbar-width: thin; }
+.cv-card-body.md > :first-child { margin-top: 0; }
+.cv-card-body.md > :last-child { margin-bottom: 0; }
+/* The app's Markdown starts headings one level down (a chat answer's "#" is an h2), so a card's "#"
+   and "##" arrive as h2 and h3. */
+.cv-card-body.md h2 { font-size: 1.5em; margin: .2em 0 .4em; }
+.cv-card-body.md h3 { font-size: 1.25em; margin: .2em 0 .4em; }
+.cv-card-body.md p { margin: 0 0 .5em; }
+.cv-board:not(.read-only) .cv-card-body { user-select: none; }
+.cv-link-body, .cv-file-body { display: flex; align-items: flex-start; gap: 10px; }
+.cv-link-body > .ic, .cv-file-body > .ic { flex: none; margin-top: 2px; color: var(--fg-3); }
+.cv-link-text { display: grid; gap: 2px; min-width: 0; }
+.cv-link-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-link-text a, .cv-link-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 13px; }
+.cv-file-path { color: var(--fg-3) !important; font-family: var(--mono); }
+.cv-image { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 9px; background: #fff; pointer-events: none; }
+
+.cv-text-field { display: block; width: 100%; height: 100%; box-sizing: border-box; padding: 10px 14px; border: 0; border-radius: 9px; outline: 2px solid var(--ring); resize: none; background: var(--cv-card); color: var(--fg); font: 15px/1.45 var(--mono); user-select: text; -webkit-user-select: text; }
+.cv-inline-field { width: 100%; min-width: 140px; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--fg); border-radius: 6px; outline: none; background: var(--surface-1); color: var(--fg); font: inherit; user-select: text; -webkit-user-select: text; }
+
+/* Handles keep their size on screen at any zoom: scaled by the inverse of the zoom. */
+.cv-handle { position: absolute; width: calc(10px * var(--cv-inv)); height: calc(10px * var(--cv-inv)); border: calc(1.5px * var(--cv-inv)) solid var(--fg); border-radius: 3px; background: var(--bg); transform: translate(-50%, -50%); z-index: 2; }
+.cv-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.cv-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.cv-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.cv-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.cv-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.cv-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.cv-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.cv-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+.cv-side { position: absolute; width: calc(14px * var(--cv-inv)); height: calc(14px * var(--cv-inv)); border-radius: 50%; background: var(--fg); box-shadow: 0 0 0 calc(3px * var(--cv-inv)) var(--bg); opacity: 0; transform: translate(-50%, -50%); cursor: crosshair; z-index: 3; transition: opacity var(--t-fast); }
+.cv-side.top { left: 50%; top: calc(-18px * var(--cv-inv)); }
+.cv-side.bottom { left: 50%; top: calc(100% + 18px * var(--cv-inv)); }
+.cv-side.left { left: calc(-18px * var(--cv-inv)); top: 50%; }
+.cv-side.right { left: calc(100% + 18px * var(--cv-inv)); top: 50%; }
+.cv-board:not(.read-only) .cv-node:hover > .cv-side, .cv-board:not(.read-only) .cv-node.selected > .cv-side, .cv-board.connecting .cv-node > .cv-side { opacity: .9; }
+.cv-board.read-only .cv-side, .cv-board.read-only .cv-handle { display: none; }
+/* While an edge is dragged out, every card shows where it can be dropped. */
+.cv-board.connecting .cv-node:hover { outline: 2px solid color-mix(in srgb, var(--fg) 60%, transparent); outline-offset: 2px; }
+
+.cv-edge-line { fill: none; stroke: var(--cv-edge); stroke-width: 2px; }
+.cv-edge[style] .cv-edge-line { stroke: var(--cv-ink); }
+.cv-edge-head { fill: var(--cv-edge); }
+.cv-edge[style] .cv-edge-head { fill: var(--cv-ink); }
+.cv-edge-hit { fill: none; stroke: transparent; stroke-width: calc(16px * var(--cv-inv)); pointer-events: stroke; cursor: pointer; }
+.cv-board.read-only .cv-edge-hit { pointer-events: none; }
+.cv-edge.selected .cv-edge-line { stroke: var(--fg); stroke-width: 3px; }
+.cv-edge.selected .cv-edge-head { fill: var(--fg); }
+.cv-edge.marked .cv-edge-line { stroke: var(--bad); stroke-dasharray: 6 4; }
+.cv-edge-draft { fill: none; stroke: var(--fg-2); stroke-width: 2px; stroke-dasharray: 6 5; }
+.cv-edge-label { position: absolute; transform: translate(-50%, -50%); max-width: 260px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 1; }
+.cv-edge-label[style*="--cv-ink"] { border-color: var(--cv-ink); }
+.cv-edge-label.selected { border-color: var(--fg); }
+.cv-marquee { position: absolute; border: calc(1px * var(--cv-inv)) solid var(--fg-2); background: color-mix(in srgb, var(--fg) 8%, transparent); pointer-events: none; }
+.cv-empty-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: min(360px, 80%); color: var(--fg-3); font-size: var(--fs-14); text-align: center; pointer-events: none; }
+
+
+.cv-image-wait { background: var(--surface-2); }
+
+/* -- live pages -------------------------------------------------------------------------------- */
+.cv-live { border: 1.5px solid var(--line-strong); border-radius: 6px; background: #fff; }
+.cv-live.selected { outline-offset: 3px; }
+/* The header sits above the page, outside it, and is the page's handle: the page itself takes clicks. */
+.cv-frame-head { position: absolute; left: 0; right: 0; bottom: 100%; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 2px; color: var(--fg-2); font-size: 15px; white-space: nowrap; cursor: grab; }
+.cv-frame-name { font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.cv-frame-size { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cv-frame-reload { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer; }
+.cv-frame-reload:hover { background: var(--surface-3); color: var(--fg); }
+.cv-frame-body { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 5px; }
+.cv-frame-page { display: block; border: 0; background: #fff; transform-origin: 0 0; }
+/* While something is dragged, a page under the pointer must not take the events from the board. */
+.cv-board.busy .cv-frame-page, .cv-board.connecting .cv-frame-page { pointer-events: none; }
+.cv-frame-wait { width: 100%; height: 100%; background: repeating-linear-gradient(45deg, var(--surface-1), var(--surface-1) 12px, var(--surface-2) 12px, var(--surface-2) 24px); }
+.cv-frame-notice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 100%; box-sizing: border-box; padding: 32px; background: var(--surface-1); color: var(--fg-2); text-align: center; font-size: 22px; line-height: 1.4; }
+.cv-frame-notice strong { color: var(--fg); font-size: 26px; }
+.cv-frame-notice .ic { width: 40px; height: 40px; color: var(--fg-3); }
+.cv-frame-notice span { max-width: 640px; }
+.cv-frame-notice .btn { font-size: 18px; min-height: 40px; padding: 6px 18px; }
+
+.cv-board.mode-comment .cv-node:not(.cv-live):not(.cv-group) { cursor: copy; }
+
+/* The glass over a live page while a pick is being made: it catches the click the page would take. */
+.cv-frame-glass { position: absolute; inset: 0; cursor: crosshair; background: transparent; z-index: 2; }
+
+@media (max-width: 680px) {
+  .cv-text-field, .cv-inline-field { font-size: 16px; }
+}
+
+.cv-origin-bar { position: absolute; left: 0; top: 0; z-index: 3; display: grid; gap: 6px; width: max-content; max-width: min(calc(100vw - 48px), calc(100% / var(--cv-inv))); box-sizing: border-box; padding: 8px; border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line-strong); border-bottom-right-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 12%, var(--surface-1)); color: var(--fg); font-size: var(--fs-13); box-shadow: var(--shadow-md); transform: scale(var(--cv-inv)); transform-origin: 0 0; cursor: default; }
+.cv-origin-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.cv-origin-row > .ic { color: var(--warn); }
+.cv-origin-text { min-width: 0; overflow-wrap: anywhere; }
+.cv-origin-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-origin-actions .btn.ghost { background: transparent; border-color: transparent; }

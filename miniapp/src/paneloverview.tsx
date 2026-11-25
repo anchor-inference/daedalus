@@ -10,7 +10,7 @@ import { TAB_ICON } from "./panelhost";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { Elapsed } from "./details";
-import { useChatBoard, type BoardTask } from "./panelpanes";
+import type { BoardTask } from "./board/tasks";
 import { useQuery } from "./store";
 import { taskSub } from "./jobs";
 import { commandPreview } from "./format";
@@ -20,10 +20,10 @@ export type OverviewRow = { tab: PanelTab; name: string; text: ReactNode; tag?: 
 
 export type OverviewStatus = { tone: "live" | "attn" | "bad" | "idle"; word: string; since?: string | null };
 
-export function Overview({ sessionId, family, status, title, meta, rows, jobs, onOpen, onBoard }: {
+export function Overview({ sessionId, board, status, title, meta, rows, jobs, onOpen, onBoard }: {
   sessionId: string;
-  /** The chat and its helpers: the tasks any of them made are the chat's. */
-  family: readonly string[];
+  /** The chat's tasks (what it and its helpers made), or undefined until they are read. */
+  board: BoardTask[] | undefined;
   status: OverviewStatus;
   title: string;
   meta: ReactNode;
@@ -31,14 +31,13 @@ export function Overview({ sessionId, family, status, title, meta, rows, jobs, o
   /** Whether the Terminal row is drawn: the session runs jobs (an orchestrator runs none). */
   jobs?: boolean;
   onOpen: (tab: PanelTab) => void;
-  /** The chat's tasks on the board; left out, the block has no way there. */
+  /** The way to the chat's tasks (its Board tab); left out, the block has no way there. */
   onBoard?: () => void;
 }) {
-  const board = useChatBoard(sessionId, family).tasks;
   const tasks = useQuery<{ tasks: TaskView[] }>(jobs ? `/api/sessions/${encodeURIComponent(sessionId)}/tasks` : null, { staleMs: 5000 }).data?.tasks;
   const job = jobRow(tasks);
   // The Terminal row stands where the mockup's work group has it: after the changes and the helpers.
-  const at = rows.findIndex((row) => row.tab !== "changes" && row.tab !== "subagents" && row.tab !== "questions");
+  const at = rows.findIndex((row) => row.tab !== "changes" && row.tab !== "board" && row.tab !== "subagents" && row.tab !== "questions");
   const all = job ? [...rows.slice(0, at < 0 ? rows.length : at), job, ...rows.slice(at < 0 ? rows.length : at)] : rows;
   return (
     <div className="ov" data-tool-page="overview">

@@ -1564,6 +1564,9 @@ export type SessionDetail = {
   run_started_at?: string | null;
   /** The git branch of the folder it works in, read from the repository at each read; null outside one. */
   branch?: string | null;
+  /** Whether that folder is in a git repository at all: what decides that the chat has a Changes tool,
+   *  without asking git for its changes; null while the host does not know (a host folder not yet read). */
+  repository?: boolean | null;
   /** The summary being written ahead of the trigger; the session is not compacting while it is. */
   compaction_background?: Compacting | null;
   run_id: string | null;

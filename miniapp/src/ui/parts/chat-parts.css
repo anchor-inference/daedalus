@@ -243,11 +243,9 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 /* Mermaid's boxes have square corners; the app's blocks, the flow's nodes among them, are rounded. */
 .mermaid-view g.node rect, .diagram-zoom-body g.node rect { rx: 6px; ry: 6px; }
 .mermaid-note { padding: 6px 14px 8px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); }
-.diagram-zoom { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); outline: none; }
-.diagram-zoom-top { display: flex; justify-content: flex-end; padding: max(8px, env(safe-area-inset-top)) 12px 0; }
-.diagram-zoom-top button { display: flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); cursor: pointer; }
-.diagram-zoom-top button:hover { background: var(--surface-2); color: var(--fg); }
-.diagram-zoom-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); }
+/* The large view is a full-window sheet: the drawing takes everything under its head. */
+.sheet.diagram-zoom .sheet-body { display: flex; flex: 1; }
+.diagram-zoom-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); }
 .diagram-zoom-body svg { width: 100%; height: 100%; }
 .fav { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 14px; aspect-ratio: 1; border-radius: 4px; background: var(--surface-3) center / cover no-repeat; color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 1; overflow: hidden; }
 .fav.has-mark { color: transparent; background-color: transparent; }
@@ -298,8 +296,12 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 
 /* ── the preview dialog ────────────────────────────────────────────────────────────────── */
 .sheet.preview { max-height: 92%; }
-.preview-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preview-name .sub { font-weight: 400; color: var(--fg-3); letter-spacing: 0; }
+.preview-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-14); font-weight: 600; overflow: hidden; white-space: nowrap; }
+.preview-glyph { display: inline-flex; flex: none; color: var(--fg-2); }
+.preview-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.preview-name .sub { flex: none; font-weight: 400; color: var(--fg-3); }
+.sheet.preview .sheet-head { gap: 4px; }
+.sheet.preview .sheet-head h3 { flex: 1; min-width: 0; }
 .preview-body { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
 .preview-image { display: block; max-width: 100%; max-height: 78vh; margin: 0 auto; border-radius: var(--radius-sm); object-fit: contain; }
 .preview-frame { width: 100%; flex: 1; min-height: 60vh; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
@@ -356,19 +358,24 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .inline-media-loading { width:100%; min-height:var(--row-h-touch); aspect-ratio:16/9; border-radius:var(--radius-lg); background:var(--surface-2); animation:media-pulse 1.2s ease-in-out infinite alternate; }
 .inline-media-error { display:block; min-height:var(--row-h-touch); width:100%; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-2); color:var(--fg-2); cursor:pointer; }
 @keyframes media-pulse { to { opacity:.55; } }
-/* A lightbox, not a dialog: the picture uses the viewport and the chrome floats on it.
-   A sheet left the image in a box with a text toolbar and the chat showing around the edges. */
-.media-viewer.lightbox { position:fixed; inset:0; z-index:60; background:#000; color:#fff; outline:none; }
+/* A picture is looked at on black: the layer's bar carries its name, how many there are, the zoom,
+   the way to the panel and to save it, and the stage under it is the rest of the window. */
+.media-viewer.fullscreen-layer { background:#000; color:#fff; }
+.media-viewer .fullscreen-bar { border-bottom:0; background:transparent; }
+.media-viewer .fullscreen-bar .iconbtn, .media-viewer .fullscreen-bar .btn { color:#fff; background:transparent; }
+.media-viewer .fullscreen-bar .iconbtn:hover, .media-viewer .fullscreen-bar .btn:hover { background:rgba(255,255,255,.14); }
+.media-viewer .fullscreen-bar .btn { border-color:rgba(255,255,255,.28); }
+/* A picture is touched as often as it is clicked: every control in the bar is a finger's 44 px. */
+.media-viewer .fullscreen-bar .iconbtn, .media-viewer .fullscreen-bar .btn { width:var(--row-h-touch); height:var(--row-h-touch); min-height:var(--row-h-touch); }
+.media-viewer .fullscreen-bar .btn { width:auto; padding:0 12px; }
+.media-viewer .fullscreen-body { position:relative; overflow:hidden; }
+.media-viewer-body { position:absolute; inset:0; }
 .media-viewer-stage { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#000; touch-action:none; user-select:none; }
 .media-viewer-stage img { max-width:100%; max-height:100%; object-fit:contain; transform-origin:center; transition:transform 80ms linear; }
 .media-viewer-stage.video { touch-action:auto; }
-.lightbox-top { position:absolute; z-index:3; top:0; left:0; right:0; display:flex; align-items:center; gap:8px; padding:max(8px, env(safe-area-inset-top)) 12px 0; background:linear-gradient(rgba(0,0,0,.72), transparent); }
-.lightbox-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-14); }
-.lightbox-count { font-variant-numeric:tabular-nums; color:#ddd; }
-.lightbox-top button, .lightbox-top a, .lightbox-edge { width:var(--row-h-touch); height:var(--row-h-touch); flex:none; display:flex; align-items:center; justify-content:center; border:0; border-radius:50%; background:rgba(8,9,10,.55); color:#fff; cursor:pointer; text-decoration:none; }
-.lightbox-top button:hover, .lightbox-top a:hover, .lightbox-edge:hover { background:rgba(8,9,10,.82); }
-.lightbox-top button:has(.lightbox-zoom) { width:auto; min-width:var(--row-h-touch); padding:0 12px; }
-.lightbox-edge { position:absolute; z-index:3; top:50%; transform:translateY(-50%); }
+.lightbox-count { flex:none; padding:0 8px; font-size:var(--fs-13); font-variant-numeric:tabular-nums; color:#ddd; }
+.lightbox-edge { position:absolute; z-index:3; top:50%; transform:translateY(-50%); width:var(--row-h-touch); height:var(--row-h-touch); display:flex; align-items:center; justify-content:center; border:0; border-radius:50%; background:rgba(8,9,10,.55); color:#fff; cursor:pointer; }
+.lightbox-edge:hover { background:rgba(8,9,10,.82); }
 .lightbox-edge.previous { left:12px; }
 .lightbox-edge.next { right:12px; }
 .media-viewer-wait { width:var(--row-h-touch); height:var(--row-h-touch); border-radius:50%; background:rgba(255,255,255,.14); animation:pulse 1.2s ease-in-out infinite; }
@@ -406,12 +413,23 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .preview-grid table { width: auto; min-width: 100%; font-size: var(--fs-12); white-space: nowrap; }
 .preview-grid th { position: sticky; top: 0; background: var(--inset); z-index: 1; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 .preview-grid td, .preview-grid th { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
-.preview-tabs { margin-bottom: 8px; overflow-x: auto; }
-.preview-tabs button { white-space: nowrap; }
+.preview-tabs { margin-bottom: 8px; overflow-x: auto; flex: none; }
+.preview-tabs .segmented { width: max-content; }
+/* A file the app cannot draw: what it is called, why there is nothing to see, the way to have it. */
+.preview-none { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 16px; text-align: center; color: var(--fg-2); font-size: var(--fs-14); }
+.preview-none b { color: var(--fg); font-weight: 500; overflow-wrap: anywhere; }
+.preview-none .btn { margin-top: 8px; }
+/* A patch: each file is a framed block under its sticky header, the lines of the Changes screen. */
+.patch-view { display: flex; flex-direction: column; gap: 16px; }
+.patch-file { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--inset); overflow: clip; }
+.patch-file .dp-head { position: static; padding: 0 16px; border-top: 0; }
+.patch-file .dp-body { padding-top: 0; }
+.json-toggle .ic { vertical-align: -2px; transform: rotate(-90deg); transition: transform var(--t-fast); }
+.json-toggle.open .ic { transform: none; }
 .iconbtn.small.ic-link, a.iconbtn { color: var(--fg-2); }
 @media (min-width: 1024px) {
-  .sheet.preview { width: min(1100px, 94vw); }
-  .sheet.preview.image, .sheet.preview.pdf, .sheet.preview.sheet, .sheet.preview.csv { width: min(1400px, 96vw); }
+  /* A picture, a PDF and a table want the room; a page of text reads best at the sheet's own width. */
+  .sheet.preview.kind-image, .sheet.preview.kind-pdf, .sheet.preview.kind-sheet, .sheet.preview.kind-csv { width: min(1400px, 96vw); }
 }
 
 /* ── sharing a service ─────────────────────────────────────────────────────────────────── */
@@ -420,8 +438,7 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .share-panel { border: 0; box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); padding: 10px 12px 12px; background: var(--inset); }
 .share-panel .segmented { margin-bottom: 8px; }
 .share-panel .segmented button { padding: 6px; font-size: var(--fs-13); }
-.share-field { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; min-width: 0; flex-wrap: wrap; }
-.share-field input.field { flex: 1 1 140px; }
+.share-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.share-field input.field { flex: 1; min-width: 0; margin: 0; }
 .share-field .ic { color: var(--fg-3); flex: none; }
-.share-field input.field { flex: 1; min-width: 0; font-size: var(--fs-12); padding: 6px 8px; }
-.share-field .btn.small { white-space: nowrap; min-height: var(--ctl-h-sm); padding: 4px 9px; }
+.share-field .btn { flex: none; white-space: nowrap; }
