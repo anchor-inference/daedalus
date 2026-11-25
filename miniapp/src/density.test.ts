@@ -174,6 +174,8 @@ const BOX_ALLOWED = [
   ".settings-dialog",
   // A layer over the whole window is a surface like a sheet: its bar is a page header's height.
   ".fullscreen-",
+  // The page header's one row is 52 px on a desktop, as tall as the surface it heads.
+  ".pagehead-row",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
@@ -371,6 +373,32 @@ describe("the scale", () => {
     }
     expect(root).toContain("--lh-ui: 1.45");
     expect(root).toContain("--lh-prose: 1.6");
+  });
+});
+
+describe("a page's header", () => {
+  const DESKTOP = "min-width: 1024px";
+  const desktopRule = (selector: string) => all.filter((r) => r.media.includes(DESKTOP) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("is one 52 px row with its title 24 px in, on every page, whatever the column under it", () => {
+    expect(desktopRule(".pagehead-row")).toContain("min-height: 52px");
+    expect(desktopRule(".pagehead")).toContain("padding: 0 12px 0 24px");
+    // The header once followed the page's column (padding in to the 1120 or 1680 px column's edge), so
+    // the titles stood at six different x positions. No rule may pad it by the column again.
+    expect(all.filter((r) => /\.pagehead:has\(\+ \.screen\.(narrow|wide)\)/.test(r.selector)).map((r) => r.selector)).toEqual([]);
+  });
+
+  it("draws the rule under a ruled page without growing it", () => {
+    expect(desktopRule(".pagehead.ruled")).toContain("box-shadow: inset 0 -1px 0 var(--line)");
+    expect(desktopRule(".pagehead.ruled")).not.toMatch(/border/);
+  });
+
+  it("sets a page's column at 880 (list), 760 (reading) or the window (full), all between 24 px margins", () => {
+    const column = (name: string) => all.filter((r) => selectors(r).includes(`.screen.page-${name}`)).map((r) => r.body).join(";");
+    expect(column("list")).toContain("calc(880px + 48px)");
+    expect(column("reading")).toContain("calc(760px + 48px)");
+    expect(column("full")).toContain("padding-inline: 24px");
+    expect(column("full")).not.toContain("width:");
   });
 });
 

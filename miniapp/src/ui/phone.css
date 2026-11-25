@@ -44,7 +44,6 @@
   .pagehead-actions { gap: 0; }
   .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; }
   .pagehead > :not(.pagehead-row) { margin-left: var(--space-3); margin-right: var(--space-3); }
-  .pagehead:has(+ .screen.narrow), .pagehead:has(+ .screen.wide) { padding-inline: var(--space-1); }
 
   /* ── the drawer ──────────────────────────────────────────────────────────────────────────── */
   .ph-drawer-root { position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 1); pointer-events: none; }

@@ -47,12 +47,6 @@ a { color: var(--accent); text-decoration: none; }
 .screen { flex: 1; padding: 6px 14px calc(76px + env(safe-area-inset-bottom)); }
 .screen.narrow { width: min(100%, 1120px); margin-inline: auto; }
 .screen.wide { width: min(100%, 1680px); margin-inline: auto; }
-/* The header's contents stand in the same column as the page under it, while its band still spans
-   the window. Flush left, the title and the filters sat 240 px left of the cards on a 1920 screen,
-   on Inbox, Memory and Services alike. The padding is the column's margin plus the side padding the
-   two share at that width (14, 24, 40). */
-.pagehead:has(+ .screen.narrow) { padding-inline: max(var(--page-pad), calc((100% - 1120px) / 2 + var(--page-pad))); }
-.pagehead:has(+ .screen.wide) { padding-inline: max(var(--page-pad), calc((100% - 1680px) / 2 + var(--page-pad))); }
 .pagehead { position: sticky; top: 0; z-index: 12; background: color-mix(in srgb, var(--wash, var(--bg)) 88%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); padding: max(6px, env(safe-area-inset-top)) 14px 6px; }
 .pagehead-row { display: flex; align-items: center; gap: 8px; min-height: var(--head-h); }
 .pagehead-title { flex: 1; min-width: 0; }
@@ -68,6 +62,34 @@ a { color: var(--accent); text-decoration: none; }
    three are the same size. */
 @media (pointer: coarse) { .pagehead .iconbtn:not(.primary) { background: var(--surface-2); } }
 .pagehead .filters { margin: 4px 0 2px; }
+/* A page's header is page chrome: it stands in the same place on every page, 24 px from the main
+   area's left edge, whatever the column under it is. It used to follow the column (padded in to the
+   1120 or 1680 px column's own edge) so the title sat above its cards, and the pages then put their
+   titles at six different x positions, which is what made the product read as six products. The
+   column is the page's business; the header is not.
+   52 px and 24 px are the sizes the redesign's header takes; the first becomes --head-h, which still
+   serves the chat header at 48 until the tokens carry 52. */
+@media (min-width: 1024px) {
+  .pagehead { padding: 0 12px 0 24px; }
+  .pagehead-row { min-height: 52px; gap: 8px; }
+  .pagehead-title { flex: 0 1 auto; display: flex; align-items: baseline; gap: 10px; }
+  .pagehead h1 { font-size: var(--fs-15); letter-spacing: 0; line-height: 1.3; }
+  .pagehead .sub { font-size: var(--fs-13); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pagehead-title.stacked { flex-direction: column; align-items: stretch; gap: 0; }
+  .pagehead-filters { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; margin-left: 4px; overflow-x: auto; scrollbar-width: none; }
+  .pagehead-filters::-webkit-scrollbar { display: none; }
+  .pagehead .pagehead-filters > * { margin: 0; flex: none; }
+  .pagehead-actions { margin-left: auto; }
+  /* The rule is an inset shadow, not a border, so a ruled header is as tall as an unruled one. */
+  .pagehead.ruled { box-shadow: inset 0 -1px 0 var(--line); }
+}
+/* The page's own column: the list is a centred 880 px, reading prose 760, and a board, table or
+   calendar takes the window between the same 24 px margins as the header. The side padding is
+   spelled 24 here rather than --page-pad, which grows to 40 on a wide window and would put the
+   page's edge 16 px right of its header's title. */
+.screen.page-list, .screen.page-reading, .screen.page-full { padding-inline: 24px; }
+.screen.page-list { width: min(100%, calc(880px + 48px)); margin-inline: auto; }
+.screen.page-reading { width: min(100%, calc(760px + 48px)); margin-inline: auto; }
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
   display: grid; grid-template-columns: repeat(4, 1fr);

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 import aiosqlite
@@ -42,6 +43,29 @@ def _canonical(value: Any) -> str:
 async def _one(conn: aiosqlite.Connection, sql: str, args: tuple[Any, ...]) -> aiosqlite.Row | None:
     async with conn.execute(sql, args) as cursor:
         return await cursor.fetchone()
+
+
+def normalize_due(value: str | None) -> str | None:
+    """A due date as the instant it is stored in: UTC, to the second, ``None`` for "no date".
+
+    ``None`` and ``""`` both mean no date (the update routes read ``""`` as "clear it" and ``None`` as
+    "leave it"; this is the stored side). A bare date is the end of that day in UTC, which is what
+    an agent writing ``2026-12-03`` means; a client that knows the operator's zone sends the instant
+    instead. A time without a zone is UTC, not the host's, so one stored value reads the same
+    wherever it is read.
+    """
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        if len(text) == 10:
+            moment = datetime.combine(date.fromisoformat(text), time(23, 59, 59), tzinfo=UTC)
+        else:
+            moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            moment = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+    except ValueError:
+        raise ValueError("a due date is an ISO date (2026-12-03) or an ISO timestamp") from None
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def _dependencies(conn: aiosqlite.Connection, task_id: str | None, project_id: str | None,
@@ -129,6 +153,7 @@ async def insert_task(
     origin_kind: str, assignee_staff_id: str | None = None,
     folder_id: str | None = None, file_ids: list[str] | None = None,
     requirements: list[dict[str, str]] | None = None,
+    due_at: str | None = None, assignee_operator: bool = False,
 ) -> dict[str, Any]:
     """Insert the card, its first contract and dependency gates inside the caller's receipt."""
     if not title.strip() or len(title) > 200 or len(acceptance) > 2000 or len(notes) > 4000:
@@ -140,6 +165,8 @@ async def insert_task(
     project_id = scope.id if scope.kind == "project" else None
     if project_id and await _one(conn, "SELECT 1 FROM projects WHERE id = ?", (project_id,)) is None:
         raise KeyError(project_id)
+    if assignee_staff_id and assignee_operator:
+        raise ValueError("a task is assigned to a staff member or to the operator, not both")
     if assignee_staff_id:
         await _assignee(conn, assignee_staff_id, project_id)
     task_id = mutation.object_id[:12]
@@ -149,12 +176,13 @@ async def insert_task(
     status = "todo" if ready else "blocked"
     checks = [{"id": f"C{index}", "text": item.strip()} for index, item in enumerate(checklist, 1)]
     await conn.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
-                       " session_id,origin_session_id,notes,created_at,updated_at,project_id,brief_json,assignee_staff_id)"
-                       " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       " session_id,origin_session_id,notes,created_at,updated_at,project_id,brief_json,assignee_staff_id,"
+                       " due_at,assignee_operator)"
+                       " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (task_id, title.strip(), status, priority, acceptance.strip(),
                         _canonical([{**item, "done": False} for item in checks]), _canonical(dependencies),
                         source_session_id, source_session_id, notes, now(), now(), project_id,
-                        _canonical(brief), assignee_staff_id))
+                        _canonical(brief), assignee_staff_id, normalize_due(due_at), 1 if assignee_operator else 0))
     for dependency in dependencies:
         await conn.execute("INSERT INTO task_dependency_edges(id,successor_task_id,predecessor_task_id,kind,"
                            " resolution_state,created_at) VALUES (?,?,?,'required','awaiting_result',?)",
@@ -204,6 +232,8 @@ async def _chat_may_move(conn: aiosqlite.Connection, principal: Principal, chat:
         raise ControlDenied("a chat moves its own tasks only")
     if row["origin_session_id"] not in chat.family:
         raise ControlDenied("this task is not on your board; its own chat or the operator moves it")
+    if row["assignee_operator"]:
+        raise DomainConflict("this task is the operator's; the operator moves it")
     if row["assignee_staff_id"] or row["current_attempt_id"]:
         raise DomainConflict("a team member works this task; it moves through the team's launch and report")
     if row["status"] in ("review", "done"):
@@ -247,18 +277,25 @@ class BoardCommands:
         events: list[AppEvent] = []
 
         async def commit(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
-            prior = await _one(conn, "SELECT status,assignee_staff_id FROM board_tasks WHERE id = ?", (entity.id,)) if entity.kind == "task" else None
+            prior = await _one(conn, "SELECT status,assignee_staff_id,assignee_operator,due_at FROM board_tasks WHERE id = ?", (entity.id,)) if entity.kind == "task" else None
             response = await effect(conn, mutation)
-            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id,origin_session_id FROM board_tasks WHERE id = ?",
+            task = await _one(conn, "SELECT id,title,status,project_id,assignee_staff_id,assignee_operator,due_at,origin_session_id FROM board_tasks WHERE id = ?",
                               (response["task_id"],))
             assert task is not None
             payload = {"task_id": task["id"], "title": task["title"], "actor": principal.origin_class,
                        "actor_id": principal.actor_id}
-            announced = [(event_type, payload)]
+            # The history says a date was set, moved or cleared ("" is cleared), not only that the card
+            # changed; only the event of the change itself carries it, not the move or the assignment
+            # that came with it.
+            dated = {"due_at": task["due_at"] or ""} if (prior["due_at"] if prior is not None else None) != task["due_at"] else {}
+            announced = [(event_type, {**payload, **dated})]
             if prior is not None and prior["status"] != task["status"]:
                 announced.append(("task.moved", {**payload, "from": prior["status"], "to": task["status"]}))
-            if (prior["assignee_staff_id"] if prior is not None else None) != task["assignee_staff_id"]:
-                assigned = {**payload, "assignee_staff_id": task["assignee_staff_id"]} if task["assignee_staff_id"] else payload
+            if ((prior["assignee_staff_id"] if prior is not None else None) != task["assignee_staff_id"]
+                    or bool(prior["assignee_operator"] if prior is not None else 0) != bool(task["assignee_operator"])):
+                assigned = {**payload, "assignee_staff_id": task["assignee_staff_id"]} if task["assignee_staff_id"] else dict(payload)
+                if task["assignee_operator"]:
+                    assigned["assignee_operator"] = True
                 announced.append(("task.assigned", assigned))
             for kind, body in announced:
                 # The chat that created the task, so that chat's board reloads on its own tasks only.
@@ -280,12 +317,16 @@ class BoardCommands:
                      source_session_id: str | None = None,
                      assignee_staff_id: str | None = None,
                      folder_id: str | None = None, file_ids: list[str] | None = None,
-                     requirements: list[dict[str, str]] | None = None) -> dict[str, Any]:
+                     requirements: list[dict[str, str]] | None = None,
+                     due_at: str | None = None, assignee_operator: bool = False) -> dict[str, Any]:
+        if assignee_operator and principal.origin_class != "operator":
+            raise ControlDenied("only the operator keeps a task for themselves")
         payload = {"title": title, "acceptance": acceptance, "checklist": checklist or [],
                    "depends_on": depends_on or [], "priority": priority, "brief": brief or {},
                    "notes": notes, "source_session_id": source_session_id,
                    "assignee_staff_id": assignee_staff_id, "folder_id": folder_id,
-                   "file_ids": file_ids or [], "requirements": requirements or []}
+                   "file_ids": file_ids or [], "requirements": requirements or [],
+                   "due_at": normalize_due(due_at), "assignee_operator": assignee_operator}
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             return await insert_task(conn, mutation, scope=scope, title=title, acceptance=acceptance,
@@ -293,7 +334,8 @@ class BoardCommands:
                                      brief=brief or {}, notes=notes, source_session_id=source_session_id,
                                      origin_kind=principal.origin_class,
                                      assignee_staff_id=assignee_staff_id, folder_id=folder_id,
-                                     file_ids=file_ids, requirements=requirements)
+                                     file_ids=file_ids, requirements=requirements,
+                                     due_at=due_at, assignee_operator=assignee_operator)
 
         return await self._mutate(principal, scope, "board.task.create", client_operation_id,
                                   expected_collection_revision, Entity("collection", scope.id), payload, effect, "task.created")
@@ -303,10 +345,12 @@ class BoardCommands:
                      staff_id: str) -> dict[str, Any]:
         """Assign an unowned, unstarted card without changing its contract or handoff."""
         async def effect(conn: aiosqlite.Connection, _: Mutation) -> dict[str, Any]:
-            row = await _one(conn, "SELECT project_id,status,assignee_staff_id,current_attempt_id"
+            row = await _one(conn, "SELECT project_id,status,assignee_staff_id,assignee_operator,current_attempt_id"
                              " FROM board_tasks WHERE id = ?", (task_id,))
             if row is None:
                 raise KeyError(task_id)
+            if row["assignee_operator"]:
+                raise DomainConflict("this task is the operator's; only the operator hands it to a member")
             if row["status"] != "todo" or row["assignee_staff_id"] or row["current_attempt_id"]:
                 raise DomainConflict("assignment approval requires an unowned, unstarted task")
             if await _one(conn, "SELECT 1 FROM effect_outbox WHERE kind = 'task.launch'"
@@ -333,6 +377,7 @@ class BoardCommands:
                      folder_id: str | None = None, file_ids: list[str] | None = None,
                      requirements: list[dict[str, str]] | None = None,
                      reassignment_reason: str | None = None,
+                     due_at: str | None = None, assignee_operator: bool | None = None,
                      chat: ChatTurn | None = None) -> dict[str, Any]:
         """Edit a card. ``chat`` is set only for a chat moving a task on its own board, which may then
         take it to ``doing`` (the chat's claim) and ``done`` (the chat's result, see
@@ -343,7 +388,10 @@ class BoardCommands:
                    "note": note, "status": status, "check_ids": check_ids,
                    "uncheck_ids": uncheck_ids, "assignee_staff_id": assignee_staff_id,
                    "folder_id": folder_id, "file_ids": file_ids or [],
-                   "requirements": requirements or [], "reassignment_reason": reassignment_reason}
+                   "requirements": requirements or [], "reassignment_reason": reassignment_reason,
+                   "due_at": due_at, "assignee_operator": assignee_operator}
+        if due_at:
+            normalize_due(due_at)
         if chat is not None:
             # The turn stays out of the request: a call replayed after a restart runs in a new turn,
             # and a different request under the same call id would be refused as reused.
@@ -354,8 +402,25 @@ class BoardCommands:
             if row is None or row["project_id"] != (scope.id if scope.kind == "project" else None):
                 raise ControlConflict("task is outside the command scope")
             chat_move = chat is not None and status in ("doing", "done")
-            if status not in (None, "todo", "blocked", "dropped") and not chat_move:
+            if assignee_operator and assignee_staff_id:
+                raise ValueError("a task is assigned to a staff member or to the operator, not both")
+            next_staff, next_operator = row["assignee_staff_id"], bool(row["assignee_operator"])
+            if assignee_operator is False:
+                next_operator = False
+            if assignee_staff_id == "":
+                next_staff, next_operator = None, False
+            elif assignee_staff_id:
+                next_staff, next_operator = assignee_staff_id, False
+            if assignee_operator:
+                next_staff, next_operator = None, True
+            # A card the operator keeps for themselves has no launch, no worker and no report to move it
+            # into work: the operator's own word does, and finishing it is their Close.
+            operators_own = principal.origin_class == "operator" and next_operator
+            if status not in (None, "todo", "blocked", "dropped") and not chat_move and not (operators_own and status == "doing"):
                 raise DomainConflict("work, review and completion require their dedicated result or launch command")
+            if ((next_operator != bool(row["assignee_operator"]) or next_staff != row["assignee_staff_id"])
+                    and (row["assignee_operator"] or next_operator) and principal.origin_class != "operator"):
+                raise DomainConflict("this task is the operator's; only the operator hands it on or keeps one for themselves")
             if chat is not None and chat_move:
                 assert status is not None
                 await _chat_may_move(conn, principal, chat, row, status)
@@ -376,6 +441,11 @@ class BoardCommands:
                                      (row["current_attempt_id"],))
                 if attempt is not None and attempt["state"] in ("queued", "starting", "running", "waiting", "recovering"):
                     raise DomainConflict("stop or reconcile the current execution before changing task state")
+            if next_operator and not row["assignee_operator"] and row["current_attempt_id"]:
+                attempt = await _one(conn, "SELECT state FROM execution_attempts WHERE id = ?",
+                                     (row["current_attempt_id"],))
+                if attempt is not None and attempt["state"] in ("queued", "starting", "running", "waiting", "recovering"):
+                    raise DomainConflict("stop or reconcile the current execution before keeping the task for yourself")
             if assignee_staff_id is not None and assignee_staff_id != row["assignee_staff_id"]:
                 if row["current_attempt_id"]:
                     attempt = await _one(conn, "SELECT state FROM execution_attempts WHERE id = ?",
@@ -434,6 +504,8 @@ class BoardCommands:
                 current_brief.update(brief)
             dependencies = json.loads(row["depends_on"] or "[]") if depends_on is None else depends_on
             ready = await _dependencies(conn, task_id, row["project_id"], dependencies)
+            if operators_own and status == "doing" and row["status"] != "doing" and not ready:
+                raise DomainConflict("this task still has unfinished dependencies")
             if checklist is None:
                 checks = check_items(row["checklist"])
             else:
@@ -482,12 +554,14 @@ class BoardCommands:
             if note:
                 notes = (notes + "\n" if notes else "") + f"[{now()[:16]}] {note}"
             await conn.execute("UPDATE board_tasks SET title = ?,acceptance = ?,checklist = ?,depends_on = ?,"
-                               " priority = ?,brief_json = ?,notes = ?,status = ?,assignee_staff_id = ?,updated_at = ? WHERE id = ?",
+                               " priority = ?,brief_json = ?,notes = ?,status = ?,assignee_staff_id = ?,assignee_operator = ?,due_at = ?,"
+                               " updated_at = ? WHERE id = ?",
                                (title.strip() if title is not None else row["title"],
                                 acceptance.strip() if acceptance is not None else row["acceptance"],
                                 _canonical(checks), _canonical(dependencies), priority or row["priority"],
                                 _canonical(current_brief), notes[-8000:], next_status,
-                                (assignee_staff_id or None) if assignee_staff_id is not None else row["assignee_staff_id"],
+                                next_staff, 1 if next_operator else 0,
+                                normalize_due(due_at) if due_at is not None else row["due_at"],
                                 now(), task_id))
             await _handoff(conn, task_id, row["project_id"], folder_id=folder_id,
                            file_ids=file_ids or [], requirements=requirements or [])
@@ -568,4 +642,4 @@ class BoardCommands:
                                   expected_entity_revision, Entity("task", task_id),
                                   {"reason": reason}, effect, "task.changed")
 
-__all__ = ["BoardCommands", "ChatTurn", "insert_task"]
+__all__ = ["BoardCommands", "ChatTurn", "insert_task", "normalize_due"]

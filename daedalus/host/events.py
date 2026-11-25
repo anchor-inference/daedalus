@@ -508,6 +508,8 @@ TaskChange = TypedDict(
         "from": NotRequired[str],
         "to": NotRequired[str],
         "assignee_staff_id": NotRequired[str],
+        "assignee_operator": NotRequired[bool],
+        "due_at": NotRequired[str],
         "actor": NotRequired[str],
         "actor_id": NotRequired[str],
         "result_id": NotRequired[str],

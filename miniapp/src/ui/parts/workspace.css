@@ -487,12 +487,7 @@
   @media (pointer: coarse) { .rail { --row-h: var(--row-h-touch); } }
   .main { min-width: 0; }
   :root { --page-pad: 24px; }
-  .pagehead { padding: 8px 24px 6px; }
   .screen { padding: 4px 24px 32px; }
-  /* A page whose body is the centred narrow column takes the same inset for its title, or on a wide
-     window the title sat 240px left of the cards it names. Padding rather than a narrower header, so
-     the header's blurred band still spans the whole pane the content scrolls under. */
-  .pagehead:has(+ .screen.narrow) { padding-left: max(24px, calc((100% - 1120px) / 2 + 24px)); padding-right: max(24px, calc((100% - 1120px) / 2 + 24px)); }
   .chat-head { padding: 0 16px; }
   .chat-scroll { padding: 8px 24px 16px; }
   .composer { padding: 8px 24px 16px; }
@@ -525,8 +520,7 @@
 @media (min-width: 1600px) {
   .chat-head, .chat-scroll, .composer { padding-left: 40px; padding-right: 40px; }
   :root { --page-pad: 40px; }
-  .screen, .pagehead { padding-left: 40px; padding-right: 40px; }
-  .pagehead:has(+ .screen.narrow) { padding-left: max(40px, calc((100% - 1120px) / 2 + 40px)); padding-right: max(40px, calc((100% - 1120px) / 2 + 40px)); }
+  .screen { padding-left: 40px; padding-right: 40px; }
 }
 
 /* tool picker */

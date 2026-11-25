@@ -20,7 +20,8 @@ async def test_the_origin_index_is_made_once_and_the_rows_survive(tmp_path: Path
         )
     # Put the file back where the previous release left it: no index, one migration behind.
     await db.execute("DROP INDEX board_tasks_by_origin")
-    await db.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    origin = next(n for n, step in enumerate(MIGRATIONS, 1) if isinstance(step, str) and "board_tasks_by_origin" in step)
+    await db.execute(f"UPDATE schema_version SET version = {origin - 1}")
     await db.close()
 
     db = Database(path, local_env="container")

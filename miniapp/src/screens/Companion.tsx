@@ -170,7 +170,7 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
             <OverflowMenu items={menu} label={t("companion.menu")} className="companion-menu" />
           </>
         }
-      >
+        filters={
         <div className="companion-tabs" role="tablist" aria-label={t("companion.tabs")}>
           {TABS.map((id) => (
             <button key={id} role="tab" aria-selected={current === id} className={current === id ? "on" : ""} onClick={() => pick(id)}>
@@ -178,7 +178,8 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
             </button>
           ))}
         </div>
-      </PageHeader>
+        }
+      />
       {profile?.paused && (
         <div className="companion-paused">
           <span className="grow">{t("companion.paused.banner")}</span>

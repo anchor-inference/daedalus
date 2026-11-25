@@ -153,8 +153,9 @@ function CanvasList({ toast, sessionId, projectId }: { toast: (message: string) 
   const nothingAnywhere = !sessionId && !projectId && data !== undefined && data.items.length === 0;
   const showTools = total > 3;
   return (
+    <>
+    <PageHeader title={t("nav.canvas")} />
     <div className="screen wide canvas-screen">
-      <PageHeader title={t("nav.canvas")} />
       {showTools && (
         <div className="cv-toolbar-row">
           <label className="cv-search">
@@ -205,6 +206,7 @@ function CanvasList({ toast, sessionId, projectId }: { toast: (message: string) 
         </Sheet>
       )}
     </div>
+    </>
   );
 }
 
