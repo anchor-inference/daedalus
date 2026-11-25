@@ -7,15 +7,15 @@
 // Connection button, and a model's behind its row, so the list stays one line a thing to scan.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, announceProviderKeys, type ContextWindowSource, type ContextWindowSources, type Preset, type PriceView, type ProviderConf, type Settings } from "../api";
+import { api, announceProviderKeys, type ContextWindowSource, type ContextWindowSources, type ModelCheckResult, type ModelHealth, type Preset, type PriceView, type ProviderConf, type Settings } from "../api";
 import { Icon } from "../icons";
 import { lang, plural, t } from "../i18n";
-import { confirmAsync, numInput } from "../ui";
+import { confirmAsync, errorText, numInput } from "../ui";
 import { Select, SelectionList, Switch } from "../ui/index";
 import { Row } from "../settingsrow";
 import { tokens } from "../format";
 import { ModelPrice } from "../modelprice";
-import { modelItems } from "../modelitems";
+import { healthAlert, modelItems } from "../modelitems";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, type RouteListing, onDemandGroups } from "../models";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ProviderLimit } from "./ProviderLimit";
@@ -209,6 +209,16 @@ function capabilities(p: Preset): string {
   return words.join(" · ");
 }
 
+/** A model's health in its row: the broken or slow mark, else how fast the last check answered. */
+function HealthTag({ health }: { health?: ModelHealth }) {
+  const alert = healthAlert(health);
+  if (alert) return <span className={`pmodel-tag ${alert.tone === "bad" ? "failed" : "warn"}`} data-health={health?.state} title={alert.why}>{alert.word}</span>;
+  const check = health?.check;
+  if (check?.state === "failed") return <span className="pmodel-tag warn" data-health="failed" title={check.detail}>{t("modelhealth.failed")}</span>;
+  if (check?.state === "ok" && check.ms != null) return <span className="pmodel-tag" data-health="ok">{t("modelhealth.ok", { s: (check.ms / 1000).toFixed(1) })}</span>;
+  return null;
+}
+
 /** One model: a line to scan (name, what it can do, its window, the star), and its fields when opened. */
 function ModelRow(props: ModelProps) {
   const { id, p, s, onPatch } = props;
@@ -219,11 +229,15 @@ function ModelRow(props: ModelProps) {
   const isDefault = s.model.preset === id;
   const inChain = !isDefault && (s.model.chain ?? []).includes(id);
   const favourite = !!p.favourite;
+  const health = s.model_health?.[id];
+  // The upstream's own words for a model that failed, under its row: a phone has no tooltip to hold them.
+  const failure = health?.state === "broken" ? health.detail : health?.check?.state === "failed" ? health.check.detail : "";
   return (
     <div className={`pmodel ${open ? "open" : ""}`} data-preset={id}>
       <div className="pmodel-row">
         <button type="button" className="pmodel-open" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <span className="pmodel-name">{title}</span>
+          <HealthTag health={health} />
           {isDefault && <span className="pmodel-tag accent">{t("settings.preset.default")}</span>}
           {inChain && <span className="pmodel-tag">{t("settings.preset.fallback")}</span>}
           {(p.openrouter_providers_gone?.length ?? 0) > 0 && <span className="pmodel-tag failed">{t("settings.preset.routes.gone.pill")}</span>}
@@ -235,6 +249,7 @@ function ModelRow(props: ModelProps) {
           <Icon name="star" size={16} />
         </button>
       </div>
+      {failure && <div className="pmodel-health" data-health-detail={id}>{failure}</div>}
       {open && <ModelEditor {...props} title={title} isDefault={isDefault} />}
     </div>
   );
@@ -711,6 +726,8 @@ function openedAtFirst(s: Settings): Set<string> {
 
 export function ModelsSection({ s, take, save, toast, accounts }: { s: Settings; take: Take; save: (patch: Partial<Settings>) => Promise<void>; toast: (text: string) => void; accounts?: SubscriptionAccounts | null }) {
   const [opened, setOpened] = useState<Set<string>>(() => openedAtFirst(s));
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<{ ok: number; n: number } | null>(null);
   const kinds = s.provider_kinds ?? DEFAULT_KINDS;
   // Every configured provider in its configured order, then any a model names that is not configured,
   // so a model is never left out of the list because its provider went.
@@ -755,6 +772,21 @@ export function ModelsSection({ s, take, save, toast, accounts }: { s: Settings;
       return null;
     }
   };
+  // One tiny request to every model, only when pressed: each probe is spent from a plan.
+  const checkModels = async () => {
+    setChecking(true);
+    try {
+      const result = await api.post<ModelCheckResult>("/api/models/check", {});
+      take({ ...s, model_health: result.health });
+      // The rows show each result; the foot counts them, since a toast is for what went wrong.
+      const states = Object.values(result.results);
+      setChecked({ ok: states.filter((r) => r.state === "ok" || r.state === "slow").length, n: states.length });
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      setChecking(false);
+    }
+  };
   const toggle = (id: string) => setOpened((now) => {
     const next = new Set(now);
     if (next.has(id)) next.delete(id);
@@ -795,6 +827,14 @@ export function ModelsSection({ s, take, save, toast, accounts }: { s: Settings;
           <div className="prov-none">
             <b>{t("settings.models.empty")}</b>
             <span className="sub">{t("settings.models.empty.sub")}</span>
+          </div>
+        )}
+        {Object.keys(s.presets ?? {}).length > 0 && (
+          <div className="set-row models-check" data-setting="models.check">
+            <span className="set-row-title models-check-note" data-checked={checked ? "" : undefined}>{checked ? t("settings.models.check.answered", checked) : t("settings.models.check.hint")}</span>
+            <button type="button" className="btn small" disabled={checking} onClick={() => void checkModels()}>
+              <Icon name="loop" size={14} /> {checking ? t("settings.models.check.running") : t("settings.models.check")}
+            </button>
           </div>
         )}
       </div>
