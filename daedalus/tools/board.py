@@ -31,7 +31,7 @@ def _command_hook(context: ToolContext):  # type: ignore[no-untyped-def]
         "Add a task to your board (this session's, shared with its subagents). Use it when work has more "
         "than a few steps or must survive compaction and restarts: title, acceptance criteria (how anyone can tell it "
         "is done), an optional checklist, dependencies (task ids that must finish first — the task "
-        "stays 'blocked' until they do), priority 1 (highest) to 5. Pass the collection revision "
+        "stays 'blocked' until they do), priority 1 (highest) to 5, an optional due date (ISO date or timestamp). Pass the collection revision "
         "shown by BoardList; stale writes are refused. Returns the task id."
     ),
 )
@@ -39,6 +39,7 @@ async def board_add(
     context: ToolContext, title: str, expected_collection_revision: int,
     acceptance: str = "", checklist: list[str] | None = None,
     depends_on: list[str] | None = None, priority: int = 3, notes: str = "",
+    due: str | None = None,
 ) -> ToolResult:
     hook = _command_hook(context)
     if hook is None:
@@ -47,7 +48,7 @@ async def board_add(
         task = await hook("add", title=title, acceptance=acceptance, checklist=checklist,
                           depends_on=depends_on, priority=priority, session_id=context.session_id,
                           notes=notes, client_operation_id=call_id(context),
-                          expected_collection_revision=expected_collection_revision)
+                          expected_collection_revision=expected_collection_revision, due_at=due)
     except (ValueError, PermissionError) as exc:
         return error(context, str(exc))
     return ok(context, f"task {task['id']} added ({task['status']}): {task['title']}", task_id=task["id"])
@@ -64,20 +65,20 @@ async def board_add(
         "Annotate a task on your board or move it: doing when you start, done when its checklist and "
         "dependencies are complete (the note is the result), or todo, blocked, dropped; a team's work moves "
         "by launch and report. Pass the exact entity revision shown by BoardGet. Check or uncheck stable "
-        "criterion IDs (C1, C2, …); unknown IDs are refused."
+        "criterion IDs (C1, C2, …); unknown IDs are refused. due sets the due date (ISO date or timestamp), '' clears it."
     ),
 )
 async def board_update(
     context: ToolContext, task_id: str, expected_entity_revision: int,
     status: str | None = None, note: str = "", check: list[str] | None = None,
-    uncheck: list[str] | None = None, priority: int | None = None,
+    uncheck: list[str] | None = None, priority: int | None = None, due: str | None = None,
 ) -> ToolResult:
     hook = _command_hook(context)
     if hook is None:
         return error(context, "the board is not available")
     try:
         task = await hook("update", task_id=task_id, status=status, note=note,
-                          check_ids=check, uncheck_ids=uncheck, priority=priority,
+                          check_ids=check, uncheck_ids=uncheck, priority=priority, due_at=due,
                           session_id=context.session_id, client_operation_id=call_id(context),
                           expected_entity_revision=expected_entity_revision)
     except KeyError:
@@ -138,6 +139,7 @@ async def board_get(context: ToolContext, task_id: str) -> ToolResult:
     return ok(
         context,
         f"{t['id']} · {t['status']} · p{t['priority']} · {t['title']}\nentity revision {t['entity_revision']}\n{brief}acceptance: {t['acceptance'] or '(none)'}\nchecklist:\n{checklist}\n"
+        f"due: {t['due_at'] or '(none)'}{' (overdue)' if t.get('overdue') else ''}\n"
         f"depends on: {', '.join(t['depends_on']) or 'nothing'}\nsession: {t['session_id'] or '-'}\nnotes:\n{t['notes'] or '(none)'}",
     )
 

@@ -434,7 +434,7 @@ async def team(orch: Orchestrators, project: Project, session_id: str, *, staff:
 
 
 def _task_line(task: dict[str, Any], names: dict[str, str]) -> str:
-    assignee = names.get(task.get("assignee_staff_id") or "", "unassigned")
+    assignee = names.get(task.get("assignee_staff_id") or "", "the operator's own" if task.get("assignee_operator") else "unassigned")
     return f"{task['id']} [{task['status']}] P{task['priority']} {task['title']} ({assignee})" + (f" after {', '.join(task['depends_on'])}" if task.get("depends_on") else "")
 
 
@@ -466,6 +466,7 @@ async def tasks(
     repository: str = "",
     label: str = "",
     issues: list[int] | None = None,
+    due: str | None = None,
 ) -> str:
     board = orch.board
     if board is None:
@@ -510,7 +511,7 @@ async def tasks(
                                             title=title, acceptance=done_when or "", checklist=checklist,
                                             depends_on=depends_on, priority=priority or 3, notes=note,
                                             brief=brief, source_session_id=session_id,
-                                            assignee_staff_id=member_id)
+                                            assignee_staff_id=member_id, due_at=due)
             task = await board.get(created["task_id"], actor=session_id)
         elif not task_id:
             raise Refused(f"{op} needs a task_id")
@@ -554,7 +555,7 @@ async def tasks(
                                             expected_entity_revision=expected_entity_revision,
                                             status=status, note=note, title=title if op == "update" else None,
                                             priority=priority, brief=brief or None, depends_on=depends_on,
-                                            assignee_staff_id=member_id)
+                                            assignee_staff_id=member_id, due_at=due)
             task = await board.get(updated["task_id"], actor=session_id)
     except KeyError as exc:
         raise Refused(f"no task {exc.args[0] if exc.args else task_id} on {project.name}'s board") from exc

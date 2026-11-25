@@ -471,6 +471,24 @@ BOARD = [
     {"id": "51c8aa", "title": "Gallery: six square photos", "status": "done", "priority": 3, "acceptance": "Six photos in photos/gallery, 800×800.", "checklist": [{"text": "pick", "done": True}, {"text": "crop", "done": True}], "depends_on": [], "session_id": S2, "origin_session_id": S2, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=12)},
 ]
 
+for _card in BOARD:
+    # The host puts the date, whether it is late and who keeps the card on every listing; the cards of
+    # the pictures say nothing of them unless a picture needs it.
+    _card.setdefault("due_at", None)
+    _card.setdefault("overdue", False)
+    _card.setdefault("assignee_operator", False)
+BOARD[0]["due_at"] = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+BOARD[3]["due_at"] = (datetime.now(UTC) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+BOARD[3]["overdue"] = True
+
+# A card's stored events, oldest first, as ``GET /api/board/{id}/events`` lists them.
+BOARD_HISTORY = {
+    "7f2a1c": [
+        {"seq": 1, "type": "task.created", "at": ago(hours=2), "actor": {"kind": "agent", "id": f"session:{S1}", "name": None}, "from": None, "to": None, "text": "Created in todo"},
+        {"seq": 2, "type": "task.moved", "at": ago(minutes=40), "actor": {"kind": "agent", "id": f"session:{S1}", "name": None}, "from": "todo", "to": "doing", "text": "todo → doing"},
+    ],
+}
+
 
 def notification(id: int, at: str, kind: str, category: str, level: str, tone: str, title: str, body: str, session_id: str | None, seen: bool, count: int = 1, *, project: str | None = None, actions: list | None = None, ref: str | None = None) -> dict:
     return {
@@ -914,6 +932,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, harnesses[1], status=harnesses[0])
     # The installation-wide Board lists BOARD below. The team's board also answers GET /api/board, and
     # asked first it answered with its own empty list, so the Board picture came out with no cards.
+    if request.method == "GET" and rel.startswith("/api/board/") and rel.endswith("/events"):
+        card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
+        if card is not None:
+            return respond(route, BOARD_HISTORY.get(card["id"]) or [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": f"Created in {card['status']}"}])
     whole_board = rel == "/api/board" and request.method == "GET"
     team = TEAM.answer(request.method, rel, urlsplit(url).query, None) or (None if whole_board else TEAM_BOARD.answer(request.method, rel, urlsplit(url).query, None))
     if team is not None:

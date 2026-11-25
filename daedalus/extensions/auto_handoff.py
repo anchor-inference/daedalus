@@ -21,7 +21,7 @@ RECOVERY_BATCH_SIZE = 128
 RECOVERY_WAKE_SIZE = 512
 _continuations: set[asyncio.Task[None]] = set()
 _CANDIDATES = (" FROM board_tasks t WHERE t.status = 'todo'"
-               " AND (? IS NULL OR t.project_id = ?)"
+               " AND t.assignee_operator = 0 AND (? IS NULL OR t.project_id = ?)"
                " AND EXISTS (SELECT 1 FROM task_dependency_edges e WHERE e.successor_task_id = t.id)"
                " AND EXISTS (SELECT 1 FROM next_actions n WHERE n.task_id = t.id AND n.state = 'active'"
                " AND n.kind = 'assign' AND n.owner_kind = 'staff')")
@@ -76,10 +76,10 @@ async def advance(app: Application, task_id: str) -> dict[str, Any]:
         return {"state": "waiting_capacity", "reason": "staff runtime unavailable"}
     async with team.queue.admission_guard():
         async with app.db.transaction() as conn:
-            async with conn.execute("SELECT project_id,status,entity_revision FROM board_tasks WHERE id = ?",
+            async with conn.execute("SELECT project_id,status,entity_revision,assignee_operator FROM board_tasks WHERE id = ?",
                                     (task_id,)) as cursor:
                 task = await cursor.fetchone()
-            if task is None or not task["project_id"] or task["status"] != "todo":
+            if task is None or not task["project_id"] or task["status"] != "todo" or task["assignee_operator"]:
                 return {"state": "ineligible"}
             readiness = await dependency_readiness(conn, task_id)
             action = await next_action_readiness(conn, task_id)
