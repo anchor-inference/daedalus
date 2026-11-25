@@ -37,7 +37,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from launcher_shots import build
+from launcher_shots import binary_or_none
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -316,7 +316,9 @@ def walk(browser, base: str, lang: str, size: tuple[int, int], endpoint: str, re
 
 
 def main() -> int:
-    binary = build()
+    binary = binary_or_none()
+    if binary is None:
+        return 0
     OUT.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="launcher-setup-"))
     models = ThreadingHTTPServer(("127.0.0.1", free_port()), Models)
