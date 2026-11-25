@@ -183,6 +183,7 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-specimen { gap: 8px; }
 .set-specimen p { display: flex; gap: 16px; margin: 0; font-size: var(--fs-15); line-height: 1.45; overflow-wrap: anywhere; }
 .set-specimen p[data-role="code"] { font-size: var(--fs-14); }
+.set-specimen .prose-stepper-preview { text-align: left; color: var(--fg); }
 .set-specimen-role { flex: none; width: 96px; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); line-height: 24px; }
 .set-card .set-face { width: 260px; }
 .set-card .set-face .combo-input { margin: 0; }

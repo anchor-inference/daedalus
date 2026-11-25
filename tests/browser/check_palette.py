@@ -34,8 +34,8 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 LANG = os.environ.get("LANG_UI", "")
 
 WORDS = {
-    "en": {"chats": "Chats", "actions": "Actions", "go": "Go to", "settings": "Settings", "section": "Section", "nothing": "Nothing matches.", "zero": "0 results", "navigation": "Navigation", "field": "Desktop navigation"},
-    "ru": {"chats": "Чаты", "actions": "Действия", "go": "Переход", "settings": "Настройки", "section": "Раздел", "nothing": "Ничего не нашлось.", "zero": "0 результатов", "navigation": "Навигация", "field": "Навигация на компьютере"},
+    "en": {"chats": "Chats", "actions": "Actions", "go": "Go to", "settings": "Settings", "section": "Section", "nothing": "Nothing matches.", "zero": "0 results", "navigation": "Navigation", "field": "Sidebar navigation"},
+    "ru": {"chats": "Чаты", "actions": "Действия", "go": "Переход", "settings": "Настройки", "section": "Раздел", "nothing": "Ничего не нашлось.", "zero": "0 результатов", "navigation": "Навигация", "field": "Навигация в боковой панели"},
 }
 
 

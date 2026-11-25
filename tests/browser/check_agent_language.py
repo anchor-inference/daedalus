@@ -156,7 +156,7 @@ def walk(browser, lang: str) -> None:  # type: ignore[no-untyped-def]
     settings.route("**/api/**", app_stub)
     settings.goto(f"{BASE}/settings/translation?token=t&lang={lang}&scheme=dark")
     card = settings.locator("[data-card='agent-language']")
-    expect(card.locator(".section-title")).to_have_text(words["card"])
+    expect(card.locator(".set-label")).to_have_text(words["card"])
     expect(card.locator("[data-setting='translation.preset']")).to_contain_text("DeepSeek Flash")
     expect(card.locator("[data-setting='translation.timeout_seconds'] input")).to_have_value("120")
     card.scroll_into_view_if_needed()
