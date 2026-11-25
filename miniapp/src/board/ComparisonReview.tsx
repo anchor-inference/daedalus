@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import type { ProjectTask } from "./board";
@@ -269,9 +270,8 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
             </div>}
           </li>)}</ul>
           <textarea className="field" rows={2} aria-label={t("result.comment")} value={commentText} onChange={(event) => setCommentText(event.target.value)} />
-          <select className="field" aria-label={t("result.commentPriority")} value={commentPriority} onChange={(event) => setCommentPriority(event.target.value as Comment["priority"])}>
-            {(["suggestion", "important", "blocking"] as const).map((priority) => <option key={priority} value={priority}>{t(`result.priority.${priority}`)}</option>)}
-          </select>
+          <Select label={t("result.commentPriority")} size="md" value={commentPriority} onChange={setCommentPriority}
+            options={(["suggestion", "important", "blocking"] as const).map((priority) => ({ id: priority, label: t(`result.priority.${priority}`) }))} />
           <button type="button" className="btn small" disabled={offline || busy || !current || !commentText.trim()} onClick={() => void addComment()}>{t("result.addComment")}</button>
         </details>
         <details><summary>{t("result.reviewEvidence")}</summary>
@@ -279,11 +279,11 @@ export function ComparisonReview({ task, groupId, slot, candidate, contract, gro
           {(evidence.data ?? []).map((item) => <div className="sub" key={item.evidence_id}>{checklist.find((check) => check.id === item.criterion_id)?.text ?? item.criterion_id} · {item.observation}</div>)}
           {checklist.map((item) => <div className="sub" key={item.id}>{item.text} · {evidence.data?.some((row) => row.criterion_id === item.id && row.verification === "verified") ? t("result.covered") : t("result.uncovered")}</div>)}
           {evidence.error && <div className="result-warning">{t("pair.reviewUnavailable")}</div>}
-          {checklist.length > 0 && <select className="field" aria-label={t("result.criterion")} value={criterionId} onChange={(event) => setCriterion(event.target.value)}>{checklist.map((item) => <option key={item.id} value={item.id}>{item.text}</option>)}</select>}
-          <select className="field" aria-label={t("result.commentArtifact")} value={manifest} onChange={(event) => setArtifact(event.target.value)}>
-            {!manifest && <option value="">{t("pair.chooseArtifact")}</option>}
-            {review.data.artifacts.filter((item) => item.file_id).map((item) => <option key={item.manifest_id} value={item.manifest_id}>{item.artifact_key}</option>)}
-          </select>
+          {checklist.length > 0 && <Select label={t("result.criterion")} size="md" className="wide" value={criterionId} onChange={setCriterion}
+            options={checklist.map((item) => ({ id: item.id, label: item.text }))} />}
+          <Select label={t("result.commentArtifact")} size="md" className="wide" value={manifest} onChange={setArtifact}
+            options={[...(!manifest ? [{ id: "", label: t("pair.chooseArtifact") }] : []),
+              ...review.data.artifacts.filter((item) => item.file_id).map((item) => ({ id: item.manifest_id, label: item.artifact_key }))]} />
           <textarea className="field" rows={2} aria-label={t("result.observation")} value={observation} onChange={(event) => setObservation(event.target.value)} />
           <button className="btn small" type="button" disabled={!canAttest} onClick={() => void attest()}>{t("result.recordEvidence")}</button>
           <textarea className="field" rows={2} aria-label={t("result.verdictReason")} value={reason} onChange={(event) => setReason(event.target.value)} />

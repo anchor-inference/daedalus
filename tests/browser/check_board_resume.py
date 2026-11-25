@@ -11,7 +11,16 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    BoardStub,
+    TeamStub,
+    Unhandled,
+    choose_option,
+    expect_app,
+    folders,
+    fulfil_shared,
+)
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -59,9 +68,11 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
     page.locator(".ptask-action").get_by_role("button", name="Continue a CLI conversation" if lang == "en" else "Продолжить разговор CLI").click()
     chooser = page.locator("#ptask-resume")
     expect(chooser).to_be_visible()
-    expect(chooser.locator('option[value="ss-old"]')).to_be_enabled()
-    expect(chooser.locator('option[value="ss-other"]')).to_be_disabled()
-    chooser.select_option("ss-old")
+    chooser.click()
+    listed = page.locator(".dropdown-list")
+    expect(listed.locator("[role=option][data-value='ss-old']")).not_to_have_attribute("aria-disabled", "true")
+    expect(listed.locator("[role=option][data-value='ss-other']")).to_have_attribute("aria-disabled", "true")
+    listed.locator("[role=option][data-value='ss-old']").click()
     page.locator(".sheet-foot .btn.primary").click()
     expect(page.locator(".sheet-foot")).to_have_count(0)
     assert board.launched[-1][0] == "t-menu" and board.launched[-1][1]["resume_from"] == "ss-old"
@@ -69,10 +80,10 @@ def check(lang: str, width: int, browser: object, unhandled: Unhandled) -> None:
     expect(page.locator(".sheet")).to_have_count(0)
     page.get_by_role("button", name="New task" if lang == "en" else "Новая задача").first.click()
     page.locator("#ptask-title").fill("Another menu")
-    page.locator("#ptask-assignee").select_option("st-ada")
+    choose_option(page, page.locator("#ptask-assignee"), "st-ada")
     chooser = page.locator("#ptask-resume")
     expect(chooser).to_be_visible()
-    chooser.select_option("ss-old")
+    choose_option(page, chooser, "ss-old")
     # A phone decides a new task at the top of its sheet, where Create sits beside the title.
     page.locator(".pboard-create:visible, .sheet-foot .btn.primary:visible").first.click()
     expect(page.locator(".sheet")).to_have_count(0)

@@ -15,6 +15,7 @@ from api_stub import (  # noqa: E402
     DEFAULT_APP,
     BoardStub,
     Unhandled,
+    choose_option,
     expect_app,
     folders,
     fulfil_shared,
@@ -84,7 +85,7 @@ def scenario(page: Page, language: str, unhandled: Unhandled) -> None:
     page.goto(f"{BASE}/project/p1/board?task=task&token=t&lang={language}")
     title = "Continue with another worker" if language == "en" else "Продолжить с другим исполнителем"
     section = open_task_tool(page, title, language)
-    section.get_by_label("New worker" if language == "en" else "Новый исполнитель").select_option("alternate")
+    choose_option(page, section.get_by_label("New worker" if language == "en" else "Новый исполнитель"), "alternate")
     expect(section).to_contain_text("conversation aren't copied" if language == "en" else "разговор не копируются")
     action = "Continue" if language == "en" else "Продолжить"
     section.get_by_role("button", name=action, exact=True).click()
