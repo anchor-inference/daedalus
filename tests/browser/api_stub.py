@@ -30,7 +30,7 @@ import urllib.request
 import zipfile
 import zlib
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
+from urllib.parse import parse_qs, quote, unquote, unquote_plus, urlsplit
 
 from calendar_stub import CalendarStub
 from companion_stub import CompanionStub
@@ -711,7 +711,8 @@ GATES: dict[str, object] = {
     "/api/terminals/load": terminal_load(),
     "/api/commands": [],
     # The model list outside the app's settings (the terminal's /model): no address, no key.
-    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
+    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "favourite": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""},
+                {"id": "starred", "label": "Starred model", "provider": "keyproxy", "model": "starred-model", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 200000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
                     "providers": [{"id": "keyproxy", "kind": "openai", "name": "Key proxy", "billing": ""}], "efforts": ["low", "medium", "high", "xhigh"]},
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
@@ -923,6 +924,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     ("POST", "/api/presence"): (204, "application/json", ""),
     # "Mark all read" in the bell's popover and on the Inbox.
     ("POST", "/api/notifications/seen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
+    # "Mark unread" on an Inbox row: the host says how many went back to unread.
+    ("POST", "/api/notifications/unseen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
@@ -1968,6 +1971,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 404, "application/json", json.dumps({"detail": "no picture"})
         return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "attachments":
+        # What was attached in a chat; none here, and a harness that draws the list answers it itself.
+        return 200, "application/json", json.dumps({"attachments": []})
     if len(parts) == 4 and parts[2] == "link-files" and method.upper() == "GET":
         return link_file_bytes(parts[3])
     exported = link_export(method.upper(), parts)
@@ -3579,6 +3585,17 @@ def inbox_list(*names: str, root: str = "/home/you/work/inbox") -> str:
     return "Attached files:\n" + "\n".join(f"- {root}/{name} ({INBOX_FILES[name][0]}, {len(INBOX_FILES[name][1])} bytes)" for name in names)
 
 
+def attachment_entry(session_id: str, name: str, *, source: str = "operator", seq: int = 1, size: int | None = None, mime: str = "", url: str = "", at: str = "2026-10-30T14:12:21Z") -> dict:
+    """One entry of ``GET /api/sessions/<id>/attachments``: the operator's inbox files serve from the
+    session's attachment route, and anything else is told its ``url`` by the caller."""
+    kept = INBOX_FILES.get(name)
+    return {
+        "id": f"{source}:{seq}:{name}", "source": source, "name": name,
+        "size": size if size is not None else (len(kept[1]) if kept else None), "mime": mime or (kept[0] if kept else "application/octet-stream"),
+        "message_seq": seq, "created_at": at, "url": url or f"/api/sessions/{session_id}/attachments/download?path={quote(name, safe='')}",
+    }
+
+
 def attachment_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] | None:
     """An attached file's bytes by its inbox name, for any session."""
     parts = rel.split("/")
@@ -4338,7 +4355,7 @@ class FocusStub:
         readable = [{"id": f["id"], "path": f["path"], "label": f["label"], "env": f["env"], "readonly": f["readonly"], "writable": False}
                     for f in project["folders"]] if orchestrator_of else []
         return {
-            "id": sid, "title": title, "status": status, "run_id": None, "compacting": None, "housekeeping": False, "error": "",
+            "id": sid, "title": title, "status": status, "run_id": None, "run_started_at": None, "branch": None, "compacting": None, "housekeeping": False, "error": "",
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",

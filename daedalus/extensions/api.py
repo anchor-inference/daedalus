@@ -175,8 +175,10 @@ from daedalus.host import (
     attached_files,
     capabilities,
     component_install,
+    git_branch,
     launcher_bridge,
     quick_agent,
+    session_attachments,
     subagent_models,
     translation,
 )
@@ -720,6 +722,13 @@ class NotificationsSeenBody(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class NotificationsUnseenBody(BaseModel):
+    """Which notifications the operator wants back as unread: the listed ids."""
+
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    model_config = {"extra": "forbid"}
+
+
 class NotificationActBody(BaseModel):
     """One of a notification's actions: ``allow``, ``deny``, ``answer:<i>``, ``open``, or ``answer`` with the words.
 
@@ -973,6 +982,7 @@ class PresetPatch(BaseModel):
     thinking: bool | None = None
     reasoning_effort: str | None = None
     images: bool | None = None
+    favourite: bool | None = None
     free_only: bool | None = None
     context_window: int | None = None
     context_window_source: Literal["auto", "manual"] | None = None
@@ -2557,6 +2567,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         default = app.config.default_preset()
         return default[1].provider if default else ""
 
+    def _session_branch(state: Any) -> str | None:
+        """The branch the session's working folder is on. A session working in a folder of its own under
+        the workspaces root reads only inside it: the root may itself sit in some repository."""
+        folder = manager.work_dir(state)
+        root = app.settings.workspaces_dir
+        return git_branch.branch_of(folder, stop=root if folder.is_relative_to(root) else None)
+
     def _session_folders(state: Any) -> list[dict[str, Any]]:
         """The folders of its project the session's file pane may open: the ones its walls let it read.
 
@@ -2652,6 +2669,13 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # A summary written ahead of the trigger while the session goes on: shown, never as blocking.
             "compaction_background": state.background_compacting,
             "run_id": state.run_id,
+            # When the run in flight began, on the wall clock; null between runs. A run that waited for the
+            # operator's answer counts from the resume, as the run-time cap does.
+            "run_started_at": since.isoformat() if (since := manager.run_since(session_id)) is not None else None,
+            # The branch the working folder is on, from the repository's HEAD file and not from git itself:
+            # this is read on every poll. Null outside a repository, on a detached HEAD, and for a session
+            # working in a folder on the host, which this process cannot see.
+            "branch": _session_branch(state),
             # The operator's messages acknowledged and still with the translator: drawn as translating after
             # a reload too, not only by the window that sent them.
             "translating": manager.translating(session_id),
@@ -3141,6 +3165,20 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    @api.get("/api/sessions/{session_id}/attachments")
+    async def session_attachments_list(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What was attached in this chat, oldest message first: the files the operator sent and the ones the
+        agent handed over (SendFile, and media placed in an answer), each with the address that serves it.
+
+        Read from the transcript on request, never on a poll: one scan of the session's stored text.
+        """
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        views = await manager.sessions.list_file_views(session_id)
+        sent = [str(call["id"]) for view in views for call in view.get("tool_calls") or [] if call.get("name") == "SendFile" and call.get("id")]
+        answers = await manager.sessions.tool_result_views(session_id, sent) if sent else []
+        return {"attachments": session_attachments.listing(session_id, views, answers)}
 
     @api.get("/api/sessions/{session_id}/attachments/download")
     async def attachment_file(session_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
@@ -5312,6 +5350,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "thinking": preset.thinking,
                 "reasoning_effort": preset.reasoning_effort,
                 "images": preset.images,
+                "favourite": preset.favourite,
                 "context_window": preset.context_window,
                 "max_output_tokens": preset.max_output_tokens,
                 "provider_kind": str((providers.get(preset.provider) or {}).get("kind") or ""),
@@ -6463,7 +6502,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/notifications")
     async def notifications_list(
-        view: Literal["all", "unseen", "problems", "needs_you"] = "all",
+        view: Literal["all", "unseen", "problems", "needs_you", "done"] = "all",
         project: str | None = Query(default=None, max_length=64),
         before: int | None = Query(default=None, ge=1),
         limit: int = Query(default=100, ge=1, le=500),
@@ -6481,6 +6520,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if sum((body.ids is not None, body.all, body.session_id is not None)) != 1:
             raise HTTPException(422, "name exactly one of ids, all or session_id")
         marked = await service.mark_seen(body.ids, everything=body.all, session_id=body.session_id)
+        return {"marked": marked, "summary": await service.summary()}
+
+    @api.post("/api/notifications/unseen")
+    async def notifications_unseen(body: NotificationsUnseenBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        service = notifications_service()
+        marked = await service.mark_unseen(body.ids)
         return {"marked": marked, "summary": await service.summary()}
 
     @api.delete("/api/notifications/{entry_id}")

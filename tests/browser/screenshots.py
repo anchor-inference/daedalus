@@ -38,6 +38,8 @@ from api_stub import (  # noqa: E402
     FILE_TEXT,
     FOCUS_WORDS,
     GATES,
+    INBOX_PDF,
+    INBOX_SHOT,
     VISION_DEFAULT,
     BoardStub,
     FocusStub,
@@ -49,6 +51,7 @@ from api_stub import (  # noqa: E402
     agent_usage,
     attached_media,
     attached_route,
+    attachment_entry,
     attachment_route,
     create_session,
     expect_app,
@@ -354,6 +357,8 @@ def detail(id_: str) -> dict:
     status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
+        # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
+        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None,
         "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
@@ -500,9 +505,17 @@ def notification(id: int, at: str, kind: str, category: str, level: str, tone: s
 
 
 def buttons(*pairs: tuple[str, str, str]) -> list[dict]:
-    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick."""
-    return [{"id": i, "label": label, "style": style, "quick": i != "open"} for i, label, style in pairs]
+    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick.
 
+    An answer says what it does, as the host's own producers write it; Open says nothing and has no key.
+    """
+    return [{"id": i, "label": label, "style": style, "quick": i != "open", **({"description": ABOUT[i.split(":")[0]]} if i.split(":")[0] in ABOUT else {})} for i, label, style in pairs]
+
+
+ABOUT = {
+    "en": {"allow": "Allows this one action, once, and the agent carries on.", "deny": "Keeps it refused; nothing runs.", "answer": "Answers the question with this option, and the run goes on."},
+    "ru": {"allow": "Разрешает это одно действие, один раз, и агент продолжает работу.", "deny": "Оставляет отказ в силе, ничего не выполняется.", "answer": "Отвечает на вопрос этим вариантом, и запуск продолжается."},
+}[LANG]
 
 # The host writes these in the operator's language; the Russian run gets the Russian words it would.
 NOTICE_WORDS = {
@@ -537,6 +550,8 @@ def notifications_view(view: str) -> list[dict]:
         return [e for e in INBOX if not e["seen"] and e["level"] != "quiet"]
     if view == "problems":
         return [e for e in INBOX if e["tone"] in ("warning", "error")]
+    if view == "done":
+        return [e for e in INBOX if e["category"] == "run_finished"]
     return INBOX
 
 
@@ -609,7 +624,7 @@ SETTINGS = {
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
     "presets": {
         "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
-        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
+        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
         "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
         "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "context_window_source": "provider", "max_output_tokens": 4096},
     },
@@ -915,6 +930,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
     # otherwise take a worktree's search for the workspace's.
+    if request.method == "GET" and rel == f"/api/sessions/{S1}/attachments":
+        # The first chat's attachments: its operator's pictures and document, and a file the agent sent.
+        return respond(route, {"attachments": [
+            attachment_entry(S1, INBOX_SHOT, seq=2, at=ago(minutes=40)), attachment_entry(S1, INBOX_PDF, seq=2, at=ago(minutes=40)),
+            attachment_entry(S1, "weekly-report.csv", source="agent", seq=9, size=2048, mime="text/csv", at=ago(minutes=12), url=f"/api/sessions/{S1}/sent/toolu_send/download?path=weekly-report.csv"),
+        ]})
     served = worktree_route(rel, params) or attached_route(rel, params) or attachment_route(rel, params)
     if served is not None:
         return respond(route, served[1], content_type=served[0])
@@ -946,6 +967,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         resolution = "answered" if action.startswith("answer") else action
         return respond(route, {"resolution": resolution, "notification": entry and {**entry, "resolved": resolution, "needs_you": False, "seen": True}})
     if request.method == "POST" and rel == "/api/notifications/seen":
+        return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
+    if request.method == "POST" and rel == "/api/notifications/unseen":
         return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
     if request.method == "POST" and rel.startswith("/api/sessions/") and rel.endswith("/command"):
         # A slash command answers with the chat's text, or — when a scene sets one — refuses as the
