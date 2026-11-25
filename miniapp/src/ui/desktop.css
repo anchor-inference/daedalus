@@ -140,20 +140,6 @@
   .composer-tools .roundbtn.primary { border-radius:50%; }
 }
 
-/* The session header in two lines: the title with the host mark, then the project, the model and the
-   live state in the meta size — what the phone's title button holds. The live state used to be a bar
-   of its own between the title and the actions, where it pushed the title into an ellipsis. */
-.chat-title-line { display:flex; align-items:center; gap:var(--space-2); min-width:0; max-width:100%; line-height:1.25; }
-.chat-title-line .chat-title { min-width:0; }
-.chat-sub { display:flex; align-items:center; gap:5px; min-width:0; max-width:100%; color:var(--fg-3); font-size:var(--fs-12); line-height:1.3; white-space:nowrap; }
-.chat-sub .sep { flex:none; }
-.chat-sub-project { flex:0 1 auto; min-width:0; }
-.chat-sub-model { flex:0 1 auto; min-width:0; color:var(--fg-3); }
-.chat-sub .head-status { height:auto; max-width:none; padding:0; gap:var(--space-1); font-size:var(--fs-12); flex:0 1 auto; }
-.chat-sub .head-status b { font-weight:500; }
-.chat-sub .head-status .dot { display:none; }
-.chat-sub .head-status.livebar:hover { background:none; color:var(--fg); }
-
 @media (min-width:1024px) {
   /* The start canvas: the mark and the question, the composer, "Start in …" and what is live, in one
      720 px column held a little above the middle of the window. */

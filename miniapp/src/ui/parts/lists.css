@@ -7,7 +7,6 @@
 /* ── phones: tighter header, every control reachable with a thumb ──────────────────────── */
 @media (max-width: 1023px) {
   .chat-head { padding: 0 6px; gap: 4px; }
-  .head-model { display: none; }
   .head-status { max-width: 36%; padding: 0 4px; }
   .composer-row .chip { max-width: 40vw; }
   .composer-row .chip span, .composer-row .chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

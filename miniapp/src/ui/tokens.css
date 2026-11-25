@@ -155,7 +155,7 @@
   --panel-w: 42%; --panel-w-min: 360px;
   --pip-w: 240px;       /* the browser's corner preview, 16:10 above a 24 px footer */
   --reading-w: 760px;   /* prose max width: the answer and the user's card */
-  --chat-w: 920px;      /* the stripe the timeline, the turns and the composer share; it widens below */
+  --chat-w: 760px;      /* the stripe the timeline, the turns and the composer share, at every window width */
   --z-sidebar: 15; --z-popover: 35; --z-navigation: 36; --z-menu: 38; --z-overlay: 30; --z-confirm: 40; --z-toast: 45;
   --head-h: 52px;        /* every header: a page's, a conversation's, the sidebar's head, a pane's */
   --page-pad: 14px;     /* a page's side padding; 24 on a desktop, 40 on a wide one */

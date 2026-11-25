@@ -27,7 +27,72 @@ export type ChangedFile = {
   /** Written whole (created or overwritten) at least once, or only edited. */
   how: "wrote" | "edited";
   place: Place | null;
+  /** The lines the turn's calls added and removed in it, or null when one of them cannot be counted. */
+  lines: LineChange | null;
 };
+
+/** Lines added and removed, as a diff counts them. */
+export type LineChange = { added: number; removed: number };
+
+const REPLACED_RE = /:\s*(\d+)\s+replacement/;
+
+function linesOf(text: string): string[] {
+  if (!text) return [];
+  return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+}
+
+/**
+ * One replacement in lines: the lines both sides share at the top and at the bottom are context, the
+ * rest of the old text was removed and the rest of the new added. That is what a line diff of the two
+ * gives for the one hunk an edit is, without the cost of a real diff on a long block.
+ */
+export function replacedLines(old: string, now: string): LineChange {
+  const a = linesOf(old);
+  const b = linesOf(now);
+  let top = 0;
+  while (top < a.length && top < b.length && a[top] === b[top]) top++;
+  let tail = 0;
+  while (tail < a.length - top && tail < b.length - top && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  return { added: b.length - top - tail, removed: a.length - top - tail };
+}
+
+/**
+ * What one call changed, in lines, from its own arguments: an Edit's replacements (each as many times
+ * as the result says it matched when it replaced every match), a Write's content as lines written. A
+ * Write over an existing file is counted as what it wrote: the call does not say what was there. Null
+ * for a call that carries no text to count (a patch, an imported tool, arguments cut short).
+ */
+export function lineChange(name: string, args: Record<string, unknown>, result = ""): LineChange | null {
+  if (name === "Write") return typeof args.content === "string" ? { added: linesOf(args.content).length, removed: 0 } : null;
+  if (name !== "Edit" && name !== "MultiEdit") return null;
+  const edits = Array.isArray(args.edits) ? (args.edits as Record<string, unknown>[]) : [args];
+  let added = 0;
+  let removed = 0;
+  for (const edit of edits) {
+    const old = edit?.old_string ?? edit?.old;
+    const now = edit?.new_string ?? edit?.new;
+    if (typeof old !== "string" || typeof now !== "string") return null;
+    const change = replacedLines(old, now);
+    // Every match replaced: the result's count is how many times this change landed. Only a single
+    // edit can say so; a batch reports one total for all of its edits.
+    const times = edit?.replace_all === true && edits.length === 1 ? Number(REPLACED_RE.exec(result)?.[1] ?? 1) : 1;
+    added += change.added * times;
+    removed += change.removed * times;
+  }
+  return { added, removed };
+}
+
+/** The sum of changes, null as soon as one of them could not be counted. */
+export function sumLines(changes: readonly (LineChange | null)[]): LineChange | null {
+  let added = 0;
+  let removed = 0;
+  for (const change of changes) {
+    if (!change) return null;
+    added += change.added;
+    removed += change.removed;
+  }
+  return { added, removed };
+}
 
 /** A path as the session's folders know it: relative to the workspace (`folder` empty) or to another folder of its project. */
 export type Place = { rel: string; folder: string };
@@ -145,7 +210,8 @@ export function turnFiles(items: readonly Activity[], workspace = "", folders: r
     }
     const before = changed.get(key);
     const how = a.name === "Write" || before?.how === "wrote" ? "wrote" : "edited";
-    changed.set(key, { callId: before?.callId ?? a.id, path, name: nameOf(path), how, place });
+    const lines = sumLines([before ? before.lines : { added: 0, removed: 0 }, lineChange(a.name, a.args, a.result ?? "")]);
+    changed.set(key, { callId: before?.callId ?? a.id, path, name: nameOf(path), how, place, lines });
   }
   for (const key of sent.keys()) changed.delete(key);
   return { sent: [...sent.values()], changed: [...changed.values()] };

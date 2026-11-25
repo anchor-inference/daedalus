@@ -19,7 +19,7 @@ import { Chevron } from "./ui/components";
 import { Row, Sheet } from "./ui/primitives";
 import type { MenuItem } from "./ui/dialogs";
 import { useReveal } from "./reveal";
-import { SENT_VISIBLE, type ChangedFile, type SentFile } from "./turnfiles";
+import { SENT_VISIBLE, sumLines, type ChangedFile, type LineChange, type SentFile } from "./turnfiles";
 
 /** The line icon for a file, by what the viewer would make of it. */
 export function fileIcon(name: string): IconName {
@@ -157,6 +157,17 @@ export function TurnFiles({ sessionId, sent, changed, onOpen }: { sessionId: str
   );
 }
 
+/** Lines added and removed, "+48 −12": the added in cyan, the removed in orange, a side left out at 0. */
+export function LineFigures({ lines, className = "lines" }: { lines: LineChange | null; className?: string }) {
+  if (!lines || (!lines.added && !lines.removed)) return null;
+  return (
+    <span className={className} aria-label={t("turn.lines", { added: lines.added, removed: lines.removed })}>
+      {lines.added > 0 && <span className="lines-add">+{lines.added}</span>}
+      {lines.removed > 0 && <span className="lines-del">−{lines.removed}</span>}
+    </span>
+  );
+}
+
 /** The path a row shows: the folder part quieter than the name, so a column of them scans by name. */
 function RowPath({ file }: { file: ChangedFile }) {
   const shown = file.place?.rel ?? file.path;
@@ -187,9 +198,10 @@ function ChangedFiles({ sessionId, files, onOpen }: { sessionId: string; files: 
   const revealOf = (file: ChangedFile) => (revealer && file.place ? () => void revealer.reveal({ session_id: sessionId, folder_id: file.place!.folder || undefined, path: file.place!.rel }) : null);
   const head = (
     <button type="button" className="changed-files-head" aria-expanded={phone ? undefined : open} aria-haspopup={phone ? "dialog" : undefined} onClick={() => setOpen((o) => !o)}>
-      <Icon name="changes" size={14} />
+      <Icon name="changes" size={16} />
       <span className="changed-files-count">{plural("turn.files.changed", files.length)}</span>
-      {!phone && <Chevron open={open} />}
+      <LineFigures lines={sumLines(files.map((file) => file.lines))} />
+      <Chevron open={open} />
     </button>
   );
   if (phone) {
@@ -240,6 +252,7 @@ function ChangedFiles({ sessionId, files, onOpen }: { sessionId: string; files: 
                   <span className="changed-file-glyph" aria-hidden><Icon name={fileIcon(file.name)} size={14} /></span>
                   <RowPath file={file} />
                   {file.how === "edited" && <span className="changed-file-how">{t("turn.files.edited")}</span>}
+                  <LineFigures lines={file.lines} />
                 </button>
                 <span className="changed-file-actions">
                   {openable && (

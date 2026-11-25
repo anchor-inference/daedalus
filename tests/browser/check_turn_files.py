@@ -123,8 +123,10 @@ def desktop(browser, native: bool) -> list[str]:  # type: ignore[no-untyped-def]
     if str(len(CHANGED)) not in text:
         problems.append(f"the line does not count the {len(CHANGED)} changed files ({text!r})")
     height = summary.evaluate("(el) => Math.round(el.getBoundingClientRect().height)")
-    if height > 32:
-        problems.append(f"the changed-files line is {height} px tall, more than one compact row")
+    # One 52 px card the column's width, the count and its lines on one row: the design's changed-files
+    # card (it was a 32 px line). Taller is a second row, which is what twenty-three cards once were.
+    if height > 52:
+        problems.append(f"the changed-files card is {height} px tall, more than its one 52 px row")
     if turn.locator(".changed-file").count():
         problems.append("the changed files are listed before the line is opened")
     page.evaluate("() => document.querySelector('.turn:last-child .changed-files-head')?.scrollIntoView({ block: 'center' })")

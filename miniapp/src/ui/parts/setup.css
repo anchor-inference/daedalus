@@ -303,11 +303,14 @@ input.field[type="range"] {
 .filetext.source-view .line { min-width:max-content; white-space:pre; }
 .filetext.source-view.wrap .line { min-width:0; white-space:pre-wrap; }
 .source-view.wrap .linebody { overflow-wrap:anywhere; }
+/* Code is coloured with the three accents and the greys, nothing else: keywords violet, strings cyan,
+   numbers orange, comments in the quiet ink, names in the plain one. A palette of its own was the
+   only rainbow left in an interface of neutral greys. */
 .tk-c { color:var(--fg-3); }
-.tk-k, .tk-t { color:light-dark(#7545a5, #c6a0f6); }
-.tk-s, .json-string { color:light-dark(#237844, #a6da95); }
-.tk-n, .json-number { color:light-dark(#98651c, #eed49f); }
-.tk-f, .tk-a { color:light-dark(#286798, #8aadf4); }
+.tk-k, .tk-t { color:var(--accent); }
+.tk-s, .json-string { color:var(--live); }
+.tk-n, .json-number { color:var(--attention); }
+.tk-f, .tk-a { color:var(--fg); }
 .json-boolean, .json-null { color:var(--accent); }
 .json-tree { overflow:auto; font:var(--fs-mono)/1.6 var(--mono); }
 .json-row { min-height:24px; overflow-wrap:anywhere; }

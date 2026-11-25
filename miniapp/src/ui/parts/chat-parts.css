@@ -13,7 +13,6 @@ body.resizing iframe { pointer-events: none; }
 .chat.pane-right { border-left: 1px solid var(--line); }
 .chat.pane .chat-head { padding: 0 12px; }
 .chat.pane .chat-scroll, .chat.pane .composer { padding-left: 16px; padding-right: 16px; }
-.chat.pane .chat-head .title { font-size: var(--fs-14); }
 @media (min-width: 1024px) {
   .app > .dual { grid-area: 1 / 1 / -1 / -1; }
 }
@@ -44,7 +43,8 @@ body.resizing iframe { pointer-events: none; }
 .reply-pill-btn { display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; white-space: nowrap; }
 .reply-pill-btn:hover, .reply-pill-btn:focus-visible { background: var(--surface-3); }
 .reply-pill-sep { width: 1px; height: 16px; background: var(--line); flex: none; }
-.reply-popover { position: fixed; z-index: var(--z-menu); width: min(360px, calc(100vw - 16px)); padding: 12px; display: flex; flex-direction: column; gap: 10px; border-radius: var(--radius-md); background: var(--surface-1); border: 0; box-shadow: var(--shadow-md); animation: reply-rise .14s ease-out both; }
+/* The reply box is the shared popover (its edge, surface, shadow and entrance), laid out as a quote over a field. */
+.menu.pop.reply-popover { max-width: calc(100vw - 16px); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .reply-quote { border-left: 2px solid var(--line-strong); padding: 1px 0 1px 12px; color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
 .reply-form { display: flex; align-items: center; gap: 8px; }
 .reply-input { flex: 1; min-width: 0; height: var(--ctl-h); padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font: inherit; font-size: var(--fs-14); }
@@ -76,7 +76,7 @@ body.resizing iframe { pointer-events: none; }
 @keyframes reply-rise { from { opacity: 0; transform: translateY(4px) scale(.98); } }
 @keyframes reply-drop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 @media (prefers-reduced-motion: reduce) {
-  .reply-pill, .reply-popover, .reply-card .reply-card-open { animation: none; }
+  .reply-pill, .reply-card .reply-card-open { animation: none; }
   .reply-card .reply-card-x { transition: none; }
 }
 /* The operator's secrets: a chip that names one (a draft's or a sent message's) and the form that keeps
@@ -297,7 +297,10 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .filetext.lined .line.cited { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .filetext.lined .linenum { flex: 0 0 auto; min-width: 4ch; text-align: right; color: var(--fg-3); user-select: none; }
 .filetext.lined .linebody { flex: 1; min-width: 0; }
-.receipt-claim { margin: 0 0 4px; }
+.receipt-claim { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 4px; }
+.receipt-claim > .ic { flex: none; margin-top: 3px; }
+.receipt-claim.ok > .ic { color: var(--live); }
+.receipt-claim.bad > .ic { color: var(--attention); }
 
 /* ── the preview dialog ────────────────────────────────────────────────────────────────── */
 .sheet.preview { max-height: 92%; }

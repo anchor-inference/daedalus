@@ -3,7 +3,7 @@ import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, 
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation, type TranslatingMessage } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
-import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
+import { MenuItem, OverflowMenu, Sheet, confirmDialog, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
@@ -22,9 +22,9 @@ import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
-import { KeptFiles, TurnFiles } from "../artifact";
+import { KeptFiles, LineFigures, TurnFiles } from "../artifact";
 import { MessageAttachments } from "../attachcards";
-import { placeOf, turnFiles, turnPages } from "../turnfiles";
+import { lineChange, placeOf, sumLines, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
 import { openSchedules } from "../schedules/host";
@@ -1922,7 +1922,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <Icon name={pane === "right" ? "close" : "back"} />
           </button>
         )}
-        <div className="grow chat-identity" style={{ minWidth: 0 }}>
+        {/* One line, as every page's header: where the chat lives, then its title, then what the run is
+            doing in the meta size. The model and its thinking left the header for the composer, which
+            names them beside the field they apply to; two lines in 52 px read as a second toolbar. */}
+        <div className="grow chat-identity">
+          {detail?.subagent_of ? (
+            <>
+              <button className="leader-link chat-crumb" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
+                <span className="truncate">{detail.leader_title ?? t("session.leader.word")}</span>
+              </button>
+              <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
+            </>
+          ) : detail && isProject(detail.project) && detail.project.name !== detail.title ? (
+            <>
+              <span className="chat-crumb truncate chat-sub-project">{detail.project.name}</span>
+              <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
+            </>
+          ) : null}
           {editingTitle !== null ? (
             <input
               className="title-edit"
@@ -1943,35 +1959,20 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               <PrivateBadge on={isPrivate(detail)} />
             </span>
           )}
-          {detail?.subagent_of ? (
-            <button className="leader-link" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
-              ↳ {detail.leader_title ?? t("session.leader.word")}
-            </button>
-          ) : detail && (
-            // The second line says what the phone's title button says: the project, the model and its
-            // thinking, and the live state, which the line carries itself rather than a bar beside it.
+          {detail && (
             <span className="chat-sub">
-              {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
-              <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText && <span className="chat-sub-effort"> {effortText}</span>}</span>
-              {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
-              {remote && remoteNow && <><span className="sep">·</span><RemoteHead b={remote} state={remoteNow} /></>}
-              {compacting ? null : (busy || saving) && !remotePaused ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
-                : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
-                : waitingLine ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button></> : null}
-              {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
-              {folderMove && <><span className="sep">·</span><MoveLive job={folderMove} compact /></>}
+              {detail.imported && <span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span>}
+              {remote && remoteNow && <RemoteHead b={remote} state={remoteNow} />}
+              {compacting ? <CompactionBar c={compacting} />
+                : (busy || saving) && !remotePaused ? <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} since={detail.run_started_at} onJump={jumpToBottom} />
+                : status === "failed" ? <span className="head-status failed" role="status"><b>{statusWord(status)}</b></span>
+                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button> : null}
+              {ahead && <AheadStatus c={ahead} />}
+              {folderMove && <MoveLive job={folderMove} compact />}
             </span>
           )}
         </div>
-        {compacting ? (
-          <CompactionBar c={compacting} />
-        ) : !detail || detail.subagent_of ? (
-          busy || saving ? (
-            <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail?.workspace} onJump={jumpToBottom} />
-          ) : status === "failed" ? (
-            <span className="head-status failed" role="status"><Dot status={status} /><b>{statusWord(status)}</b></span>
-          ) : null
-        ) : null}
+        {!detail && (busy || saving) && <LiveBar status={status} saving={saving} base={tail} live={live} onJump={jumpToBottom} />}
         {offline && <span className="head-status offline">{t("session.reconnecting")}</span>}
         <div className="head-actions">
           {!visit && <LiveLinkChip sessionId={id} onOpen={() => setSharing(true)} />}
@@ -1991,10 +1992,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </button>
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
-          <ChatSearch sessionId={id} onPick={openMessage} />
           {!visit && !!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
           {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
           <TerminalButton dock={terminalDock} phone={phone} />
+          {/* Search, the panel and the menu close the row in that order on every chat, the three a
+              header always has; the buttons before them appear only when there is something to show. */}
+          <ChatSearch sessionId={id} onPick={openMessage} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
           </button>}
@@ -2014,6 +2017,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {!detail && <TurnSkeleton />}
               {/* An imported chat begins with where it came from, above whatever older pages load. */}
               {detail?.imported && <ImportBanner sessionId={id} origin={detail.imported} toast={toast} onPulled={() => void load(true)} />}
+              {/* A chat with nothing in it says so where the conversation will be: a blank page above the
+                  composer read as one that had not loaded. */}
+              {detail && !detail.imported && turns.length === 0 && !busy && !sendingMessages.length && (
+                <div className="chat-empty" role="status">
+                  <Icon name="chat" size={20} />
+                  <b>{t("session.empty")}</b>
+                  <span>{t("session.empty.sub")}</span>
+                </div>
+              )}
               {pageable && <div className="sub older-note">{older === "loading" ? t("session.older") : ""}</div>}
               {snapshots?.pruned && (
                 <div className="sub older-note">
@@ -2042,11 +2054,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   render={(i) => (
                     <Safe>
                       {i > 0 && !settled[i].imported && !!settled[i - 1].imported && <HandoffLine at={settled[i].startedAt} />}
-                      <TurnView turn={settled[i]} live={false} onTurnAction={turnAction} />
+                      {/* The newest answer keeps its row of actions in view, as the last thing in the chat
+                          and what the operator acts on next; the earlier ones show theirs on hover. */}
+                      <TurnView turn={settled[i]} live={false} latest={!busy && i === settled.length - 1} onTurnAction={turnAction} />
                     </Safe>
                   )}
                 />
-                {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
+                {busy && <LiveTurn base={tail} live={live} since={detail?.run_started_at} onTurnAction={turnAction} onRender={pinBottom} />}
                 {/* A message the host is holding is drawn once, as its card above the composer, where
                     its Steer and × are; the bubble here would be the same words a second time. */}
                 {pendingRows(sendingMessages, detail?.translating).filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <PendingMessage key={pending.id} text={pending.text} translating={pending.translating} />)}
@@ -2258,15 +2272,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       <TerminalSheet dock={terminalDock} workspace={detail?.workspace} />
 
       {commandResult && (
-        <Overlay><div className="sheet-backdrop" onClick={() => setCommandResult(null)}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="grip" />
-            <h3 className="mono">{commandResult.line}</h3>
-            <div className="sheet-body">
-              <pre className="diff" style={{ whiteSpace: "pre-wrap" }}>{commandResult.text}</pre>
-            </div>
-          </div>
-        </div></Overlay>
+        <Sheet title={commandResult.line} onClose={() => setCommandResult(null)} size="md" className="command-result-sheet">
+          <pre className="diff" style={{ whiteSpace: "pre-wrap" }}>{commandResult.text}</pre>
+        </Sheet>
       )}
 
       {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
@@ -2565,7 +2573,7 @@ function TurnSources({ turn }: { turn: Turn }) {
   return <SourcesButton sources={sources} onOpen={() => openSources(turn.key)} />;
 }
 
-const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
+const TurnView = memo(function TurnView({ turn, live, latest = false, runStart = null, onTurnAction }: { turn: Turn; live: boolean; latest?: boolean; runStart?: number | null; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
   const { id: sessionId, workspace, folders, preview, toast, link, compose, translateInto } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
@@ -2576,7 +2584,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // The answer in the operator's language: the automatic translation, or one asked for under it.
   const asked = useAskedTranslation({ sessionId, seq: turn.answerSeq, text: turn.answer, translation: turn.answerTranslation, live, into: translateInto });
   if (turn.summary) return <SummaryBlock message={turn.summary} />;
-  const elapsed = (live ? Date.now() : turn.endedAt) - turn.startedAt;
+  // A live turn counts from the run's start as the host has it (a run resumed after a question starts
+  // again from the answer); a settled one from its first message to its last.
+  const elapsed = live ? Math.max(0, Date.now() - (runStart ?? turn.startedAt)) : turn.endedAt - turn.startedAt;
   const summary = activitySummary(turn, live, Date.now());
   const activeTool = live ? [...turn.activity].reverse().find((item) => item.kind === "tool" && item.running) as ToolItem | undefined : undefined;
   const activeAction = activeTool ? describe(activeTool) : null;
@@ -2620,19 +2630,19 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const answered = answerTime(turn, closing, live);
   // The time and the speed go together: both belong to a turn that finished with an answer.
   const answeredStamp = answered ? <><MessageTime at={answered.at} took={answered.took} /><TurnSpeed runId={turn.runId} /></> : undefined;
+  // A fork is a new session, which a live link's visitor could not open: their rows leave it out.
+  const forkable = !inShare();
+  // Copy (drawn by the row itself), retry and fork first, the three an answer always offers; then the
+  // link, the translation and the reply; the one undoing action waits behind the menu.
   const answerActions = (text: string, answerSeq: number | undefined, translate?: MessageAction | null): MessageAction[] => [
+    ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
+    ...(settled && forkable ? [{ icon: "fork" as IconName, label: t("session.fork.action"), onSelect: () => onTurnAction!("fork", seq!) }] : []),
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
     ...(translate ? [translate] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
-    ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
   ];
-  // A fork is a new session, which a live link's visitor could not open: their menus leave it out.
-  const forkable = !inShare();
-  const turnMenu: MenuItem[] | undefined = settled
-    ? [
-        ...(forkable ? [{ label: t("session.fork.action"), icon: "fork" as IconName, onSelect: () => onTurnAction!("fork", seq!) }] : []),
-        ...(canRevert ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
-      ]
+  const turnMenu: MenuItem[] | undefined = settled && canRevert
+    ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }]
     : undefined;
   const copyLink = async () => {
     const url = `${window.location.origin}${link}#m${seq}`;
@@ -2713,7 +2723,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {/* A note between steps has no row of actions: its "Translate" is a quiet line that shows on hover. */}
           {said.line ?? (closing === segment ? null : said.offer)}
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
-          {closing === segment && <MessageActions text={mediaCopyText(said.text, turn.media ?? [])} actions={answerActions(said.text, segment.seq, said.action)} more={turnMenu} trail={answeredStamp} />}
+          {closing === segment && <MessageActions shown={latest} text={mediaCopyText(said.text, turn.media ?? [])} actions={answerActions(said.text, segment.seq, said.action)} more={turnMenu} trail={answeredStamp} />}
           </>}
         </Translatable>
       ))}
@@ -2740,7 +2750,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
       <SavedToMemory activity={turn.activity} />
-      {turn.answer && !live && <MessageActions text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq, asked.action)} more={turnMenu} trail={answeredStamp} />}
+      {turn.answer && !live && <MessageActions shown={latest} text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq, asked.action)} more={turnMenu} trail={answeredStamp} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
@@ -2770,18 +2780,24 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
     wasLive.current = live;
   }, [live]);
   const steps = stepCount(items);
-  const families = open ? "" : orchestrator ? stepLine(items) : familyLine(items);
+  // The orchestrator's line names what it did in the project's words; a chat's says how long and how
+  // many steps, and what kinds of step they were is the list it opens into.
+  const families = open || !orchestrator ? "" : stepLine(items);
   const label = elapsed !== null
     ? imported && !live ? t("imp.worked", { name: harnessMeta(imported).name }) : t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })
     : steps > 0 ? plural("session.part.steps", steps) : t("session.reasoning");
   return (
     <>
       <button className={`thinking-head ${holds ? "awaiting" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`dots ${live ? "on" : ""}`}>
-          <i />
-          <i />
-          <i />
-        </span>
+        {/* The dots are the run's own mark, drawn while it works; a finished block is a line of words
+            and a chevron, which is all the summary of six minutes of work needs to be. */}
+        {live && (
+          <span className="dots on">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         <span className="worked">{label}</span>
         {current && <span className="activity-current truncate">{current}</span>}
         {elapsed !== null && steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
@@ -2940,7 +2956,7 @@ function TurnSkeleton() {
  * The turn the run is writing right now. It reads the stream directly, so a token repaints this
  * component and nothing else: the settled turns above it never hear about it.
  */
-function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; live: LiveStore; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void; onRender?: () => void }) {
+function LiveTurn({ base, live, since = null, onTurnAction, onRender }: { base: Turn | null; live: LiveStore; since?: string | null; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void; onRender?: () => void }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   useLayoutEffect(() => onRender?.());
@@ -2949,7 +2965,7 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
   // dots over it — whatever the session is still doing behind the answer.
   return (
     <Safe>
-      <TurnView turn={turn} live={!state.ended} onTurnAction={onTurnAction} />
+      <TurnView turn={turn} live={!state.ended} runStart={runStartOf(since)} onTurnAction={onTurnAction} />
     </Safe>
   );
 }
@@ -3111,7 +3127,7 @@ export function SubagentTranscript({ id, onPreview, toast, inline = false, fallb
  *  brings the newest content back into view. The `livebar` classes are what the settle harness watches.
  *  `compact` drops the word and the step count for the side panel, whose line also holds its buttons
  *  in 360 px: the dot already says the state, and the step is what the operator reads. */
-export function LiveBar({ status, saving, base, live, workspace, onJump, compact = false }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void; compact?: boolean }) {
+export function LiveBar({ status, saving, base, live, workspace, since, onJump, compact = false }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; since?: string | null; onJump: () => void; compact?: boolean }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   if (saving) {
@@ -3125,11 +3141,14 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
   const now = Date.now();
   const turn = applyLive(base, state, now);
   const steps = stepCount(turn.activity);
-  const { tool: running, since } = currentStep(turn, state);
+  const { tool: running, since: stepSince } = currentStep(turn, state);
   // Two clocks, each said as what it is: the step's own beside the step, the turn's beside the state
   // word. The compact bar has room for one and shows the step's; the turn's is in its title.
-  const turnTime = duration(now - turn.startedAt);
-  const stepTime = since !== null && status !== "waiting" ? duration(Math.max(0, now - since)) : null;
+  // The run's own start, by the host's clock, when the host says it: the turn's first message is when
+  // the operator wrote, and a run resumed after a question starts again from the answer.
+  const runStart = runStartOf(since) ?? turn.startedAt;
+  const turnTime = duration(Math.max(0, now - runStart));
+  const stepTime = stepSince !== null && status !== "waiting" ? duration(Math.max(0, now - stepSince)) : null;
   // A session waiting on the operator has nothing in progress, whatever its last turn holds.
   const step =
     status === "waiting"
@@ -3165,6 +3184,13 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
       {step && stepTime && <span className="num step-time" title={t("session.livebar.steptime", { time: stepTime })}>{stepTime}</span>}
     </button>
   );
+}
+
+/** The host's run start as a clock reading, or null when it gave none or one that does not parse. */
+function runStartOf(at: string | null | undefined): number | null {
+  if (!at) return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /** The phone bar's second line during a run: the state and how long the turn has taken. */
@@ -3222,7 +3248,7 @@ function MessageTime({ at, took }: { at: string | number; took?: number | null }
 /** The row of small buttons under a message: copy it, and whatever else the turn allows; the rest behind ⋯.
  *  `lead` and `trail` stand before and after the buttons: the message's time, on the side of the row
  *  away from the text it answers to. */
-function MessageActions({ text, actions = [], more, lead, trail }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode }) {
+function MessageActions({ text, actions = [], more, lead, trail, shown = false }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode; shown?: boolean }) {
   // A phone shows the same icons as a desktop, in 44 px targets (ui/phone.css): the word "Copy"
   // beside one icon and every other action behind ⋯ made the turn's commands a hunt.
   const menu = more ?? [];
@@ -3242,14 +3268,14 @@ function MessageActions({ text, actions = [], more, lead, trail }: { text: strin
   });
   useContextActions(context, [{ label:t("common.copy"), icon:"copy", onSelect:() => void copy() }, ...actions, ...(more ?? [])]);
   return (
-    <div ref={controls} className="msg-actions">
+    <div ref={controls} className={`msg-actions ${shown ? "shown" : ""}`}>
       {lead}
       <button className="iconbtn small" onClick={copy} aria-label={t(copied ? "common.copied" : "common.copy")} title={t(copied ? "common.copied" : "common.copy")}>
-        <Icon name={copied ? "check" : "copy"} size={15} />
+        <Icon name={copied ? "check" : "copy"} size={16} />
       </button>
       {actions.map((a) => (
         <button key={a.label} className={`iconbtn small ${a.danger ? "danger" : ""}`} onClick={a.onSelect} aria-label={a.label} title={a.label}>
-          <Icon name={a.icon} size={15} />
+          <Icon name={a.icon} size={16} />
         </button>
       ))}
       {menu.length > 0 && <OverflowMenu small label={t("turn.more")} items={menu} />}
@@ -3512,11 +3538,14 @@ function ToolGroup({ family, group }: { family: string; group: ToolItem[] }) {
     if (running) setOpen(true);
   }, [running]);
   const d = describe(group[group.length - 1]);
+  // "Edited 2 files +31 −4": what the group changed, counted when every call in it can be.
+  const lines = WRITERS_COUNTED.includes(family) && !running ? sumLines(group.filter((g) => !g.error).map((g) => lineChange(g.name, g.args, g.result ?? ""))) : null;
   return (
     <div className="group">
       <div className={`act head ${running ? "running" : ""}`} onClick={() => setOpen((o) => !o)}>
         <Icon name={d.icon} />
         <span className="verb">{groupVerb(d.family, running, group.length, family)}</span>
+        <LineFigures lines={lines} />
         <span className="act-end"><Chevron open={open} /></span>
       </div>
       {open && group.map((g) => <ToolRow key={g.id} item={g} nested />)}
@@ -3576,6 +3605,9 @@ function ThoughtBlock({ text }: { text: string }) {
     </div>
   );
 }
+
+/** The steps whose arguments carry the text they wrote, so their lines can be counted. */
+const WRITERS_COUNTED = ["Write", "Edit", "MultiEdit"];
 
 /** The tools whose detail is a file the panel can open. */
 const FILE_TOOLS = ["Read", "Write", "Edit", "ImageView", "SendFile"];
@@ -3750,6 +3782,7 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           <span className="detail">{d.detail}</span>
         ))}
         <span className="act-end">
+          {WRITERS_COUNTED.includes(item.name) && !item.running && !item.error && <LineFigures lines={lineChange(item.name, item.args, item.result ?? "")} />}
           {/* A step imported from another program keeps the name it had there, beside Daedalus's own verb. */}
           {item.orig && item.orig !== d.verb && <span className="act-orig" title={t("imp.tool.orig", { name: item.orig })}>{item.orig}</span>}
           {item.error && !item.running && <span className="failed">{t("turn.failed")}</span>}
@@ -3828,34 +3861,29 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
       gone = true;
     };
   }, [sessionId, receipt]);
+  // The shared sheet: its own title, close button, Escape and focus return, where a hand-built backdrop
+  // and box had only a click outside.
   return (
-    <Overlay>
-      <div className="sheet-backdrop" onClick={onClose}>
-        <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("session.receipt", { id: receipt })}>
-          <div className="grip" />
-          <h3>{t("session.receipt", { id: receipt })}</h3>
-          <div className="sheet-body">
-            {row === undefined && <div className="empty">{t("common.loading")}</div>}
-            {row === null && <div className="empty">{t("session.receipt.none", { id: receipt })}</div>}
-            {row && (
-              <>
-                <p className="receipt-claim">
-                  <b>{row.passed ? `✅ ${t("session.receipt.ok")}` : `❌ ${t("session.receipt.fail")}`}</b> — {row.criterion}
-                </p>
-                <div className="sub">
-                  {t("session.receipt.meta", { code: row.exit_code, secs: (row.duration_ms / 1000).toFixed(1), when: timeAgo(row.at) })}
-                  {row.tests_run !== null && t("session.receipt.tests", { n: row.tests_run })}
-                  {row.sandboxed ? t("session.receipt.sandboxed") : ""}
-                  {row.dependencies && t("session.receipt.depends", { list: row.dependencies })}
-                </div>
-                <RawHtml html={codeBlock(row.command, "sh")} />
-                {row.output_head && (looksLikeDiff(row.output_head) ? <DiffView text={row.output_head} /> : <pre className="filetext">{row.output_head}</pre>)}
-              </>
-            )}
+    <Sheet title={t("session.receipt", { id: receipt })} onClose={onClose} size="md" className="receipt-sheet">
+      {row === undefined && <div className="empty">{t("common.loading")}</div>}
+      {row === null && <div className="empty">{t("session.receipt.none", { id: receipt })}</div>}
+      {row && (
+        <>
+          <p className={`receipt-claim ${row.passed ? "ok" : "bad"}`}>
+            <Icon name={row.passed ? "check" : "alert"} size={16} />
+            <span><b>{row.passed ? t("session.receipt.ok") : t("session.receipt.fail")}</b> — {row.criterion}</span>
+          </p>
+          <div className="sub">
+            {t("session.receipt.meta", { code: row.exit_code, secs: (row.duration_ms / 1000).toFixed(1), when: timeAgo(row.at) })}
+            {row.tests_run !== null && t("session.receipt.tests", { n: row.tests_run })}
+            {row.sandboxed ? t("session.receipt.sandboxed") : ""}
+            {row.dependencies && t("session.receipt.depends", { list: row.dependencies })}
           </div>
-        </div>
-      </div>
-    </Overlay>
+          <RawHtml html={codeBlock(row.command, "sh")} />
+          {row.output_head && (looksLikeDiff(row.output_head) ? <DiffView text={row.output_head} /> : <pre className="filetext">{row.output_head}</pre>)}
+        </>
+      )}
+    </Sheet>
   );
 }
 

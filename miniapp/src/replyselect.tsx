@@ -3,12 +3,13 @@
 // composer, the dialog that edits one, and the quotes a sent message is drawn with. The wire form and
 // the list per chat are in quotereply.ts.
 
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 import { t } from "./i18n";
 import { addQuoteReply, cleanQuote, type QuoteReply, removeQuoteReply, type SentReply, updateQuoteReply } from "./quotereply";
-import { Sheet, useLayer } from "./ui/dialogs";
+import { Popover, Sheet, useLayer } from "./ui/dialogs";
+import type { VirtualAnchor } from "./ui/primitives/responsive";
 
 /** The attribute an element carries when a selection inside it may be answered: the seq of the agent
  *  message it draws, or empty when that is not known. Only an agent's answer carries it, so the
@@ -267,47 +268,22 @@ function ReplyField({ onAdd, onCancel }: { onAdd: (text: string) => void; onCanc
   );
 }
 
-/** The popover where a desktop writes the reply, anchored where the pill was. */
+/** The width of the box a desktop writes the reply in. */
+const REPLY_W = 360;
+
+/**
+ * The popover where a desktop writes the reply, anchored to the passage where the pill was. The shared
+ * popover places it above the passage, or under it when there is no room, keeps it beside the words as
+ * the conversation scrolls, and closes it on a press elsewhere or Escape; this box once measured the
+ * selection itself on every scroll and listened for presses outside on its own.
+ */
 function ReplyPopover({ quote, range, scroller, onAdd, onClose }: { quote: string; range: Range; scroller: RefObject<HTMLElement | null>; onAdd: (text: string) => void; onClose: () => void }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [point, setPoint] = useState<{ left: number; top: number } | null>(null);
-  useLayer(onClose);
-  useLayoutEffect(() => {
-    const host = scroller.current;
-    const measure = () => {
-      const panel = box.current;
-      if (!panel || !host) return;
-      const bounds = host.getBoundingClientRect();
-      const whole = range.getBoundingClientRect();
-      const rects = Array.from(range.getClientRects());
-      const width = panel.offsetWidth;
-      const height = panel.offsetHeight;
-      const left = Math.max(8, Math.min(whole.left + whole.width / 2 - width / 2, window.innerWidth - width - 8));
-      const firstTop = rects[0]?.top ?? whole.top;
-      const above = firstTop - height - PILL_GAP;
-      const top = above >= Math.max(8, bounds.top) ? above : Math.min((rects.at(-1)?.bottom ?? whole.bottom) + PILL_GAP, window.innerHeight - height - 8);
-      setPoint({ left, top });
-    };
-    measure();
-    host?.addEventListener("scroll", measure, { passive: true });
-    window.addEventListener("resize", measure);
-    return () => {
-      host?.removeEventListener("scroll", measure);
-      window.removeEventListener("resize", measure);
-    };
-  }, [range, scroller]);
-  // A press anywhere else gives the reply up, as Escape does.
-  useEffect(() => {
-    const outside = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) onClose(); };
-    document.addEventListener("pointerdown", outside, true);
-    return () => document.removeEventListener("pointerdown", outside, true);
-  }, [onClose]);
-  return createPortal(
-    <div ref={box} className="reply-popover" role="dialog" aria-label={t("quote.sheet")} style={point ?? { visibility: "hidden", left: 0, top: 0 }}>
+  const anchor = useMemo<VirtualAnchor>(() => ({ getBoundingClientRect: () => range.getBoundingClientRect(), contextElement: scroller.current ?? undefined }), [range, scroller]);
+  return (
+    <Popover anchor={anchor} onClose={onClose} label={t("quote.sheet")} side="top" align="center" width={REPLY_W} className="reply-popover">
       <QuoteBar quote={quote} lines={2} />
       <ReplyField onAdd={onAdd} onCancel={onClose} />
-    </div>,
-    document.body,
+    </Popover>
   );
 }
 
