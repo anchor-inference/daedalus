@@ -3,6 +3,7 @@
 // returns. Drawn in a 64-unit square; the body sits low so a hat or a halo has room above it.
 
 import { t } from "./i18n";
+import { ICON_STROKE } from "./icons";
 import { useQuery } from "./store";
 
 export type CompanionShape = "orb" | "drop" | "square" | "star" | "cloud";
@@ -15,6 +16,15 @@ export const EYES: CompanionEyes[] = ["dots", "wide", "sleepy", "happy", "visor"
 export const ACCESSORIES: CompanionAccessory[] = ["none", "antenna", "halo", "hat", "glasses", "bow"];
 /** A few colours that read on both themes; the editor also takes any #rrggbb. */
 export const SWATCHES = ["#7c6cf0", "#3fa7f5", "#2bb673", "#f5a524", "#ef5d7a", "#9aa3b2"];
+
+// Every line of the face is a multiple of one width, so the face draws its lines as the icons around
+// it do. An icon is 24 units across with a line of ICON_STROKE; the face is 64 across and is shown at
+// about half that, beside icons of about 18 px, so the same line on it is
+// ICON_STROKE * (64 / 24) * (18 / 32) = 1.5 * ICON_STROKE units. Its fine detail is half of that, and
+// the rounding that softens the star's points, which is a fill and not a line, is twice it.
+const LINE = ICON_STROKE * 1.5;
+const FINE = LINE / 2;
+const SOFT = LINE * 2;
 
 export const DEFAULT_AVATAR: AvatarParams = { shape: "orb", color: "#7c6cf0", eyes: "dots", accessory: "none" };
 
@@ -36,7 +46,7 @@ function body(shape: CompanionShape, color: string) {
     case "square":
       return <rect x="11" y="18" width="42" height="40" rx="11" fill={color} />;
     case "star":
-      return <path d="M32 13 L38.5 27 L54 29 L42.5 39.5 L45.5 55 L32 47.5 L18.5 55 L21.5 39.5 L10 29 L25.5 27 Z" fill={color} stroke={color} strokeWidth="5" strokeLinejoin="round" />;
+      return <path d="M32 13 L38.5 27 L54 29 L42.5 39.5 L45.5 55 L32 47.5 L18.5 55 L21.5 39.5 L10 29 L25.5 27 Z" fill={color} stroke={color} strokeWidth={SOFT} strokeLinejoin="round" />;
     case "cloud":
       return (
         <g fill={color}>
@@ -64,9 +74,9 @@ function eyes(kind: CompanionEyes) {
         </g>
       );
     case "sleepy":
-      return <path d="M19 38 Q24 42 29 38 M35 38 Q40 42 45 38" stroke={ink} strokeWidth="2.6" fill="none" strokeLinecap="round" />;
+      return <path d="M19 38 Q24 42 29 38 M35 38 Q40 42 45 38" stroke={ink} strokeWidth={LINE} fill="none" strokeLinecap="round" />;
     case "happy":
-      return <path d="M19 40 Q24 34 29 40 M35 40 Q40 34 45 40" stroke={ink} strokeWidth="2.6" fill="none" strokeLinecap="round" />;
+      return <path d="M19 40 Q24 34 29 40 M35 40 Q40 34 45 40" stroke={ink} strokeWidth={LINE} fill="none" strokeLinecap="round" />;
     case "visor":
       return (
         <g>
@@ -91,12 +101,12 @@ function accessory(kind: CompanionAccessory, color: string) {
     case "antenna":
       return (
         <g>
-          <line x1="32" y1="17" x2="32" y2="6" stroke={ink} strokeWidth="2.4" strokeLinecap="round" />
-          <circle cx="32" cy="5" r="3.4" fill={color} stroke={ink} strokeWidth="1.6" />
+          <line x1="32" y1="17" x2="32" y2="6" stroke={ink} strokeWidth={LINE} strokeLinecap="round" />
+          <circle cx="32" cy="5" r="3.4" fill={color} stroke={ink} strokeWidth={FINE} />
         </g>
       );
     case "halo":
-      return <ellipse cx="32" cy="8" rx="13" ry="3.6" fill="none" stroke="#f5c542" strokeWidth="2.8" />;
+      return <ellipse cx="32" cy="8" rx="13" ry="3.6" fill="none" stroke="#f5c542" strokeWidth={LINE} />;
     case "hat":
       return (
         <g fill={ink}>
@@ -106,7 +116,7 @@ function accessory(kind: CompanionAccessory, color: string) {
       );
     case "glasses":
       return (
-        <g fill="none" stroke={ink} strokeWidth="2">
+        <g fill="none" stroke={ink} strokeWidth={LINE}>
           <circle cx="25" cy="38" r="6.5" />
           <circle cx="39" cy="38" r="6.5" />
           <line x1="31.5" y1="38" x2="32.5" y2="38" />
@@ -114,7 +124,7 @@ function accessory(kind: CompanionAccessory, color: string) {
       );
     case "bow":
       return (
-        <g fill="#ef5d7a" stroke={ink} strokeWidth="1.2" strokeLinejoin="round">
+        <g fill="#ef5d7a" stroke={ink} strokeWidth={FINE} strokeLinejoin="round">
           <path d="M40 15 L48 10 L48 20 Z" />
           <path d="M40 15 L32 10 L32 20 Z" />
           <circle cx="40" cy="15" r="2.4" />

@@ -148,7 +148,7 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     page.wait_for_selector(".companion-editor", timeout=5000)
     page.locator(".companion-editor input.field").fill("Iris")
     page.locator(".companion-swatch").nth(2).click()
-    page.locator(".companion-editor .btnrow .btn:not(.ghost)").click()
+    page.locator(".companion-editor-foot .btn:not(.ghost)").click()
     page.wait_for_timeout(500)
     saved = [b for m, p, b in posted if m == "PUT" and p == "/api/companion"]
     check(bool(saved) and saved[-1].get("name") == "Iris" and saved[-1]["avatar"]["color"] == "#2bb673", f"{where}: the name and the colour are saved ({saved[-1:]})")
