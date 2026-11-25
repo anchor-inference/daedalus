@@ -198,8 +198,6 @@
 .erow-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* A change's own sheet has the room to say who, where and when in full: truncated to a line, a
    phone showed "daed…", "bot/websear…" and "28 Se…" and nothing could bring them back. */
-.proposal-sheet .erow-meta { flex-wrap: wrap; row-gap: 4px; white-space: normal; }
-.proposal-sheet .erow-meta > span { overflow: visible; overflow-wrap: anywhere; }
 .erow-meta .sep { color: var(--fg-3); flex: none; }
 .erow-meta .word { font-weight: 500; flex: none; }
 .erow-meta.running .word { color: var(--live); }
@@ -324,9 +322,6 @@
 .erow.proposal .pill { flex: none; }
 .proposal-summary { margin-top: 4px; line-height: 1.45; }
 .proposal-text { white-space: pre-wrap; line-height: 1.5; font-size: var(--fs-14); }
-.proposal-sheet .segmented { margin: 4px 0 10px; }
-.proposal-sheet pre.diff { max-height: 60vh; overflow: auto; font-size: var(--fs-mono); }
-pre.diff .file { color: var(--fg); font-weight: 600; }
 .task-check { display: flex; align-items: center; gap: 8px; }
 .task-check .bar { flex: 1; max-width: 160px; }
 .check-row { margin: 0; min-height: var(--row-h); align-items: flex-start; }
