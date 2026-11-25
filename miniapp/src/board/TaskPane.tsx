@@ -3,13 +3,13 @@
 // pane rather than a dialog, so the board stays in view and another card opens in its place; on a
 // phone the same contents fill a sheet. A chat's own board mounts it in its panel at the panel's width.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { copyText } from "../ui/components";
 import { absTime, relTimeLong } from "../format";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { navigate, projectPagePath } from "../router";
-import { useQuery } from "../store";
+import { invalidate, useQuery } from "../store";
 import { Button, IconButton, OverflowMenu, Select, Sheet, useLayer, type MenuItem } from "../ui/primitives";
 import { ChatFinish } from "./ChatFinish";
 import { closeCard, closeItems } from "./operatorClose";
@@ -277,7 +277,15 @@ function DuePick({ task, writes, disabled }: { task: BoardTask; writes: TaskWrit
 }
 
 function History({ task, live }: { task: BoardTask; live: boolean }) {
-  const { data, error } = useQuery<TaskEvent[]>(`/api/board/${encodeURIComponent(task.id)}/events?limit=50&at=${encodeURIComponent(task.updated_at)}`, { staleMs: 5000 });
+  const key = `/api/board/${encodeURIComponent(task.id)}/events?limit=50`;
+  const { data, error } = useQuery<TaskEvent[]>(key, { staleMs: 5000 });
+  // A card that changed has a new line to show. The change used to ride in the address as a
+  // parameter the host does not read, which the route contract refuses; the list is asked again instead.
+  const seen = useRef(`${key} ${task.updated_at}`);
+  useEffect(() => {
+    const now = `${key} ${task.updated_at}`;
+    if (seen.current !== now) { seen.current = now; invalidate(key); }
+  }, [key, task.updated_at]);
   const events = [...(data ?? [])].reverse();
   const old = Date.now() - Date.parse(task.created_at) > HISTORY_DAYS * 86400_000;
   // The host keeps events a week: an older card's earliest lines are gone, and the list says so.
