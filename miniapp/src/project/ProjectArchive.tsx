@@ -59,7 +59,7 @@ export function ProjectArchive({ project, onChanged, onOpenRestored, readFailed 
   const [opened, setOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<SelectedPath[]>([]);
-  const [folderId, setFolderId] = useState(project.folders[0]?.id ?? "");
+  const [pickedFolder, setPickedFolder] = useState("");
   const [relativePath, setRelativePath] = useState("");
   const [receipt, setReceipt] = useState<ExportReceipt | null>(null);
   const [upload, setUpload] = useState<Upload | null>(null);
@@ -74,6 +74,9 @@ export function ProjectArchive({ project, onChanged, onOpenRestored, readFailed 
   const latest = useQuery<{ latest: ExportReceipt | null; available: boolean }>(`/api/projects/${encodeURIComponent(project.id)}/workspace-archive`, { staleMs: 0 });
   const downloadReceipt = receipt ?? (latest.data?.available ? latest.data.latest : null);
   const readableFolders = project.folders.filter((folder) => folder.reachable && folder.reach === "agents");
+  // The list offers only readable folders, so the folder shown first is the first of those, not of
+  // every folder: starting from the project's first folder posted one the list did not show.
+  const folderId = readableFolders.some((folder) => folder.id === pickedFolder) ? pickedFolder : readableFolders[0]?.id ?? "";
   const canExport = !offline && !readFailed && !busy && Number.isInteger(project.entity_revision) && (project.entity_revision ?? 0) > 0;
 
   function addFile() {
@@ -178,7 +181,7 @@ export function ProjectArchive({ project, onChanged, onOpenRestored, readFailed 
         <p className="sub">{t("archive.files.hint")}</p>
         {readableFolders.length > 0 ? <>
           <label className="field" htmlFor="archive-folder">{t("archive.folder")}</label>
-          <Select id="archive-folder" label={t("archive.folder")} size="md" value={folderId} onChange={setFolderId}
+          <Select id="archive-folder" label={t("archive.folder")} size="md" value={folderId} onChange={setPickedFolder}
             options={readableFolders.map((folder) => ({ id: folder.id, label: folder.label || t("archive.folder.default") }))} />
           <label className="field" htmlFor="archive-relative-path">{t("archive.relativePath")}</label>
           <input id="archive-relative-path" className="field" value={relativePath} onChange={(event) => setRelativePath(event.target.value)} placeholder={t("archive.pathExample")} />

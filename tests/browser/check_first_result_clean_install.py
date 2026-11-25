@@ -246,11 +246,15 @@ def scenario(language: str, width: int) -> None:
             "verification": "verified", "accepted": True, "evidence_ids": [], "reason": "Prices match",
         })
         assert bad.status == 409 and "evidence" in bad.text().lower()
-        sheet.get_by_role("textbox", name="What did you observe?" if language == "en" else "Что вы наблюдали?").fill("Compared bread with the approved price")
-        sheet.get_by_role("button", name="Record observation" if language == "en" else "Записать наблюдение").click()
-        # The click only starts the request: the host is asked for the evidence once the page shows it
-        # recorded, or a loaded machine reads the list before the observation has reached it.
-        expect(sheet).to_contain_text("Compared bread with the approved price")
+        observed = sheet.get_by_role("textbox", name="What did you observe?" if language == "en" else "Что вы наблюдали?")
+        observed.fill("Compared bread with the approved price")
+        # A textarea's text content follows what is typed into it, so the sheet "contains" the sentence
+        # before anything is sent; waiting on that text let the host be read before it had the row.
+        # The page empties the field only once the host has answered, and the answer is awaited itself.
+        with page.expect_response(lambda r: r.url.endswith(f"/results/{result_id}/evidence") and r.request.method == "POST") as recorded:
+            sheet.get_by_role("button", name="Record observation" if language == "en" else "Записать наблюдение").click()
+        assert recorded.value.ok, recorded.value.text()
+        expect(observed).to_have_value("")
         evidence = api("GET", f"/api/board/{task_id}/results/{result_id}/evidence")
         assert len(evidence) == 1 and evidence[0]["criterion_id"] == "C1"
         assert evidence[0]["manifest_digest_before"] == evidence[0]["manifest_digest_after"]
