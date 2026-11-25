@@ -184,6 +184,9 @@ button.menu-row:hover { background:var(--hover); }
 .notice-toasts { position: fixed; z-index: var(--z-toast); display: flex; flex-direction: column; gap: 8px; pointer-events: none; outline: 0; }
 .notice-toasts > * { pointer-events: auto; }
 .notice-toasts.stack { right: 24px; bottom: 24px; width: 360px; }
+/* The status line has the same corner (the banner's the same top): while it is up the notices stand clear of it. */
+body:has(.toast-viewport .toast) .notice-toasts.stack { bottom: 96px; }
+body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px + env(safe-area-inset-top)); }
 .notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 12px 14px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); cursor: pointer; animation: layer-in var(--t-base) var(--ease-out); }
 .notice-toasts.stack .notice-toast { touch-action: pan-y; }
 .notice-toast[data-swiping] { transition: none; user-select: none; }
