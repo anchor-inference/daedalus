@@ -41,7 +41,12 @@
 .attachment-markup:hover { background: var(--fg); color: var(--bg); }
 .attachment-markup:disabled { opacity: .5; cursor: progress; }
 @media (max-width: 1023px) {
-  .annotate-bar { flex-wrap: wrap; padding-left: var(--gutter); padding-right: var(--gutter); }
+  /* The layer's bar grows to two rows: its name and close button, then undo, redo, clear and Attach, with the
+     snapshot's address on a line of its own under them. */
+  .annotate .fullscreen-bar { height: auto; min-height: 52px; flex-wrap: wrap; row-gap: var(--space-1); padding: max(var(--space-1), env(safe-area-inset-top)) var(--space-2) var(--space-2) var(--gutter); }
+  .annotate .fullscreen-title { order: 0; }
+  .annotate .fullscreen-bar > .iconbtn { order: 1; }
+  .annotate-bar { order: 2; flex: 1 1 100%; flex-wrap: wrap; }
   .annotate-where { order: 9; flex-basis: 100%; text-align: left; }
   .annotate-history { margin-left: auto; }
   .annotate-stage { margin: var(--space-2) 0; }
