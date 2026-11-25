@@ -5559,6 +5559,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
     en: "Every browser and installed app that is signed in has to sign in again; this one is re-issued its session.",
     ru: "Всем браузерам и установленным приложениям придётся войти заново; этому выдадут новую сессию.",
   },
+  "settings.security.sessions": { en: "Sessions", ru: "Сеансы" },
   "settings.security.signedout": { en: "every other session is signed out", ru: "все остальные сессии завершены" },
   "settings.totp.title": { en: "Two-factor authentication", ru: "Двухфакторная аутентификация" },
   "settings.totp.sub": {

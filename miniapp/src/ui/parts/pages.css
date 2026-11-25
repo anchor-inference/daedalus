@@ -281,10 +281,6 @@ a.memory-source:hover { color: var(--fg); }
 .settings-col .card > .sub + .keyproxy-add { padding-top: 12px; border-top: 1px solid var(--line); }
 .keyproxy-add > .sub { margin-bottom: 10px; }
 .keyproxy-add > .btnrow { margin-top: 12px; }
-/* The secrets under their card's words: with nothing to search yet the toolbar is the one button, and
-   it starts the line as a card's action does instead of hanging at the far edge over an empty list. */
-.settings-col .secrets-manager { margin-top: 10px; }
-.settings-col .secrets-toolbar > .secrets-add-open:only-child { margin-left: 0; }
 /* A catalogue (voices, recognition models, components): what is in use in a card, the filters and the
    tiles on the page under it, the chosen one's settings in a card after them. */
 .catalogue > .catalogue-filters { margin: 0 0 12px; }

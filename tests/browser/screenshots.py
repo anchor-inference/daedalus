@@ -997,6 +997,23 @@ def respond(route, body, *, content_type: str = "application/json", status: int 
     route.fulfill(status=status, content_type=content_type, body=body if isinstance(body, (bytes, str)) else json.dumps(body))
 
 
+def seed_secrets() -> None:
+    """What Settings → Security lists in the pictures: three secrets and a saved sign-in, once per run.
+
+    A store a check has filled already is left as it is."""
+    from api_stub import SECRETS
+
+    if SECRETS.items or SECRETS.logins or getattr(SECRETS, "pictured", False):
+        return
+    SECRETS.pictured = True  # type: ignore[attr-defined]
+    SECRETS.projects = [{"id": "p1", "name": "Home network"}]
+    SECRETS.seed("router_admin", scope_id="s1", scope_title="Router setup", note="ISP router web admin", used=(datetime.now(UTC) - timedelta(hours=5)).isoformat(), uses=3, by="BrowserAct")
+    SECRETS.seed("nas_ssh", scope="project", scope_id="p1", scope_title="Home network", note="NAS admin over SSH")
+    SECRETS.seed("release_token", scope_id="s2", scope_title="Release notes")
+    SECRETS.logins = [{"id": "l1", "site": "router.local", "name": "router.local", "created_at": "2026-10-28T09:00:00Z", "updated_at": "2026-10-28T09:00:00Z",
+                       "last_used_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(), "uses": 4, "readable": True}]
+
+
 def stub(route) -> None:  # type: ignore[no-untyped-def]
     request = route.request
     url = request.url
@@ -1159,6 +1176,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"user_id": 1, "via": "token"})
     if rel == "/api/auth/config":
         return respond(route, {"telegram": None, "pairing": True, "second_factor": bool(getattr(stub, "second_factor", False))})
+    if rel == "/api/secrets" or rel.startswith("/api/secrets/"):
+        seed_secrets()
     if rel == "/api/auth/totp":
         # On, with two recovery codes spent: the state the Security picture is of.
         return respond(route, {"enabled": True, "enrolling": False, "recovery_left": 8, "enabled_at": "2026-10-01T09:30:00+00:00"})

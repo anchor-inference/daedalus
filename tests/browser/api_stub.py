@@ -1303,6 +1303,7 @@ class FakeSecrets:
         self.chat = "sess-1"
         self.project: dict | None = None
         self.projects: list[dict] = []
+        self.logins: list[dict] = []
 
     def seed(self, name: str, *, scope: str = "session", scope_id: str = "", scope_title: str = "", note: str = "",
              value: str = FAKE_SECRET_VALUE, used: str | None = None, uses: int = 0, by: str = "") -> dict:
@@ -1324,7 +1325,7 @@ class FakeSecrets:
             if session_id:
                 return 200, {"secrets": [r for r in self.items if self._here(r)], "others": [r for r in self.items if not self._here(r)],
                              "project_id": self.project["id"] if self.project else None, "project_name": self.project["name"] if self.project else None}
-            return 200, {"secrets": self.items, "logins": [], "projects": self.projects}
+            return 200, {"secrets": self.items, "logins": self.logins, "projects": self.projects}
         if path == "/api/secrets" and method == "POST":
             scope = str(data.get("scope") or "session")
             scope_id = str(data.get("project_id") or (self.project["id"] if scope == "project" and self.project else data.get("session_id") or self.chat))
