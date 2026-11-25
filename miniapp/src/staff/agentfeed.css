@@ -11,7 +11,7 @@
 .feed-agent-why { font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
 .feed-agent[data-state="refused"] .feed-agent-text, .feed-agent[data-state="failed"] .feed-agent-text { opacity: .75; }
 
-.agent-hop, .agent-wait { flex: none; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; }
+.agent-hop, .agent-wait { flex: none; font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; }
 .agent-wait { color: var(--data-wait); }
 .pill.agent-state { flex: none; }
 .pill.agent-state.sent { color: var(--info); }

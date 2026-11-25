@@ -79,7 +79,7 @@
    touch screen always, since there is no hover to find it by. */
 .event-line.answerable { grid-template-columns: auto minmax(0, 1fr) auto; }
 .event-reply.iconbtn.small { width: 22px; height: 22px; align-self: center; background: transparent; color: var(--fg-3); }
-.event-reply.iconbtn.small:hover { background: var(--surface-2); color: var(--fg); }
+.event-reply.iconbtn.small:hover { background: var(--hover); color: var(--fg); }
 @media (hover: hover) {
   .event-reply { opacity: 0; transition: opacity var(--t-fast); }
   .event-line:hover .event-reply, .event-reply:focus-visible { opacity: 1; }
@@ -118,7 +118,7 @@
 .msg-quote:hover { color: var(--fg); }
 
 /* What became of an operator's message: small print under it, on its side of the chat. */
-.msg-fate { list-style: none; margin: 0 4px 0 0; padding: 0; display: grid; gap: 1px; justify-items: end; max-width: 100%; font-size: var(--fs-11); line-height: var(--lh-ui); color: var(--fg-3); }
+.msg-fate { list-style: none; margin: 0 4px 0 0; padding: 0; display: grid; gap: 1px; justify-items: end; max-width: 100%; font-size: var(--fs-12); line-height: var(--lh-ui); color: var(--fg-3); }
 .fate-line { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0 6px; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 .fate-line.arrival { color: var(--info); }
 .fate-line.read svg { color: var(--ok); margin-right: 2px; }
@@ -165,10 +165,10 @@
 .goal-item.linked:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
-.goal-status, .goal-age { flex: none; font-size: var(--fs-11); color: var(--fg-3); }
+.goal-status, .goal-age { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
 .goal-item-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
 .goal-owner.unowned { color: var(--warn); }
-.goal-accept { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-3); font-size: var(--fs-11); }
+.goal-accept { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-3); font-size: var(--fs-12); }
 .goal-accept.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .goal-accept.attn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .goal-next { color: var(--warn); overflow-wrap: anywhere; min-width: 0; }
@@ -179,7 +179,7 @@
    count hidden. Measured on the strip rather than the window, since a desk with the panel open
    leaves the conversation a phone's width too. */
 @container goal (max-width: 640px) {
-  .goal-line { gap: 6px; font-size: var(--fs-11); }
+  .goal-line { gap: 6px; font-size: var(--fs-12); }
   .goal-line > svg { display: none; }
   .goal-counts { gap: 8px; }
   .goal-count-long { display: none; }
@@ -189,7 +189,7 @@
   .goal-primary { flex-wrap: wrap; }
   .goal-next-action { min-height: var(--row-h-touch); }
 }
-.event-time { color: var(--fg-3); font-size: var(--fs-11); font-family: var(--mono); }
+.event-time { color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); }
 .event-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 /* The questions an orchestrator's turn put to the operator, under its worked group. */
 .step-asks { display: grid; gap: 6px; margin: 2px 0 8px; }
@@ -398,7 +398,7 @@
 .term-phone-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .term-phone-title { display: flex; align-items: center; gap: 4px; min-width: 0; font-family: var(--mono); font-size: var(--fs-13); font-weight: 600; }
 .term-phone-title .ic { flex: none; color: var(--fg-3); }
-.term-phone-cwd { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.term-phone-cwd { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 /* The page never zooms here: two fingers set the terminal's font instead. */
 .term-phone-screen { flex: 1; min-height: 0; display: flex; overflow: hidden; touch-action: pan-y; }
 .term-phone-zoom { flex: 1; min-width: 0; min-height: 0; display: flex; }

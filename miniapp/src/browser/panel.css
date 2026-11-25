@@ -98,7 +98,7 @@
 .bv-cursor { position: absolute; left: 0; top: 0; z-index: 3; transition: transform var(--t-base) var(--ease-out); will-change: transform; }
 .bv-cursor svg { display: block; margin: -3px 0 0 -4px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .45)); overflow: visible; }
 .bv-cursor-arrow { fill: var(--accent); stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
-.bv-cursor-tag { position: absolute; left: 14px; top: 17px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-11); font-weight: 600; line-height: 16px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); }
+.bv-cursor-tag { position: absolute; left: 14px; top: 17px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; line-height: 16px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); }
 .bv-overlay.parked .bv-cursor { opacity: .55; }
 .bv-overlay.parked .bv-cursor-arrow { fill: var(--fg-3); }
 .bv-overlay.parked .bv-cursor-tag { background: var(--surface-3); color: var(--fg-2); }
@@ -106,9 +106,9 @@
 @keyframes bv-ripple { from { opacity: .9; transform: scale(.25); } to { opacity: 0; transform: scale(1.5); } }
 .bv-box { position: absolute; border: 2px solid var(--accent); border-radius: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); animation: bv-box 900ms ease-out forwards; }
 @keyframes bv-box { 0% { opacity: 0; transform: scale(1.06); } 14% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; } }
-.bv-box-label { position: absolute; left: -2px; bottom: 100%; margin-bottom: 4px; max-width: 240px; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-11); font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bv-chip { position: absolute; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg); font-size: var(--fs-11); line-height: 16px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); animation: bv-chip 1800ms ease-out forwards; }
-.bv-chip kbd { font-family: var(--mono); font-size: var(--fs-11); }
+.bv-box-label { position: absolute; left: -2px; bottom: 100%; margin-bottom: 4px; max-width: 240px; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bv-chip { position: absolute; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-3); color: var(--fg); font-size: var(--fs-12); line-height: 16px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); animation: bv-chip 1800ms ease-out forwards; }
+.bv-chip kbd { font-family: var(--mono); font-size: var(--fs-12); }
 @keyframes bv-chip { 0% { opacity: 0; transform: translateY(-3px); } 10%, 75% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 .bv-overlay.compact .bv-box { border-width: 1.5px; border-radius: 3px; box-shadow: none; }
 .bv-overlay.compact .bv-ripple { width: 14px; height: 14px; margin: -7px 0 0 -7px; border-width: 1.5px; }
@@ -306,7 +306,7 @@
 .browser-dot { position: absolute; top: 4px; right: 3px; width: 8px; height: 8px; border: 2px solid var(--bg); border-radius: 50%; background: var(--fg-3); box-sizing: content-box; }
 .browser-dot.acting { background: var(--live); }
 .browser-dot.you { background: var(--accent); }
-.browser-dot.needs { top: 1px; right: 0; width: 14px; height: 14px; background: var(--attention); color: var(--primary-ink); font-size: var(--fs-11); font-weight: 600; line-height: 14px; text-align: center; }
+.browser-dot.needs { top: 1px; right: 0; width: 14px; height: 14px; background: var(--attention); color: var(--primary-ink); font-size: var(--fs-12); font-weight: 600; line-height: 14px; text-align: center; }
 .bp-phonebar { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); }
 .bp-phonebar-domain { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
 .bp-phonebar-tabs { flex: none; color: var(--fg-3); font-size: var(--fs-12); }

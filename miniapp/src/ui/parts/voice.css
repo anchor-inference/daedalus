@@ -55,7 +55,7 @@
    browser will not make a sound, an engine failed to load), grey for everything else. The :root rule
    for prefers-reduced-motion takes every animation below away; the colours and the words still
    tell the states apart, which is why none of them is drawn by motion alone. */
-.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-11); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
+.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
 
 /* The page is the area under its header and nothing scrolls but what is inside it: the transcript
    in its own box, the stage when the window is too short for it, the agents beside them. The page

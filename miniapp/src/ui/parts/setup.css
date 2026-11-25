@@ -33,7 +33,7 @@
 .orp-head { display: none; }
 .orp-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: var(--space-2); align-items: start; padding: 6px 10px; cursor: pointer; }
 .orp-row + .orp-row, .orp-head + .orp-row { border-top: 1px solid var(--line); }
-.orp-row:hover { background: var(--surface-2); }
+.orp-row:hover { background: var(--hover); }
 .orp-row.on { background: var(--surface-3); }
 .orp-row .switch { margin: 3px 0 0; }
 .orp-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -389,7 +389,7 @@ input.field[type="range"] {
 
 .menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
 /* The mark of a session with every check bypassed, beside its title in the header. */
-.bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
+.bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 @media (min-width: 1024px) {
   .composer-box, .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
 }
@@ -403,7 +403,7 @@ input.field[type="range"] {
 .search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
 .search-notice { padding: var(--space-2) var(--space-3); }
 .folder-add { width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:var(--space-1); padding:0; flex-shrink:0; display:grid; place-items:center; line-height:0; color:var(--fg-2); border-color:transparent; background:transparent; box-shadow:none; }
-.folder-add:hover { background:var(--surface-2); color:var(--fg); }
+.folder-add:hover { background: var(--hover); color:var(--fg); }
 .folder-add .ic, .pagehead-actions .iconbtn .ic { display:block; margin:auto; }
 @media (max-width:600px) { .folder-top .folder-add { min-width:44px; min-height:var(--row-h-touch); padding:8px; } }
 
@@ -465,7 +465,7 @@ input.field[type="range"] {
 /* Subagents are peers of files and jobs, but opening one is navigation rather than panel content.
    Keep the roster at the session edge where it is visible without occupying the Details tab. */
 .subagents-trigger { position:relative; }
-.subagents-count { position:absolute; right:2px; bottom:2px; display:grid; place-items:center; min-width:15px; height:15px; padding:0 3px; border:1px solid var(--bg); border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg); font-size:var(--fs-11); font-weight:600; line-height:1; scale:.82; transform-origin:right bottom; }
+.subagents-count { position:absolute; right:2px; bottom:2px; display:grid; place-items:center; min-width:15px; height:15px; padding:0 3px; border:1px solid var(--bg); border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg); font-size:var(--fs-12); font-weight:600; line-height:1; scale:.82; transform-origin:right bottom; }
 .subagents-live { position:absolute; top:3px; right:3px; width:7px; height:7px; border:1px solid var(--bg); border-radius:50%; background:var(--live); }
 /* A subagent's state, the same dot in the left column and the Subagents tab: hollow at rest. */
 .sub-dot { flex:none; width:7px; height:7px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--fg-3); }
@@ -496,11 +496,11 @@ input.field[type="range"] {
    said the same thing again, in a stripe on every card. */
 .subagent-card { position:relative; display:flex; flex-direction:column; gap:var(--space-2); min-width:0; padding:0 var(--space-3) 10px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); overflow:hidden; }
 .subagent-card-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:var(--ctl-h-lg); margin:0 calc(-1 * var(--space-3)) -4px; padding:0 var(--space-3); border:0; border-radius:0; background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; transition:background var(--t-fast); }
-.subagent-card-head:hover { background:var(--surface-2); }
+.subagent-card-head:hover { background: var(--hover); }
 .subagent-card-head:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .subagent-card-head > .ic { flex:none; color:var(--fg-3); }
 .subagent-name { min-width:0; font-size:var(--fs-14); font-weight:500; }
-.subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:2px 7px 2px 6px; border:0; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--tone) 12%, transparent); color:var(--tone); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
+.subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:2px 7px 2px 6px; border:0; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--tone) 12%, transparent); color:var(--tone); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 .subagent-chip .sub-dot { display:none; }
 .subagent-chip[data-phase="working"] { --tone:var(--info); }
 .subagent-chip[data-phase="working"] .sub-dot { display:inline-block; }
@@ -525,18 +525,18 @@ input.field[type="range"] {
 /* What the helper brought back, in a recessed well; how it ended is the card's tag. */
 .subagent-report { display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); }
 .subagent-report p { margin:0; color:var(--fg); font-size:var(--fs-13); line-height:1.4; overflow-wrap:anywhere; }
-.subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-12); }
 .subagent-delivery.ok .ic { color:var(--ok); }
 .subagent-delivery.wait { color:var(--warn); }
 .subagent-run { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; color:var(--fg-2); font-size:var(--fs-12); }
 .subagent-model { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; }
 .subagent-model .provider-mark { width:18px; height:18px; border-radius:var(--radius-xs); }
 .subagent-model .provider-mark svg { width:12px; height:12px; }
-.subagent-effort { display:inline-flex; flex:none; align-items:center; gap:3px; padding:0 6px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-11); line-height:16px; }
+.subagent-effort { display:inline-flex; flex:none; align-items:center; gap:3px; padding:0 6px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-12); line-height:16px; }
 .subagent-effort.off { color:var(--fg-3); }
 .subagent-spend { display:inline-flex; flex:none; align-items:baseline; gap:8px; color:var(--fg-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .subagent-spend b { color:var(--fg); font-weight:500; }
-.subagent-context { display:flex; align-items:center; gap:8px; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.subagent-context { display:flex; align-items:center; gap:8px; color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .subagent-bar { flex:1; height:4px; border-radius:2px; background:var(--surface-3); overflow:hidden; }
 .subagent-bar i { display:block; height:100%; border-radius:2px; background:var(--fg); }
 .subagent-bar.attn i { background:var(--warn); }
@@ -553,7 +553,7 @@ input.field[type="range"] {
 .subagent-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:8px; margin:0 -12px; padding:6px 8px 6px 6px; border-bottom:1px solid var(--line); background:var(--bg); }
 .subagent-head-copy { display:flex; flex-direction:column; flex:1; min-width:0; }
 .subagent-head-copy b { font-size:var(--fs-13); }
-.subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-12); }
 /* An open helper: the list of the leader's helpers down its left side, its conversation in a column that
    scrolls by itself so the list stands still beside it. With the room the list is docked; without it
    (a narrow panel, a phone) it folds into the head's button and opens over the conversation. */
@@ -565,11 +565,11 @@ input.field[type="range"] {
 .subagent-rail-scrim { position:absolute; inset:0; z-index:3; background:color-mix(in srgb, var(--bg) 45%, transparent); }
 .subagent-rail-row { display:flex; flex:none; align-items:center; gap:8px; min-height:var(--row-h); padding:0 8px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
 /* A pointer's hover only: a tap on a phone left the row it opened the list from shaded like a second current one. */
-@media (hover: hover) { .subagent-rail-row:hover { background:var(--surface-2); color:var(--fg); } }
+@media (hover: hover) { .subagent-rail-row:hover { background: var(--hover); color:var(--fg); } }
 .subagent-rail-row[aria-current="true"] { background:var(--surface-3); color:var(--fg); font-weight:500; }
 .subagent-rail-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .subagent-rail-copy { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
-.subagent-rail-copy small { color:var(--fg-3); font-size:var(--fs-11); font-weight:400; }
+.subagent-rail-copy small { color:var(--fg-3); font-size:var(--fs-12); font-weight:400; }
 .subagent-rail-toggle.on { color:var(--fg); background:var(--surface-3); }
 .subagent-chat { padding-top:12px; }
 .subagent-chat .msg-wrap, .subagent-chat .answer { max-width:none; }

@@ -105,7 +105,7 @@ h3.ptask-title { margin: 0; min-width: 0; text-wrap: balance; }
 .ptask-tool .task-workflow, .ptask-tool .task-context { border-top: 0; padding-top: 0; }
 .pair-slot { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3) 0; border-top: 1px solid var(--line); min-width: 0; }
 .pair-slot h4 { margin: 0; font-size: var(--fs-13); font-weight: 600; }
-.result-fingerprints { font-size: var(--fs-11); color: var(--fg-3); overflow-wrap: anywhere; }
+.result-fingerprints { font-size: var(--fs-12); color: var(--fg-3); overflow-wrap: anywhere; }
 .result-fingerprints ul { margin: 0; padding-left: 16px; }
 .result-review > h4 { margin: 0 0 6px; font-size: var(--fs-13); font-weight: 600; }
 .result-transfer { display: flex; flex-direction: column; gap: 6px; margin-top: var(--space-2); }

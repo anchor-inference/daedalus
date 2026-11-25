@@ -638,6 +638,12 @@ describe("every size", () => {
   it("names a step of the scale rather than a number", () => {
     expect(numericFonts(all)).toEqual([]);
   });
+
+  // --fs-11 is 12 px and stays in the tokens only because published pages were promised the name;
+  // an app rule that writes it reads as a size under the floor and invites a smaller one back.
+  it("never writes --fs-11, the name kept for published pages", () => {
+    expect(all.filter((r) => /--fs-11\b/.test(r.body) && r.selector !== ":root").map((r) => r.selector)).toEqual([]);
+  });
 });
 
 describe("every box", () => {
@@ -1023,7 +1029,8 @@ describe("the side panel", () => {
   const value = (name: string) => Number(new RegExp(`${name}: (\\d+(?:\\.\\d+)?)px`).exec(scale?.body ?? "")?.[1] ?? Number.NaN);
 
   it("redefines every step at or under the desktop's, with a 13 px body and 12 px meta", () => {
-    for (const [name, px] of Object.entries(TOKENS)) {
+    // --fs-11 is the published pages' name and nothing in the app writes it, so the panel has no reason to redefine it.
+    for (const [name, px] of Object.entries(TOKENS).filter(([name]) => name !== "--fs-11")) {
       expect(value(name), name).toBeLessThanOrEqual(px);
     }
     expect(value("--fs-prose")).toBe(13);

@@ -139,7 +139,7 @@
   .steer { row-gap:2px; }
   .steer > .ic { grid-row:1; grid-column:1; }
   .steer-text { grid-row:1; grid-column:2; }
-  .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-11); }
+  .steer-hint { grid-row:2; grid-column:2; white-space:normal; font-size:var(--fs-12); }
   .steer-now, .steer-edit, .steer-x { grid-row:1 / span 2; }
 }
 /* A narrow card (a pane of the dual view, the Chrome side panel) keeps the field, the model and the
@@ -171,7 +171,7 @@
 .dock-detail { font-size:var(--fs-12); line-height:1.5; color:var(--fg-2); padding:8px 10px; background:var(--inset); box-shadow:var(--shadow-ring); border-radius:var(--radius-sm); }
 .dock-actions { display:flex; gap:6px; }
 .dock-actions .btn:not(.primary) { background:transparent; border-color:transparent; box-shadow:none; color:var(--fg-2); }
-.dock-actions .btn:not(.primary):hover { background:var(--surface-2); color:var(--fg); }
+.dock-actions .btn:not(.primary):hover { background: var(--hover); color:var(--fg); }
 /* a blocked call overrides a check, not a question: the shield in the failure's ink says so */
 .dock.approval[data-kind="blocked"] .dock-title .ic { color:var(--bad); }
 .dock.approval [data-blocked-reason] { font-size:var(--fs-13); overflow-wrap:anywhere; }

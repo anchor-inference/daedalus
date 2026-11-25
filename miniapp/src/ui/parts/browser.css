@@ -165,7 +165,7 @@
 /* The guessed next message is the empty field's placeholder, set apart from the usual hint so it
    reads as an offer rather than as an instruction; the key that takes it sits in the field's corner. */
 .composer-box .composer-field.ghost[data-empty]::before { color:var(--fg-3); font-style:italic; opacity:1; }
-.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:0; border-radius:var(--radius-xs); background:var(--surface-1); box-shadow:var(--shadow-xs); color:var(--fg-3); font-size:var(--fs-11); cursor:pointer; }
+.composer-ghost-accept { position:absolute; top:var(--space-2); right:var(--space-2); display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border:0; border-radius:var(--radius-xs); background:var(--surface-1); box-shadow:var(--shadow-xs); color:var(--fg-3); font-size:var(--fs-12); cursor:pointer; }
 .composer-ghost-accept:hover { color:var(--fg); background:var(--surface-3); }
 .composer-ghost-accept kbd { font:inherit; }
 
@@ -268,7 +268,7 @@
 .remote-head { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; color: var(--fg-3); }
 .remote-head > .ic { flex: none; color: var(--kind-remote); }
 .remote-device { flex: 0 1 auto; min-width: 0; color: var(--fg-2); }
-.remote-folder { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: var(--fs-11); }
+.remote-folder { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: var(--fs-12); }
 .remote-state { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: 2px; }
 .remote-dot { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
 .remote-head[data-remote-state="connected"] .remote-dot, .device-link.on .remote-dot { background: var(--ok); }
@@ -276,7 +276,7 @@
 .remote-head[data-remote-state="paused"] .remote-state { color: var(--warn); }
 .remote-head[data-remote-state="paused"] .remote-dot { background: var(--warn); }
 @media (prefers-reduced-motion: reduce) { .remote-head[data-remote-state="reconnecting"] .remote-dot { animation: none; } }
-.remote-guard { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); }
+.remote-guard { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); }
 .remote-guard[data-guard="plan"] { color: var(--kind-remote); }
 .ph-chat-remote { overflow: hidden; text-overflow: ellipsis; }
 .remote-paused { display: flex; align-items: center; gap: var(--space-3); padding: 8px var(--gutter, 16px); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }

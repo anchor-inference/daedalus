@@ -2,7 +2,7 @@
 .sched-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
 .sched-row:first-of-type { border-top: 0; }
 .sched-name { font-size: var(--fs-13); font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.sched-when { font-size: var(--fs-11); color: var(--fg-3); }
+.sched-when { font-size: var(--fs-12); color: var(--fg-3); }
 
 /* ── phones: tighter header, every control reachable with a thumb ──────────────────────── */
 @media (max-width: 1023px) {
@@ -156,7 +156,7 @@
 /* The list is as wide as its column. */
 .agents-screen { width: 100%; }
 .folder-live { display: inline-flex; flex: none; }
-.chip.tiny { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; flex: none; }
+.chip.tiny { padding: 1px 7px; font-size: var(--fs-12); min-height: 0; flex: none; }
 .erow.fork { margin-left: 22px;  }
 .erow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; min-height: var(--row-h); padding: 8px 12px; margin-bottom: 6px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--drop-xs); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
 .erow:hover { background: var(--surface-2); }
@@ -166,7 +166,7 @@
 .erow-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .erow-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .erow-title { flex: 1; min-width: 0; font-weight: 500; font-size: var(--fs-14); line-height: 1.35; letter-spacing: -0.005em; overflow-wrap: anywhere; }
-.erow-time { color: var(--fg-3); font-size: var(--fs-11); flex: none; font-variant-numeric: tabular-nums; }
+.erow-time { color: var(--fg-3); font-size: var(--fs-12); flex: none; font-variant-numeric: tabular-nums; }
 /* A result the operator has not seen: a dot beside the time and a heavier name, in the list and in the sidebar. */
 .unread-dot { flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--accent); align-self: center; }
 .erow.unread .erow-title, .sidebar .erow.unread .erow-title { font-weight: 600; }
@@ -216,7 +216,7 @@
 .notice-title { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; line-height: var(--lh-ui); overflow-wrap: anywhere; }
 .notice-row.unread .notice-title { font-weight: 600; }
 .notice-row.quiet .notice-title { color: var(--fg-2); font-weight: 400; }
-.notice-count { flex: none; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; font-variant-numeric: tabular-nums; }
+.notice-count { flex: none; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; font-variant-numeric: tabular-nums; }
 .notice-time { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .notice-row.unread .notice-time::after { content: ""; display: inline-block; width: var(--dot); height: var(--dot); margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
 .notice-meta { color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -244,8 +244,8 @@
 .check-row input { margin-top: 3px; }
 .check-row .done { color: var(--fg-3); text-decoration: line-through; }
 
-.service-name .chip.port { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; }
-.service-name .chip { padding: 1px 8px; font-size: var(--fs-11); }
+.service-name .chip.port { padding: 1px 7px; font-size: var(--fs-12); min-height: 0; }
+.service-name .chip { padding: 1px 8px; font-size: var(--fs-12); }
 .service-meta { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-3); }
 .service-line .btn.open { flex: none; min-height: var(--ctl-h-sm); }
 /* A choice of one is a list's rows, the chosen one filled and its ring violet: the radio is drawn here

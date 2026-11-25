@@ -32,7 +32,7 @@
 .status.done { color: var(--ok); }
 .status .dot { background: currentColor; }
 .status.running .dot { background: var(--live); }
-.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--radius-xs); border: 0; font-size: var(--fs-11); font-weight: 500; white-space: nowrap;
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--radius-xs); border: 0; font-size: var(--fs-12); font-weight: 500; white-space: nowrap;
   background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); }
 .pill.running { color: var(--live); }
 .pill.waiting, .pill.pending { color: var(--warn); }
@@ -118,7 +118,7 @@ a.iconbtn { text-decoration: none; }
 .chip.ok { color: var(--ok); }
 .chip.bad { color: var(--bad); }
 .chip.select { cursor: pointer; min-height: var(--ctl-h-sm); padding: 4px 10px; color: var(--fg-2); background: transparent; box-shadow: inset 0 0 0 1px var(--line); transition: background var(--t-fast), color var(--t-fast); }
-.chip.select:hover { background: var(--surface-2); color: var(--fg); }
+.chip.select:hover { background: var(--hover); color: var(--fg); }
 .chip.select[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
 /* overflow-x alone makes the row a scroll container on both axes, and in a flex column (the bell's
    popover) it may then shrink below its chips and scroll them vertically. It never shrinks, and only
@@ -177,7 +177,7 @@ a.iconbtn { text-decoration: none; }
 /* The select (primitives/select.tsx): the value and a caret; its list floats over the page (overlays.css). */
 .dropdown { position: relative; display: inline-flex; min-width: 0; max-width: min(340px, 100%); }
 .dropdown-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: min(340px, 100%); min-height: var(--ctl-h-sm); padding: 4px 8px 4px 10px; border: 1px solid var(--line-strong); box-shadow: none; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; transition: background var(--t-fast); }
-.dropdown-btn:hover:not(:disabled) { background: var(--surface-2); }
+.dropdown-btn:hover:not(:disabled) { background: var(--hover); }
 .dropdown-btn:disabled { opacity: .55; cursor: not-allowed; }
 .dropdown-btn[aria-invalid="true"] { border-color: var(--attention); }
 .dropdown-btn[data-popup-open] { background: var(--selected); }

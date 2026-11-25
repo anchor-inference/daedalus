@@ -180,12 +180,12 @@
 .panel-filetabs::-webkit-scrollbar { display: none; }
 .file-tab { position: relative; flex: none; display: flex; align-items: center; height: var(--ctl-h-sm); max-width: 220px; border-radius: var(--radius-xs); color: var(--fg-2); transition: background var(--t-fast) var(--ease-out); }
 .file-tab.on { background: var(--surface-3); color: var(--fg); }
-.file-tab:hover:not(.on) { background: var(--surface-2); }
+.file-tab:hover:not(.on) { background: var(--hover); }
 .file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 8px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .file-tab-name .ic { flex: none; color: var(--fg-3); }
 .file-tab-name:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-xs); }
 .file-tab-close { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 4px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); cursor: pointer; }
-.file-tab-close:hover { background: var(--surface-4); color: var(--fg); }
+.file-tab-close:hover { background: var(--hover); color: var(--fg); }
 
 /* The wide view: the tree on the left, the open files with the viewer on the right. */
 .panel-body.split { display: flex; flex-direction: row; }

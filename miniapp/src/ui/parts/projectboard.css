@@ -55,8 +55,8 @@
 .task-card-state.pcard-status > .truncate { min-width: 0; }
 .pcard-open { color: var(--fg-2); }
 .pcard-who { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.pcard-short { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); flex: none; }
-.pcard-branch { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-2); min-width: 0; display: block; }
+.pcard-short { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); flex: none; }
+.pcard-branch { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-2); min-width: 0; display: block; }
 .pcard .btn.small { flex: none; }
 .btn.warn { color: var(--warn); background: transparent; border-color: var(--line); font-weight: 500; }
 .btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
@@ -106,7 +106,7 @@
 .pboard-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--fs-13); }
 .pboard-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: baseline; min-width: 0; }
 .pboard-item > * { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
-.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 .pboard-item-line { display: flex; align-items: baseline; gap: 6px; }
 .pboard-item-text { flex: 1; min-width: 0; }
 .pboard-item-line .chip { flex: none; }

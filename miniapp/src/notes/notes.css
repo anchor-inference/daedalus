@@ -76,7 +76,7 @@
 .notes-empty .btn.primary { margin-top: 8px; }
 .notes-templates { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 4px; }
 .notes-templates .chip { cursor: pointer; }
-.notes-templates .chip:hover { color: var(--fg); background: var(--surface-3); }
+.notes-templates .chip:hover { color: var(--fg); background: var(--hover); }
 .notes-tip { margin-top: 12px !important; color: var(--fg-3); }
 .notes-none, .notes-error { padding: 20px 8px; text-align: center; color: var(--fg-3); font-size: var(--fs-13); display: grid; gap: 8px; justify-items: center; }
 .notes-loading { display: grid; gap: 4px; }

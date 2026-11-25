@@ -151,7 +151,7 @@
 .settings-color input { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
 .settings-faces { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
 .settings-faces button { display: flex; align-items: baseline; gap: 8px; min-height: var(--row-h); padding: 6px 10px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
-.settings-faces button:hover { background: var(--surface-2); }
+.settings-faces button:hover { background: var(--hover); }
 .settings-font { display: flex; flex-direction: column; gap: 16px; }
 .settings-font > .segmented { align-self: flex-start; margin: 0; }
 .settings-font-preview { padding: 16px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); overflow-wrap: anywhere; }

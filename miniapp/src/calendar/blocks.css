@@ -18,7 +18,7 @@
 
 /* A count of done things and a hairline bar under it; the success colour once all is done. */
 .cal-progress { display: inline-flex; flex-direction: column; gap: 2px; min-width: 34px; flex: none; }
-.cal-progress-text { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-11); font-weight: 600; color: var(--fg-2); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.cal-progress-text { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); font-weight: 600; color: var(--fg-2); font-variant-numeric: tabular-nums; line-height: 1.2; }
 .cal-progress-bar { display: block; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
 .cal-progress-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--fg); transition: width var(--t-base) var(--ease-out); }
 .cal-progress.complete .cal-progress-text { color: var(--ok); }
@@ -66,12 +66,12 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-blk { display: grid; gap: 6px; min-width: 0; }
 .cal-blk-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-h-touch); padding: 0 2px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); text-align: left; cursor: pointer; }
 /* Hover only where there is a pointer: a tapped head on a phone kept its hover shade after the tap. */
-@media (hover: hover) { .cal-blk-head:hover { background: var(--surface-2); } }
+@media (hover: hover) { .cal-blk-head:hover { background: var(--hover); } }
 .cal-blk-head:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .cal-blk-head > .ic { color: var(--fg-3); transition: transform var(--t-fast); }
 .cal-blk.folded > .cal-blk-head > .ic, .cal-history:not(.open) > .cal-blk-head > .ic { transform: rotate(-90deg); }
 .cal-blk-title { flex: 1; min-width: 0; font-size: var(--fs-13); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cal-blk-kind { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.cal-blk-kind { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 .cal-blk.kind-unknown .cal-blk-title { color: var(--fg-2); font-weight: 600; }
 
 /* A checklist: each row is its checkbox, at least a thumb tall. */
@@ -107,7 +107,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-card + .cal-card { border-top: 1px solid var(--line); }
 .cal-card-hit { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--row-h-touch); padding: 8px 12px; border: 0; background: var(--card); color: var(--fg); text-align: left; cursor: pointer; }
 .cal-card-hit.static { cursor: default; }
-@media (hover: hover) { button.cal-card-hit:hover { background: var(--surface-2); } }
+@media (hover: hover) { button.cal-card-hit:hover { background: var(--hover); } }
 .cal-card-hit:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .cal-card-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
 .cal-card-title { font-size: var(--fs-14); line-height: 1.35; overflow-wrap: anywhere; }
@@ -130,7 +130,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-field dt { font-size: var(--fs-12); color: var(--fg-3); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-field dd { margin: 0; font-size: var(--fs-14); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .cal-field.stale { opacity: .7; border: 1px dashed var(--line-strong); background: none; }
-.cal-stale { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--attention) 16%, transparent); color: var(--attention); font-size: var(--fs-11); font-weight: 600; }
+.cal-stale { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--attention) 16%, transparent); color: var(--attention); font-size: var(--fs-12); font-weight: 600; }
 
 /* Steps: big numbers that are the step's checkbox, and a timer where the step takes time. */
 .cal-steps-view { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: none; }
@@ -168,7 +168,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-history-who { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); }
 .cal-history-who.agent { color: var(--fg); }
 .cal-history-what { color: var(--fg); overflow-wrap: anywhere; }
-.cal-history-list time { font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cal-history-list time { font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* ── agenda rows and day totals ── */
 .cal-agenda-items { display: grid; gap: 4px; min-width: 0; }
@@ -187,7 +187,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-row-icon { justify-self: center; }
 .cal-row-end { display: inline-flex; align-items: center; gap: 8px; justify-self: end; }
 .cal-row-status.done { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
-.cal-row-status.skipped { font-size: var(--fs-11); color: var(--fg-3); }
+.cal-row-status.skipped { font-size: var(--fs-12); color: var(--fg-3); }
 .cal-row.skipped .cal-row-title { text-decoration: line-through; color: var(--fg-3); }
 .cal-row.dense { min-height: var(--row-h-dense); padding-top: 2px; padding-bottom: 2px; }
 .cal-agenda.dense .cal-agenda-day { padding: 6px 0; }
@@ -201,7 +201,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 
 /* The week and the day: a typed block's progress beside its time; a done event goes quiet. */
 .cal-block-progress { font-weight: 600; }
-.cal-chip-progress { flex: none; margin-left: auto; font-size: var(--fs-11); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.cal-chip-progress { flex: none; margin-left: auto; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .cal-block.done:not(.task) { opacity: .62; }
 .cal-mark.done { opacity: .4; }
 
@@ -213,7 +213,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-view.phone .cal-agenda-date { flex-direction: column; align-items: center; gap: 0; }
 .cal-view.phone .cal-agenda-wd { text-align: center; }
 .cal-view.phone .cal-agenda-wd small { display: none; }
-.cal-view.phone .cal-agenda-wd b { font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); }
+.cal-view.phone .cal-agenda-wd b { font-size: var(--fs-12); font-weight: 600; color: var(--fg-3); }
 
 /* ── the header's filter button ── */
 .cal-filter-body { display: grid; gap: 16px; }
@@ -230,7 +230,7 @@ button.cal-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 2
 .cal-grp-toggle { flex: none; }
 .cal-grp-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: var(--row-h-dense); padding: 0 6px 0 2px; border: 0; background: none; color: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 .cal-grp.hidden .cal-grp-open { color: var(--fg-3); }
-.cal-grp-count { margin-left: auto; font-size: var(--fs-11); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cal-grp-count { margin-left: auto; font-size: var(--fs-12); color: var(--fg-3); font-variant-numeric: tabular-nums; }
 .cal-grp-archived { justify-self: start; margin-top: 4px; color: var(--fg-3); }
 .cal-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-2); }
 .cal-bulk-label { font-size: var(--fs-13); font-weight: 600; color: var(--fg-2); }
@@ -267,7 +267,7 @@ input.field.cal-bedit-min { width: 100%; }
 .cal-bedit-cols > .btn, .cal-bedit-table > .btn, .cal-bedit-items > .btn { justify-self: start; }
 .cal-bedit-grid { display: grid; gap: 4px 6px; align-items: center; overflow-x: auto; padding-bottom: 2px; }
 .cal-bedit-row { display: contents; }
-.cal-bedit-th { font-size: var(--fs-11); font-weight: 600; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-bedit-th { font-size: var(--fs-12); font-weight: 600; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-bedit-grid input.field { padding: 5px 8px; font-size: var(--fs-13); min-width: 0; }
 .cal-type-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .cal-type-row > .dropdown { flex: 1 1 160px; max-width: none; }
@@ -287,7 +287,7 @@ input.field.cal-bedit-min { width: 100%; }
 .cal-type-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
 .cal-type-row { align-items: center; }
 button.cal-type-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; width: 100%; min-height: var(--row-h-touch); padding: 6px 8px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--fg); text-align: left; cursor: pointer; border-radius: 0; }
-button.cal-type-row:hover { background: var(--surface-2); }
+button.cal-type-row:hover { background: var(--hover); }
 .cal-type-name { display: grid; gap: 1px; flex: 1; min-width: 0; }
 .cal-type-name b { font-size: var(--fs-14); font-weight: 500; }
 .cal-type-name small { font-size: var(--fs-12); color: var(--fg-3); }

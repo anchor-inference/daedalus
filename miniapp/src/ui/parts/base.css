@@ -54,7 +54,7 @@ a { color: var(--accent); text-decoration: none; }
 .pagehead .sub { font-size: var(--fs-12); color: var(--fg-3); }
 .pagehead-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .pagehead .iconbtn { background: transparent; color: var(--fg-2); }
-.pagehead .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.pagehead .iconbtn:hover { background: var(--hover); color: var(--fg); }
 .pagehead .iconbtn.on { background: var(--surface-3); color: var(--fg); }
 .pagehead .iconbtn.primary { background: var(--primary); color: var(--primary-ink); }
 /* A finger gets no hover to find a target by, so the header's plain icons show the box they are
