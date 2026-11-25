@@ -325,6 +325,8 @@ export const api = {
     call<{ commands: TerminalCommand[] }>("GET", `/api/terminals/${encodeURIComponent(id)}/commands?last=${last}&output=${output ? 1 : 0}`),
   /** A name of the operator's own; an empty one gives the terminal back the title its program sets. */
   renameTerminal: (id: string, title: string) => call<TerminalView>("PATCH", `/api/terminals/${encodeURIComponent(id)}`, { title }),
+  /** Takes the keyboard (`human`: an agent's writes wait) or gives it back (`auto`: they go in at once). */
+  terminalKeyboard: (id: string, owner: "auto" | "human") => call<unknown>("POST", `/api/terminals/${encodeURIComponent(id)}/keyboard`, { owner }),
   /** Forgets an exited or lost terminal; refused (409) while it runs. */
   removeTerminal: (id: string) => call<unknown>("DELETE", `/api/terminals/${encodeURIComponent(id)}`),
   /** One changed file's unified diff, as `GET /api/terminals/{id}/files` listed it. */

@@ -5,6 +5,7 @@
 import type { CSSProperties } from "react";
 import type { TerminalRun, TerminalView } from "../api";
 import { t } from "../i18n";
+import { paneState } from "./status";
 
 /**
  * A run's colour as CSS. The daemon writes 0 for the default colour (left to the card), 1..256 for
@@ -159,6 +160,46 @@ export function ownerPath(row: TerminalView, sessionPath: (id: string) => string
   if (row.owner.kind === "session" && row.owner.id) return sessionPath(row.owner.id);
   if ((row.owner.kind === "staff" || row.owner.kind === "project") && row.project_id) return teamPath(row.project_id);
   return null;
+}
+
+/** Who a terminal belongs to, in as few words as a chip has room for: "chat «Checkout»", "you", "staff Ira", "project «Bakery»". */
+export function ownerWho(row: TerminalView): string {
+  const label = row.owner.label || "";
+  if (row.owner.kind === "session") return t("term.list.chat", { name: label || t("term.card.unnamed") });
+  if (row.owner.kind === "staff") return t("term.card.staff", { name: label || t("term.card.unnamed") });
+  if (row.owner.kind === "project") return t("term.card.project", { name: label || t("term.card.unnamed") });
+  return t("term.list.you");
+}
+
+/**
+ * The list row's owner line: who, and "· host" when the terminal runs on the machine itself rather
+ * than in the container. The card's longer line (`ownerLine`) stays for the phone, which has the width.
+ */
+export function ownerShort(row: TerminalView): string {
+  const who = ownerWho(row);
+  return row.env === "host" ? t("term.list.onhost", { who }) : who;
+}
+
+/**
+ * The middle line of a row: what the terminal is doing in a few words of its own. What an agent waits
+ * for, else what the host says runs in it, else the last command a shell ran, else the folder. A
+ * finished terminal says how its last command ended, so "psql" is not left looking alive.
+ */
+export function rowCommand(row: TerminalView): string {
+  const last = row.last_command?.command || "";
+  if (!running(row)) {
+    const how = row.exit_signal ? t("term.card.signal", { signal: row.exit_signal }) : t("term.card.code", { code: row.exit_code ?? "?" });
+    return last ? `${last} · ${how}` : how;
+  }
+  return row.agent?.waiting_for || row.running || last || row.cwd;
+}
+
+/** The word at a row's right edge: that it waits for the operator, else how long it has been open (or how long ago it ended). */
+export function rowTag(row: TerminalView, now = Date.now()): { text: string; level: "wait" | "stale" | "plain" } {
+  if (!running(row)) return { text: span(row.exited_at || row.last_output_at, now), level: "plain" };
+  if (paneState(row) === "waiting") return { text: t("term.ws.state.waiting"), level: "wait" };
+  const idle = staleFor(row, now);
+  return idle ? { text: idle, level: "stale" } : { text: span(row.created_at, now), level: "plain" };
 }
 
 /** The owner line: "session «Checkout page»", "staff Ira · project «Bakery»", "free · ~/work", "project «Bakery»". */

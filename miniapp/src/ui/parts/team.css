@@ -338,35 +338,8 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .push-nudge { display: block; margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); text-decoration: none; box-shadow: inset 0 0 0 1px var(--line); }
 .push-nudge:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
 
-/* The Terminals screen: cards with the last rows of each screen, grouped by project; the load bar in
-   the header; the full-screen view with its grid of up to four. */
-.pagehead .term-filters { margin: 6px 0 2px; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
-.pagehead .term-filters::-webkit-scrollbar { display: none; }
-.term-new-button .ic { margin-right: 4px; }
-.term-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: var(--space-3); }
-.term-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); overflow: hidden; }
-/* A terminal on the host itself, outside the sandbox, keeps an amber edge besides its lock tag: it is
-   the one card on the page where a command reaches the operator's own machine, and a tag alone was
-   easy to miss in a grid of cards that otherwise look the same. */
-.term-card.host { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); box-shadow: inset 0 2px 0 var(--warn), var(--drop-xs); }
-.term-card.finished { opacity: .66; }
-.term-card-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.term-card-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.term-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 10px 12px 0; }
-.term-card-title { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-13); font-weight: 500; }
-.term-card-head .term-env { margin-right: 0; }
-.term-card-owner { padding: 0 12px 6px; font-size: var(--fs-12); }
-.term-card-preview { margin: 0; height: calc(6 * 1.45em + 16px); padding: 8px 12px; overflow: hidden; background: var(--term-bg); color: var(--fg); font-family: var(--mono); font-size: var(--fs-11); line-height: 1.45; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-/* A line wider than the card ends in an ellipsis: clipped bare, "cd ../daedalus" read as "cd ../daeda",
-   a whole command that was never typed. */
-.term-card-line { white-space: pre; overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
-.term-card-foot { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); padding: 4px 8px 4px 12px; min-width: 0; }
-.term-card-status { flex: 1; min-width: 0; font-size: var(--fs-12); }
-.term-card-status[data-level="warn"] { color: var(--warn); }
-.term-card-status[data-level="bad"] { color: var(--bad); }
-.term-card-foot .btn.small { flex: none; }
-.term-group + .term-group { margin-top: var(--space-2); }
-
+/* The Terminals page's own rules are terminal/workspace.css; what is left here is shared with the
+   picker, the phone and the dock. */
 .term-new-path { display: flex; gap: var(--space-2); align-items: center; }
 .term-new-path .field { flex: 1; min-width: 0; font-family: var(--mono); }
 .term-new-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2); }
@@ -401,24 +374,9 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-pick-sheet .term-pick { padding: 0 var(--space-2) var(--space-3); }
 .term-pick-sheet .term-pick-folder { padding: 0 var(--space-3) var(--space-3); }
 
-/* Clean-up on the Overview: a terminal's End beside Open, the selection, the group's End all, and the
-   question that lists what each one stops. */
-.term-card { position: relative; }
-.term-card.selected { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
-.term-card.stale:not(.selected) { border-style: dashed; }
-.term-card-status[data-level="stale"] { color: var(--warn); }
-.term-card-check { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; padding: 4px; border-radius: var(--radius-xs); }
-.term-card.selecting .term-card-head { padding-left: 36px; }
-.term-card-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
-/* Red words, no red frame: a row of framed red buttons read as an alarm over every card. */
-.term-card-foot .term-card-end { border-color: transparent; }
-.term-card-end .ic { margin-right: 4px; }
-.term-group-title { display: flex; align-items: center; gap: var(--space-2); }
-.term-group-end { margin-left: auto; }
-.term-group-end .ic, .tp-overview .pagehead .btn.small .ic { margin-right: 4px; }
+/* The question that lists what each terminal ended in bulk stops. */
 .pagehead .btn.small .num { margin-left: 4px; color: var(--fg-2); }
 .pagehead .btn[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-strong); }
-.term-select-bar { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0 2px; }
 .term-bulk-list { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; max-height: 40vh; overflow: auto; }
 .term-bulk-list li { overflow-wrap: anywhere; }
 .term-bulk-title { font-family: var(--mono); font-size: var(--fs-13); }

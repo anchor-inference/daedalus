@@ -184,15 +184,12 @@ export function toAddress(ws: Workspace): { detail: string | null; query: Record
   const query: Record<string, string> = { layout: String(ws.layout) };
   if (used) query.panes = ws.panes.map((id) => id ?? "").join(",").replace(/,+$/, "");
   const detail = activeId(ws);
-  if (!detail) query.view = "workspace";
   return { detail, query };
 }
 
 // ── storage ───────────────────────────────────────────────────────────────────────────────────
 
 export const STORAGE_KEY = "daedalus.term.workspace";
-export const VIEW_KEY = "daedalus.term.view";
-export type TerminalsView = "overview" | "workspace";
 
 export function loadWorkspace(): Workspace {
   try {
@@ -209,30 +206,4 @@ export function saveWorkspace(ws: Workspace): void {
   } catch {
     /* remembered for this page only */
   }
-}
-
-export function loadView(): TerminalsView | null {
-  try {
-    const value = localStorage.getItem(VIEW_KEY);
-    return value === "overview" || value === "workspace" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveView(view: TerminalsView): void {
-  try {
-    localStorage.setItem(VIEW_KEY, view);
-  } catch {
-    /* remembered for this page only */
-  }
-}
-
-/**
- * Which view `/app/terminals` opens on: the Workspace when panes are set up, unless the operator
- * chose the Overview last; the Overview when nothing is set up, whatever was chosen, because an
- * empty grid is not a page anyone meant to come back to.
- */
-export function openingView(remembered: TerminalsView | null, ws: Workspace): TerminalsView {
-  return hasPanes(ws) && remembered !== "overview" ? "workspace" : "overview";
 }

@@ -6,14 +6,16 @@
 // is shown in the workspace (focused if a pane already holds it). The address then follows the active
 // pane, written with `replace` so that moving between panes does not fill the history.
 //
-// A desktop draws the grid (terminal/workspace.tsx). A phone, or a touch tablet with no mouse, shows
-// one pane at a time with the phone's keys row and compose line, and a switcher between the panes.
+// A desktop draws the page header, the list of every terminal (terminal/list.tsx) and the grid
+// (terminal/workspace.tsx). A phone, or a touch tablet with no mouse, shows one pane at a time with the
+// phone's keys row and compose line, and a switcher between the panes.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, Project, TerminalEnv, TerminalList, TerminalLoad, TerminalView as TerminalRow } from "../api";
 import { t } from "../i18n";
 import { back, navigate, pathFor } from "../router";
-import { useMedia } from "../ui/index";
+import { PageHeader, screenTitle, useMedia } from "../ui/index";
+import { Button, IconButton } from "../ui/primitives";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 import { endTerminal } from "../terminal/actions";
@@ -25,10 +27,14 @@ import { useEvent } from "../events";
 import { instanceFor, setTerminalEnvs, terminals } from "../terminal/terminals";
 import { PhoneTerminal } from "../terminal/mobile";
 import { TerminalStatusLine } from "../terminal/statusline";
-import { paneTitle, StateDot, TerminalWorkspace, type WorkspaceSlots } from "../terminal/workspace";
+import { LayoutSwitch, paneTitle, StateDot, TerminalWorkspace, type WorkspaceSlots } from "../terminal/workspace";
+import { ListColumn } from "../terminal/list";
+import { PaneHold } from "../terminal/holdline";
+import { headerCounts } from "../terminal/preview";
+import { statusFacts } from "../terminal/statusfacts";
 import { TerminalSidePanel } from "../terminal/sidepanel";
 import { readSide, saveSide, type SidePrefs } from "../terminal/sidestate";
-import { activeId, close, focus, fromAddress, loadWorkspace, place, replace, saveView, saveWorkspace, toAddress, type Workspace } from "../terminal/workspacestate";
+import { activeId, close, focus, fromAddress, loadWorkspace, place, replace, saveWorkspace, setLayout, toAddress, type Workspace } from "../terminal/workspacestate";
 import { StaffPhoneTerminal } from "../project/phone";
 import { FreeTerminalPicker } from "./Terminals";
 import { terminalCommandKey } from "../terminal/keys";
@@ -51,17 +57,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
   useEffect(() => {
     if (list.data?.envs) setTerminalEnvs(list.data.envs);
   }, [list.data]);
-  // Each pane's status line: the agent, the folder and branch, the context, the spend; and over it,
-  // for a staff member's terminal, the line that writes to the member.
-  const slots = useMemo<WorkspaceSlots>(() => {
-    const homes = new Map((list.data?.envs ?? []).map((e) => [e.env, e.home]));
-    return {
-      footer: (pane) => <TerminalStatusLine row={pane.row} state={pane.state} home={pane.row ? homes.get(pane.row.env) : null} />,
-      compose: (pane) => (showsCompose(pane.row) ? <AgentCompose key={pane.id} pane={pane} toast={toast} /> : null),
-    };
-  }, [list.data?.envs, toast]);
-
-  // Another agent's message reached the member in a terminal: its tab and pane say "message" for a
+  // Another agent's message reached the member in a terminal: its pane says "message" for a
   // moment. One timer per terminal, so a second message restarts the moment rather than cutting it.
   const [messaged, setMessaged] = useState<ReadonlySet<string>>(() => new Set());
   const flashes = useRef(new Map<string, number>());
@@ -93,7 +89,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
   });
   const update = useCallback((change: (ws: Workspace) => Workspace) => setWs((current) => change(current)), []);
 
-  // The terminal asked to take the keyboard: the one the address opened, then whatever a tab, Alt+N
+  // The terminal asked to take the keyboard: the one the address opened, then whatever Alt+N
   // or the list chooses (see TerminalWorkspaceProps.focus).
   const current = activeId(ws);
   const [focusAt, setFocusAt] = useState<{ id: string | null; token: number }>(() => ({ id: current, token: 1 }));
@@ -116,9 +112,17 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     if (detail) requestFocus(detail);
   }, [key, address, detail, requestFocus]);
 
+  // Nothing set up is the bare address: it is the one every link to the page uses, and it must stay
+  // that while the page only shows its list. Once a pane is open the address describes the panes.
+  const addressNow = useRef(address);
+  addressNow.current = address;
   useEffect(() => {
     saveWorkspace(ws);
     const target = toAddress(ws);
+    if (!target.detail && !ws.panes.some(Boolean)) {
+      if (addressNow.current.detail || addressNow.current.query.toString()) navigate(pathFor("terminals"), { replace: true });
+      return;
+    }
     navigate(pathFor("terminals", target.detail, target.query), { replace: true });
   }, [ws]);
 
@@ -219,11 +223,6 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     invalidate("/api/terminals");
   };
 
-  const overview = () => {
-    saveView("overview");
-    navigate(pathFor("terminals", null, { view: "overview" }));
-  };
-
   const sheet = picking ? <FreeTerminalPicker envs={envs} lens={lens} projects={projects} toast={toast} anchor={picking.anchor} phone={!wide} onClose={() => setPicking(null)} /> : null;
 
   if (!wide) {
@@ -231,7 +230,7 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     const shownId = current ?? filled[0]?.id ?? null;
     if (!shownId) {
       // Nothing to show: the phone's list of terminals is one Back away, as it is from any terminal.
-      return <div className="screen"><div className="empty"><b>{t("term.ws.empty.title")}</b><button className="btn primary" onClick={overview}>{t("term.ws.view.overview")}</button></div></div>;
+      return <div className="screen"><div className="empty"><b>{t("term.ws.empty.title")}</b><button className="btn primary" onClick={() => navigate(pathFor("terminals"))}>{t("term.screen.back")}</button></div></div>;
     }
     const row = byId.get(shownId) ?? null;
     const switcher = filled.length > 1 ? (
@@ -262,37 +261,87 @@ export function TerminalWorkspaceScreen({ detail, query, toast, project, project
     return row?.owner.kind === "staff" && row.owner.id ? <StaffPhoneTerminal key={shownId} staffId={row.owner.id} projectId={row.project_id} {...phone} /> : <PhoneTerminal key={shownId} {...phone} />;
   }
 
+  // What the page says about each pane, once the host has told it where the terminal runs: the folder
+  // and branch go in the header, and the foot says who types and keeps the rest of the status line.
+  const homes = new Map(envs.map((e) => [e.env, e.home]));
+  const slots: WorkspaceSlots = {
+    where: (pane) => {
+      const facts = statusFacts(pane.row, pane.state, pane.row ? homes.get(pane.row.env) : null);
+      if (!facts.path && !facts.branch) return null;
+      return (
+        <span className="tp-pane-cwd" title={facts.path?.full}>
+          {facts.path && <span className="tp-pane-path truncate">{facts.path.short}</span>}
+          {facts.branch && <span className="tp-pane-branch truncate">{facts.branch.name}{facts.branch.dirty ? "*" : ""}</span>}
+        </span>
+      );
+    },
+    footer: (pane) => (
+      <>
+        {pane.active && <PaneHold row={pane.row} state={pane.state} onRestart={() => pane.id && void restart(pane.id)} toast={toast} />}
+        <TerminalStatusLine row={pane.row} state={pane.state} home={pane.row ? homes.get(pane.row.env) : null} />
+      </>
+    ),
+    compose: (pane) => (showsCompose(pane.row) ? <AgentCompose key={pane.id} pane={pane} toast={toast} /> : null),
+    side: side.open ? (
+      <TerminalSidePanel ws={ws} update={update} rows={rows} states={states} prefs={side} onPrefs={setSide} onOpen={open} onFocusRequest={requestFocus} toast={toast} />
+    ) : undefined,
+  };
+
+  const counts = headerCounts(rows);
+  const waiting = rows.filter((r) => paneState(r, states[r.id]) === "waiting");
+  const nothing = !!list.data && rows.length === 0;
+
   return (
-    <>
-      <TerminalWorkspace
-        ws={ws}
-        update={update}
-        rows={rows}
-        projects={projects}
-        load={load.data ?? null}
-        states={states}
-        onState={onState}
-        focus={focusAt}
-        onFocusRequest={requestFocus}
-        onOpen={open}
-        onRestart={(id) => void restart(id)}
-        onRemove={(id) => void remove(id)}
-        onEnd={(id) => void end(id)}
-        onCloseTerminal={(id) => void closeTerminal(id)}
-        onRename={(id, title) => void rename(id, title)}
-        onNew={(anchor) => setPicking({ anchor })}
-        onOverview={overview}
-        toast={toast}
-        messaged={messaged}
-        slots={{
-          ...slots,
-          panel: { open: side.open, onToggle: () => setSide((p) => ({ ...p, open: !p.open })) },
-          side: side.open ? (
-            <TerminalSidePanel ws={ws} update={update} rows={rows} states={states} prefs={side} onPrefs={setSide} onOpen={open} onFocusRequest={requestFocus} toast={toast} />
-          ) : undefined,
-        }}
+    <div className="tp tp-ws" data-layout={ws.layout}>
+      <PageHeader
+        title={screenTitle("terminals")}
+        subtitle={list.data ? t("term.screen.counts", counts) : undefined}
+        ruled
+        filters={waiting.length > 0 ? (
+          <button type="button" className="tp-waiting" onClick={() => open(waiting[0].id)} title={waiting.map((r) => r.title).join(", ")}>
+            <StateDot status="waiting" />
+            <span>{t("term.ws.waiting", { n: waiting.length })}</span>
+          </button>
+        ) : undefined}
+        actions={
+          <>
+            <IconButton icon="panel" label={t("term.ws.panel")} pressed={side.open} className="tp-panel-toggle" onClick={() => setSide((p) => ({ ...p, open: !p.open }))} />
+            <LayoutSwitch layout={ws.layout} onChange={(layout) => update((w) => setLayout(w, layout))} />
+            <Button variant="primary" icon="plus" className="tp-new term-new-button" disabled={!!list.data && !envs.some((e) => e.available)} aria-haspopup="menu" aria-expanded={!!picking}
+              onClick={(e) => setPicking({ anchor: e.currentTarget })}>{t("term.new")}</Button>
+          </>
+        }
       />
+      <div className="tp-body">
+        <ListColumn rows={rows} states={states} ws={ws} projects={projects} load={load.data ?? null} onOpen={open} toast={toast} />
+        {nothing ? (
+          <div className="tp-nothing">
+            <b>{t("term.screen.empty")}</b>
+            <div className="sub">{t("term.screen.empty.sub")}</div>
+          </div>
+        ) : (
+          <TerminalWorkspace
+            ws={ws}
+            update={update}
+            rows={rows}
+            states={states}
+            onState={onState}
+            focus={focusAt}
+            onFocusRequest={requestFocus}
+            onOpen={open}
+            onRestart={(id) => void restart(id)}
+            onRemove={(id) => void remove(id)}
+            onEnd={(id) => void end(id)}
+            onCloseTerminal={(id) => void closeTerminal(id)}
+            onRename={(id, title) => void rename(id, title)}
+            onNew={(anchor) => setPicking({ anchor })}
+            toast={toast}
+            messaged={messaged}
+            slots={slots}
+          />
+        )}
+      </div>
       {sheet}
-    </>
+    </div>
   );
 }
