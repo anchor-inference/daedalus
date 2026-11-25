@@ -79,7 +79,7 @@
    touch screen always, since there is no hover to find it by. */
 .event-line.answerable { grid-template-columns: auto minmax(0, 1fr) auto; }
 .event-reply.iconbtn.small { width: 22px; height: 22px; align-self: center; background: transparent; color: var(--fg-3); }
-.event-reply.iconbtn.small:hover { background: var(--surface-2); color: var(--fg); }
+.event-reply.iconbtn.small:hover { background: var(--hover); color: var(--fg); }
 @media (hover: hover) {
   .event-reply { opacity: 0; transition: opacity var(--t-fast); }
   .event-line:hover .event-reply, .event-reply:focus-visible { opacity: 1; }
@@ -118,7 +118,7 @@
 .msg-quote:hover { color: var(--fg); }
 
 /* What became of an operator's message: small print under it, on its side of the chat. */
-.msg-fate { list-style: none; margin: 0 4px 0 0; padding: 0; display: grid; gap: 1px; justify-items: end; max-width: 100%; font-size: var(--fs-11); line-height: var(--lh-ui); color: var(--fg-3); }
+.msg-fate { list-style: none; margin: 0 4px 0 0; padding: 0; display: grid; gap: 1px; justify-items: end; max-width: 100%; font-size: var(--fs-12); line-height: var(--lh-ui); color: var(--fg-3); }
 .fate-line { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0 6px; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 .fate-line.arrival { color: var(--info); }
 .fate-line.read svg { color: var(--ok); margin-right: 2px; }
@@ -146,10 +146,6 @@
 .goal-strip.attn .goal-line { border-color: color-mix(in srgb, var(--attention) 40%, var(--line)); }
 .goal-strip.attn .goal-line > .ic:first-child { color: var(--attention); }
 .goal-primary > .btn { min-height: 36px; }
-.goal-counts { flex: 1; min-width: 0; display: flex; gap: 12px; overflow: hidden; white-space: nowrap; }
-.goal-count { flex: none; }
-.goal-count.decisions, .goal-count.waiting_for_you { color: var(--warn); }
-.goal-count-short { display: none; }
 .goal-chev { flex: none; display: inline-flex; color: var(--fg-3); transform: rotate(180deg); transition: transform var(--t-fast); }
 .goal-strip.open .goal-chev { transform: none; }
 .goal-list { display: grid; gap: 16px; max-height: min(50vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--shadow-md); min-width: 0; }
@@ -165,10 +161,10 @@
 .goal-item.linked:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
-.goal-status, .goal-age { flex: none; font-size: var(--fs-11); color: var(--fg-3); }
+.goal-status, .goal-age { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
 .goal-item-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
 .goal-owner.unowned { color: var(--warn); }
-.goal-accept { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-3); font-size: var(--fs-11); }
+.goal-accept { flex: none; padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-3); font-size: var(--fs-12); }
 .goal-accept.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .goal-accept.attn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .goal-next { color: var(--warn); overflow-wrap: anywhere; min-width: 0; }
@@ -179,20 +175,15 @@
    count hidden. Measured on the strip rather than the window, since a desk with the panel open
    leaves the conversation a phone's width too. */
 @container goal (max-width: 640px) {
-  .goal-line { gap: 6px; font-size: var(--fs-11); }
+  .goal-line { gap: 6px; font-size: var(--fs-12); }
   .goal-line > svg { display: none; }
-  .goal-counts { gap: 8px; }
-  .goal-count-long { display: none; }
-  .goal-count-short { display: inline; }
 }
 @container goal (max-width: 390px) {
   .goal-primary { flex-wrap: wrap; }
   .goal-next-action { min-height: var(--row-h-touch); }
 }
-.event-time { color: var(--fg-3); font-size: var(--fs-11); font-family: var(--mono); }
+.event-time { color: var(--fg-3); font-size: var(--fs-12); font-family: var(--mono); }
 .event-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-/* The questions an orchestrator's turn put to the operator, under its worked group. */
-.step-asks { display: grid; gap: 6px; margin: 2px 0 8px; }
 
 /* The panel beside the orchestrator: the board drawn as one list inside it. */
 .pboard-bar { display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; }
@@ -314,10 +305,6 @@
 /* The first thing a new project shows: centred in the free height, not pinned under the header with
    the rest of a desktop screen left empty below it, which read as a page that had not finished. */
 .focus-enable { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-height: 0; padding-bottom: 8vh; }
-.autonomy-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); cursor: pointer; }
-.autonomy-option.on { border-color: var(--fg); }
-.autonomy-option input { margin-top: 3px; }
-.autonomy-text { display: grid; gap: 2px; min-width: 0; }
 .form-hint { margin: 4px 0 2px; font-size: var(--fs-12); }
 .focus-cost { margin: 12px 0 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); }
 
@@ -402,7 +389,7 @@
 .term-phone-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .term-phone-title { display: flex; align-items: center; gap: 4px; min-width: 0; font-family: var(--mono); font-size: var(--fs-13); font-weight: 600; }
 .term-phone-title .ic { flex: none; color: var(--fg-3); }
-.term-phone-cwd { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.term-phone-cwd { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 /* The page never zooms here: two fingers set the terminal's font instead. */
 .term-phone-screen { flex: 1; min-height: 0; display: flex; overflow: hidden; touch-action: pan-y; }
 .term-phone-zoom { flex: 1; min-width: 0; min-height: 0; display: flex; }
@@ -450,45 +437,16 @@
 .app.project-phone .main.chat-open .composer { padding-bottom: 10px; }
 :root[data-keyboard="open"] .app.project-phone .composer { padding-bottom: 6px; }
 .pagehead .term-env { margin-right: 2px; flex: none; }
-.needs-banner { display: grid; gap: var(--space-2); margin: var(--space-2) 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.chat > .needs-banner { flex: none; margin: var(--space-2) 10px 0; }
-.phone-board > .needs-banner { margin: var(--space-2) 12px 0; }
-.needs-banner-head { display: flex; align-items: center; gap: 6px; color: var(--warn); font-size: var(--fs-12); font-weight: 500; }
-.needs-banner-more, .needs-banner-when { color: var(--fg-3); font-weight: 400; }
-.needs-banner-text { font-size: var(--fs-14); line-height: var(--lh-ui); overflow-wrap: anywhere; }
 .ask-answers-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .ask-answers-row .btn { flex: 1 1 auto; justify-content: center; min-height: var(--row-h-touch); }
 .ask-answers-own { display: flex; align-items: center; gap: var(--space-2); }
 .ask-answers-own .field { flex: 1; min-width: 0; min-height: var(--row-h-touch); margin: 0; }
 .ask-answers-own .btn { min-height: var(--row-h-touch); }
 .ask-answers-write { background: transparent; border-style: dashed; border-color: var(--line-strong); color: var(--fg-2); }
-.phone-staff { display: grid; }
-.phone-staff-item { display: flex; align-items: center; gap: 2px; min-width: 0; border-bottom: 1px solid var(--line); }
-.phone-staff-row { flex: 1; display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-3)); padding: 6px 4px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-.phone-staff-edit { background: transparent; color: var(--fg-3); }
-.phone-staff-row:active { background: var(--surface-1); }
-.phone-staff-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.phone-staff-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
-.phone-staff-name > .truncate { flex: 0 1 auto; min-width: 0; }
 /* The name is who the row is: the role gives way first. Both shrinking alike cut "Cleo" to "C…" and
    "langpt" to "l." beside a long role; the cap keeps a very long name from taking the whole line. */
-.phone-staff-name > .truncate:first-child { flex: 0 0 auto; max-width: 60%; }
-.phone-staff-role { color: var(--fg-2); font-size: var(--fs-12); font-weight: 400; }
-.phone-staff-name .harness-badge, .phone-staff-name .term-env { flex: none; margin-right: 0; }
-.phone-staff-line { color: var(--fg-3); font-size: var(--fs-12); }
-.phone-staff-line.waits { color: var(--warn); }
-.phone-terms { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
 .phone-term-row { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
-.phone-term-row > .phone-term { flex: 1; }
 .term-rename { display: grid; gap: var(--space-2); }
-.phone-term { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: calc(var(--row-h-touch) + var(--space-2)); padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); }
-.phone-term > .ic { flex: none; color: var(--fg-3); }
-.phone-term.host > .ic { color: var(--warn); }
-.phone-term.ended { opacity: .66; }
-.phone-term-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.phone-term-title { font-family: var(--mono); font-size: var(--fs-13); font-weight: 500; }
-.phone-term-line { color: var(--fg-3); font-size: var(--fs-12); }
-.phone-term .term-env { margin-right: 0; }
 
 /* Spend where the work is: words under the project's name, a line in each team row, the totals over the journal. */
 .staff-spend { color: var(--fg-2); }
@@ -503,7 +461,7 @@
 /* On a phone: a project on a phone: the request card, the setup card, Needs decision, the terminals page and its full-screen terminal. */
 @media (max-width: 1023px) {
   /* Terminals: one capacity line, cards with the screen's last rows, the sheets */
-  .ph-cap { flex: none; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: var(--tap); padding: 4px var(--gutter) 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .ph-cap { flex: none; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: var(--row-h-touch); padding: 4px var(--gutter) 10px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .ph-cap-l { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-13); color: var(--fg-3); }
   .ph-cap-l > .ic:last-child { margin-left: auto; color: var(--fg-3); }
   .ph-cap[data-level="warn"] .ph-cap-l { color: var(--warn); } .ph-cap[data-level="bad"] .ph-cap-l { color: var(--bad); }
@@ -539,15 +497,15 @@
   .ph-tcard-sb { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-tcard-term { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); box-shadow: var(--shadow-ring); background: var(--term-bg, #000); font-family: var(--mono); font-size: var(--fs-12); line-height: 1.45; white-space: pre; overflow: hidden; }
   .ph-tcard-term > div { overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
-  .ph-tcard-ft { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 0 8px 0 14px; font-size: var(--fs-13); color: var(--fg-2); }
+  .ph-tcard-ft { display: flex; align-items: center; gap: 8px; min-height: var(--row-h-touch); padding: 0 8px 0 14px; font-size: var(--fs-13); color: var(--fg-2); }
   .ph-tcard-st { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .ph-tcard-st[data-level="warn"] { color: var(--warn); } .ph-tcard-st[data-level="bad"] { color: var(--bad); }
   .ph-terms .ph-page-pad { padding-bottom: var(--space-1); }
   .ph-ask { display: flex; flex-direction: column; gap: var(--space-2); }
   .ph-ask-row { display: flex; gap: var(--space-2); }
   .ph-ask-wide { width: 100%; }
-  .ph-ask .btn, .ph-ask-own .btn { min-height: var(--tap); }
-  .ph-ask-own .field { min-height: var(--tap); font-size: var(--fs-16); }
+  .ph-ask .btn, .ph-ask-own .btn { min-height: var(--row-h-touch); }
+  .ph-ask-own .field { min-height: var(--row-h-touch); font-size: var(--fs-16); }
   .ph-ask-note { font-size: var(--fs-13); color: var(--warn); }
   .ph-ask-own { display: flex; flex-direction: column; gap: var(--space-2); }
   /* The full-screen terminal: the page's bar (back, the title in the terminal's face over where it
@@ -556,7 +514,7 @@
      every row the keyboard leaves. */
   .term-phone { background: var(--term-bg, var(--bg)); }
   .term-phone-head { min-height: var(--top-h); padding: 0 var(--space-1); gap: 0; border: 0; background: var(--bg); }
-  .term-phone-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .term-phone-head .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; }
   .term-phone-head .iconbtn:disabled { opacity: .35; }
   .term-phone-titles { padding: 0 var(--space-2); }
   .term-phone-title { font-size: var(--fs-14); font-weight: 500; }
@@ -602,28 +560,28 @@
   .needs-card.answered .needs-text { color: var(--fg-2); }
   .needs-code { display: block; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg); font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
   .needs-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-  .needs-card .btn { min-height: var(--tap); padding: 0 var(--space-4); }
+  .needs-card .btn { min-height: var(--row-h-touch); padding: 0 var(--space-4); }
   /* An option is read whole: on a narrower phone it takes a second line inside its button rather than
      losing its end to an ellipsis, which hid the word that told two options apart. */
   .needs-row .btn.grow { flex: 1 1 auto; height: auto; padding: 6px 14px; white-space: normal; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
   .needs-links { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: -4px 0 -8px -8px; }
   .needs-links .btn { color: var(--fg-2); font-weight: 400; }
-  .needs-pen { flex: none; width: var(--tap); height: var(--tap); color: var(--fg-2); }
-  .needs-held { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: var(--space-2); height: var(--tap); padding: 0 var(--space-4); border-radius: 12px; box-shadow: inset 0 0 0 1.5px var(--fg); font-size: var(--fs-14); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .needs-pen { flex: none; width: var(--row-h-touch); height: var(--row-h-touch); color: var(--fg-2); }
+  .needs-held { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: var(--space-2); height: var(--row-h-touch); padding: 0 var(--space-4); border-radius: 12px; box-shadow: inset 0 0 0 1.5px var(--fg); font-size: var(--fs-14); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .needs-held .ic { flex: none; }
   .needs-note { display: flex; align-items: flex-start; gap: var(--space-2); padding: 10px 12px; border-radius: 12px; font-size: var(--fs-14); line-height: 1.4; }
   .needs-note .ic { flex: none; margin-top: 2px; }
   .needs-note.bad { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--fg); } .needs-note.bad .ic { color: var(--bad); }
   .needs-note.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
   .needs-own { display: flex; align-items: center; gap: var(--space-2); }
-  .needs-own .iconbtn { width: var(--tap); height: var(--tap); }
-  .needs-own .field { flex: 1; min-width: 0; height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); padding: 0 14px; font-size: var(--fs-16); }
+  .needs-own .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); }
+  .needs-own .field { flex: 1; min-width: 0; height: var(--row-h-touch); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); padding: 0 14px; font-size: var(--fs-16); }
   /* A project still being set up: the steps done and left, and the button that ends it. */
   .setup-card { flex: none; margin: var(--space-2) var(--gutter); padding: 16px 14px 14px; border-radius: var(--radius-md); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); }
   .setup-card h3 { margin: 0; font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
   .setup-card p { margin: 4px 0 6px; font-size: var(--fs-14); color: var(--fg-2); }
   .setup-card ul { list-style: none; margin: 0 0 var(--space-3); padding: 0; }
-  .setup-card li > button, .setup-step { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--tap); padding: 0; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
+  .setup-card li > button, .setup-step { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--row-h-touch); padding: 0; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
   .setup-card li > button > .ic { margin-left: auto; color: var(--fg-3); }
   .setup-card li.done .setup-step { color: var(--fg-2); }
   .setup-mark { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); color: var(--primary-ink); }
@@ -634,7 +592,7 @@
   .ph-card-head b { flex: 1; min-width: 0; font-weight: 600; letter-spacing: -0.01em; }
   .ph-card p { margin: 6px 0 12px; font-size: var(--fs-14); line-height: 1.4; color: var(--fg-2); overflow-wrap: anywhere; }
   .ph-card .waiting { color: var(--warn); }
-  .ph-card .btn { min-height: var(--tap); }
+  .ph-card .btn { min-height: var(--row-h-touch); }
   .ph-attention .ph-page-pad { padding-top: var(--space-2); }
   /* An empty or failed list puts its state in the middle of the page, not under the bar. */
   .ph-board .ph-page-body.list:has(> .ph-empty), .ph-attention .ph-page-body.list:has(> .ph-empty) { display: flex; flex-direction: column; }

@@ -23,26 +23,14 @@
 .change-problem { color: var(--warn); }
 .change-actions { display: flex; gap: 8px; flex: none; }
 .main.chat-open .change-strip { flex: none; }
-.nudge-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; min-height: 28px; padding: 4px 12px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
-.nudge-strip a { color: var(--fg); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
-.main.chat-open .nudge-strip { flex: none; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
 .erow-meta > .mono:not(:first-child) { flex: 0 1 auto; }
-/* The model is the part of a row's state line that gives way, with an ellipsis: held at its width
-   by the rule above, it was cut flush against the row's menu — "DeepSee" with nothing to say so. */
-.erow-meta > span.erow-model { flex: 0 1 auto; }
 .mrow-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); align-items: center; }
 .provider-limit { margin-top: 10px; padding: 8px 0; border-top: 1px solid var(--line); line-height: 1.4; }
 .provider-limit .btn, .provider-limit .linkbtn { margin-left: 8px; }
 @media (max-width: 480px) { .kpi-grid > .kpi:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 
-/* ── files the agent sent, attached under the answer ───────────────────────────────────── */
-.sent-files { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin-top: 8px; }
-.sent-file.image { margin: 0; display: flex; flex-direction: column; gap: 4px; max-width: min(100%, 420px); }
-.sent-file.image .tool-image { max-height: 320px; }
-.sent-file.file-chip { max-width: 100%; min-height: var(--row-h); }
-.sent-file .truncate { max-width: 260px; }
 
 /* ── voice: the call, what was said, and the agents it started ──────────────────────────── */
 /* This page is looked at sideways by someone who is talking, so what it has to say it says in
@@ -55,7 +43,7 @@
    browser will not make a sound, an engine failed to load), grey for everything else. The :root rule
    for prefers-reduced-motion takes every animation below away; the colours and the words still
    tell the states apart, which is why none of them is drawn by motion alone. */
-.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-11); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
+.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
 
 /* The page is the area under its header and nothing scrolls but what is inside it: the transcript
    in its own box, the stage when the window is too short for it, the agents beside them. The page

@@ -2,8 +2,7 @@
 
 The sidebar draws every project as one row with a square tile, and the companion's with its face on its tile. The
 row opens the list of voice conversations where it stands, as every project row does; the voice page
-itself is the first thing the row's menu (and its right click) offers after a new chat, and the rail's
-mic is the other way there. With one voice conversation the row still opens to show it.
+itself is the first thing the row's menu (and its right click) offers after a new chat. With one voice conversation the row still opens to show it.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 8203 /tmp/app-root &

@@ -3,7 +3,7 @@
 // head, the model and the project where a chat picks them, and the rare choices (a private chat, an
 // own directory, a folder of the project, a loop, tools) under its +. A separate window used to ask
 // the same things again.
-// On a phone it is the home of the redesign: the composer at the bottom, the model in the title and
+// On a phone it is the home page: the composer at the bottom, the model in the title and
 // only the live chats above it; the full list is the Chats page (Chats.tsx), at ?view=chats.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,7 @@ import { agentName, isProject, kindOf } from "../grouping";
 import { relTime, shortModel, untilShort } from "../format";
 import { ToolPicker, fmtInterval, statusWord } from "../ui/components";
 import { screenTitle, useMedia } from "../ui/index";
-import { Banner, SectionHeader } from "../ui/primitives";
+import { Banner, SectionHeader, Select } from "../ui/primitives";
 import { TopBar } from "../shell";
 import { IconButton, MenuRow, Row } from "../ui/primitives";
 import { AccessSelect } from "../toggles";
@@ -546,10 +546,8 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
       <label className="field" htmlFor="start-loop-text">{t("newagent.loop.label")}</label>
       <textarea id="start-loop-text" className="field" rows={2} value={extra.loop.text} onChange={(e) => editLoop({ text: e.target.value })} placeholder={t("newagent.loop.placeholder")} />
       <div className="start-agent-loop-row">
-        <select className="field" value={extra.loop.mode} aria-label={t("newagent.loop")} onChange={(e) => editLoop({ mode: e.target.value as "interval" | "dynamic" })}>
-          <option value="interval">{t("newagent.loop.interval")}</option>
-          <option value="dynamic">{t("loop.selfpaced")}</option>
-        </select>
+        <Select size="md" className="start-loop-mode" label={t("newagent.loop")} value={extra.loop.mode} onChange={(mode) => editLoop({ mode })}
+          options={[{ id: "interval" as const, label: t("newagent.loop.interval") }, { id: "dynamic" as const, label: t("loop.selfpaced") }]} />
         {extra.loop.mode === "interval" && <input className="field" type="number" min={1} value={extra.loop.minutes} onChange={(e) => editLoop({ minutes: e.target.value })} aria-label={t("newagent.loop.minutes")} />}
         <input className="field" type="number" min={1} placeholder={t("newagent.loop.max")} value={extra.loop.max} onChange={(e) => editLoop({ max: e.target.value })} aria-label={t("newagent.loop.max")} />
       </div>

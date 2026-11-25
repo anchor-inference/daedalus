@@ -549,17 +549,20 @@ BOARD_HISTORY = {
         {"seq": 1, "type": "task.created", "at": ago(hours=2), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": None, "to": None, "text": "Created in todo"},
         {"seq": 2, "type": "task.changed", "at": ago(hours=2), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Due", "due_at": BOARD[0]["due_at"]},
         {"seq": 3, "type": "task.moved", "at": ago(minutes=40), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": "todo", "to": "doing", "text": "todo → doing"},
-        {"seq": 4, "type": "task.changed", "at": ago(minutes=20), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": None, "to": None, "text": "Edited"},
+        {"seq": 4, "type": "task.changed", "at": ago(minutes=20), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Priority P3 → P2", "field": "priority", "change": {"from": 3, "to": 2}},
     ],
     "9d0b12": [
         {"seq": 11, "type": "task.created", "at": ago(hours=5), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Created in todo"},
         {"seq": 12, "type": "task.moved", "at": ago(hours=4), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": "todo", "to": "blocked", "text": "todo → blocked"},
         {"seq": 13, "type": "task.changed", "at": ago(hours=1), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Edited"},
     ],
-    # An old card: its creation is older than the week the host keeps, so the list starts later.
-    "51c8aa": [],
+    # A card older than the host's history table: its lines were rebuilt from what the card still
+    # carried, the creation without its column, and the pane says that earlier history was not recorded.
+    "51c8aa": [
+        {"seq": 21, "type": "task.created", "at": ago(days=12), "actor": {"kind": "system", "id": None, "name": None}, "from": None, "to": None, "text": "Created", "operation": None, "backfilled": True},
+        {"seq": 22, "type": "task.accepted", "at": ago(minutes=12), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Result accepted", "operation": None, "backfilled": True},
+    ],
 }
-# A card created more than a week ago, so its pane says the earliest history is gone.
 BOARD[5]["created_at"] = ago(days=12)
 
 
@@ -1109,7 +1112,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
         if card is not None:
             kept = BOARD_HISTORY.get(card["id"])
-            return respond(route, kept if kept is not None else [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": f"Created in {card['status']}"}])
+            return respond(route, kept if kept is not None else [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": card["status"], "text": f"Created in {card['status']}"}])
     if request.method == "PUT" and rel.startswith("/api/board/"):
         # The host's word on a move, nothing stored: a card the operator keeps cannot start while what it
         # waits for is unfinished, which is the refusal the pictures show.
@@ -2368,7 +2371,7 @@ def run_focus() -> int:
         pid = focus.projects[0]["id"]
         shot(page, "project-focus", f"project/{pid}?panel=board", wait=".chat.in-project .event-card", before=open_focus_brief, settle=700)
         shot(page, "project-journal", f"project/{pid}/journal", wait=".journal-entry", settle=500)
-        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-head", settle=700)
+        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-who", settle=700)
         asking = FocusStub.bakery(LANG)
         asking.questions_of_bakery(LANG)
         page = desk.new_page()

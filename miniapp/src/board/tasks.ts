@@ -44,15 +44,26 @@ export type BoardTask = {
   overdue?: boolean;
 };
 
-/** One line of a card's history, as `GET /api/board/{id}/events` lists it, oldest first. */
+/** One line of a card's history, as `GET /api/board/{id}/events` lists it, oldest first. The host keeps
+ *  every change in a table of its own; a line marked `backfilled` was rebuilt when that table was made,
+ *  from what was left of the card then, so what came before it is not all there. */
 export type TaskEvent = {
   seq: number;
   type: string;
   at: string;
   actor: { kind: string; id: string | null; name: string | null };
+  /** The column before and after, for a creation or a move; a rebuilt creation's column is unknown (null). */
   from: string | null;
   to: string | null;
   text: string;
+  /** The command that made the change (`board.task.close`, `staff.report` …); null for the system's own. */
+  operation?: string | null;
+  backfilled?: boolean;
+  /** Which field a `task.changed` line is about, with its old and new value for a title or a priority. */
+  field?: "title" | "priority" | "due_at";
+  change?: { from: unknown; to: unknown };
+  /** The card whose closing or acceptance moved this one, for a dependent that was waiting on it. */
+  cause?: { task_id: string; title: string | null };
   assignee?: { kind: "operator" } | { kind: "staff"; id: string; name: string | null } | null;
   due_at?: string | null;
 };
@@ -177,20 +188,30 @@ export const byUrgency = (a: BoardTask, b: BoardTask) => a.priority - b.priority
 /** One history line in the reader's language, from the event's fields rather than the host's English. */
 export function eventText(event: TaskEvent): string {
   const column = (status: string | null) => (status && ["todo", "doing", "review", "done", "blocked", "dropped"].includes(status) ? columnLabel(status as Status) : status ?? "?");
+  const priority = (value: unknown) => (typeof value === "number" && value >= 1 && value <= 5 ? t(`board.priority.${value}`) : String(value ?? "?"));
   switch (event.type) {
-    case "task.created": return t("board.event.created", { column: column(event.to ?? "todo") });
+    // A creation rebuilt from an old card does not know its column, and saying "To do" would be a guess.
+    case "task.created": return event.to ? t("board.event.created", { column: column(event.to) }) : t("board.event.createdBare");
     case "task.moved": return t("board.event.moved", { from: column(event.from), to: column(event.to) });
     case "task.assigned":
       if (!event.assignee) return t("board.event.unassigned");
       return event.assignee.kind === "operator" ? t("board.event.kept") : t("board.event.assigned", { name: event.assignee.name ?? t("board.event.member") });
     case "task.accepted": return t("board.event.accepted");
-    case "task.merge_failed": return t("board.event.mergeFailed");
-    case "task.ci_failed": return t("board.event.ciFailed");
-    case "task.launch_waiting": return t("board.event.launchWaiting");
+    case "task.removed": return t("board.event.removed");
+    case "task.restored": return t("board.event.restored");
     default:
-      if ("due_at" in event) return event.due_at ? t("board.event.due", { date: dueLabel(event.due_at) }) : t("board.event.dueCleared");
+      if (event.field === "title") return t("board.event.titled", { title: String(event.change?.to ?? "") });
+      if (event.field === "priority") return t("board.event.prioritised", { from: priority(event.change?.from), to: priority(event.change?.to) });
+      if (event.field === "due_at" || "due_at" in event) return event.due_at ? t("board.event.due", { date: dueLabel(event.due_at) }) : t("board.event.dueCleared");
       return t("board.event.changed");
   }
+}
+
+/** Why a dependent moved: the card it waited on was closed by hand or its result was accepted. */
+export function eventCause(event: TaskEvent): string {
+  if (!event.cause) return "";
+  const title = event.cause.title ?? t("board.event.cause.unnamed");
+  return event.operation?.endsWith(".close") ? t("board.event.cause.closed", { title }) : t("board.event.cause.finished", { title });
 }
 
 /** Who did it, when the event names a chat: "in Menu planning". */

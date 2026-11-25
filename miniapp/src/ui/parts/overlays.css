@@ -50,7 +50,6 @@
 .menu button[data-popup-open] { background: var(--selected); }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; flex: none; }
 .menu-group { padding: 8px 10px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.menu-heading { padding: 6px 10px 2px; }
 /* A checkbox item sets how the items below it act; its box sits at the row's end, like a setting's. */
 .menu .menu-check { margin-left:auto; flex:none; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px var(--line-strong); border-radius:4px; }
 .menu .menu-check.on { background:var(--accent); color:var(--accent-ink); box-shadow:none; }
@@ -67,7 +66,6 @@ button.menu-row:hover { background:var(--hover); }
 .menu-row-t { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .menu-row-sub { font-size:var(--fs-12); color:var(--fg-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .menu-row-aside { flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-12); color:var(--fg-3); }
-.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
 .menu-row-kbd { margin-left:auto; }
 .menu-row-check { flex:none; width:16px; display:inline-flex; color:var(--accent); }
 .menu-row-chev { flex:none; display:inline-flex; color:var(--fg-3); }
@@ -218,7 +216,7 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
 .notice-toasts.banner .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
 .notice-toasts.banner .notice-actions .btn.danger { color: var(--bad); }
 .notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; box-shadow: none; }
-.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
+.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--row-h-touch); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
 
 /* On a phone: sheets, their rows and contents, and the confirmation dialog. */
 @media (max-width: 1023px) {
@@ -231,9 +229,9 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
   .sheet .grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line-strong); margin: 8px auto 4px; flex: none; }
   /* flex: none because the sheet is a column with a max height: a long body made the head shrink to its
      min-height, and the model sheet's subtitle, wrapped onto a second line, slid under the search field. */
-  .sheet-head { flex: none; min-height: var(--tap); margin: 0 -8px 0 0; padding: 0 0 var(--space-1); gap: var(--space-2); }
+  .sheet-head { flex: none; min-height: var(--row-h-touch); margin: 0 -8px 0 0; padding: 0 0 var(--space-1); gap: var(--space-2); }
   .sheet-head h3, .sheet h3 { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; }
-  .sheet-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; color: var(--fg-2); }
+  .sheet-head .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; background: none; color: var(--fg-2); }
   .sheet.full { border-radius: 0; }
   :is(.sheet.ph-sheet, .sheet.menu-sheet) { padding-left: 0; padding-right: 0; }
   :is(.sheet.ph-sheet, .sheet.menu-sheet) .sheet-head { margin: 0; padding: 0 var(--space-2) var(--space-1) var(--gutter); }
@@ -300,7 +298,7 @@ body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px +
   .dialog { border-radius: var(--radius-lg); padding: 20px 20px 16px; }
   .dialog h3 { font-size: var(--fs-17); font-weight: 600; }
   .dialog-body { font-size: var(--fs-14); }
-  .dialog-actions .btn { min-height: var(--tap); padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .dialog-actions .btn { min-height: var(--row-h-touch); padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
   .dialog-actions .btn:not(.primary):not(.danger) { background: none; color: var(--fg-2); }
   .dialog-actions .btn.danger.solid { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 }

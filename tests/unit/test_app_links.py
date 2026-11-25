@@ -21,7 +21,7 @@ def test_with_a_public_address_every_form_of_an_app_address_becomes_a_full_link(
 
 
 def test_without_one_a_link_keeps_its_words_and_a_bare_path_stays_text() -> None:
-    assert app_links(f"Turn it on in [Voice & speech]({ROW}).", "") == "Turn it on in Voice & speech."
+    assert app_links(f"Turn it on in [Voice input]({ROW}).", "") == "Turn it on in Voice input."
     assert app_links(f"Open {ROW}", "") == f"Open {ROW}"
 
 

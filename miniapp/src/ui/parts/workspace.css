@@ -19,7 +19,7 @@
 .panel-tab .ic { color: var(--fg-3); transition: color var(--t-fast) var(--ease-out); }
 .panel-tab:hover .ic, .panel-tab.on .ic { color: inherit; }
 /* A count is a small neutral tag: as an ink pill it outweighed the open tab's own underline. */
-.panel-tab .count { font-size: var(--fs-11); font-weight: 500; line-height: 16px; min-width: 16px; padding: 0 4px; text-align: center; color: var(--fg-2); background: var(--surface-3); border-radius: 4px; font-variant-numeric: tabular-nums; }
+.panel-tab .count { font-size: var(--fs-12); font-weight: 500; line-height: 16px; min-width: 16px; padding: 0 4px; text-align: center; color: var(--fg-2); background: var(--surface-3); border-radius: 4px; font-variant-numeric: tabular-nums; }
 .panel-actions { display: flex; gap: 2px; flex: none; }
 .panel-toolbar { flex: none; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .panel-toolbar .iconbtn[disabled] { opacity: .35; cursor: default; }
@@ -79,7 +79,7 @@
 .details .dt-section, .details .dt-section:first-child { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--dt-card); overflow: visible; }
 .details summary.dt-label { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); margin: 0; padding: 0 10px 0 var(--space-2); border-radius: var(--radius-md); font-size: var(--fs-14); font-weight: 500; color: var(--fg); cursor: pointer; list-style: none; }
 .details summary.dt-label::-webkit-details-marker { display: none; }
-.details summary.dt-label:hover { background: var(--surface-2); }
+.details summary.dt-label:hover { background: var(--hover); }
 .details summary.dt-label:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .dt-icon { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); background: var(--dt-tile); color: var(--fg-3); }
 .dt-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -104,7 +104,7 @@
 .dt-headline-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dt-headline-side { flex: none; margin-left: auto; }
 .dt-today { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; padding: var(--space-1) 10px; border-radius: var(--radius-sm); background: var(--dt-tile); }
-.dt-today-label { font-size: var(--fs-11); color: var(--fg-2); }
+.dt-today-label { font-size: var(--fs-12); color: var(--fg-2); }
 .dt-today b { font-size: var(--fs-14); font-weight: 500; font-variant-numeric: tabular-nums; }
 
 /* Two tiles to a row in a narrow panel, all on one row once the panel has room for them. */
@@ -113,7 +113,7 @@
 .dt-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: var(--space-2) 10px; border-radius: var(--radius-sm); background: var(--dt-tile); }
 .dt-stat-label { overflow: hidden; font-size: var(--fs-12); color: var(--fg-3); text-overflow: ellipsis; white-space: nowrap; }
 .dt-stat-value { font-size: var(--fs-14); font-weight: 500; font-variant-numeric: tabular-nums; }
-.dt-stat-sub { font-size: var(--fs-11); color: var(--fg-3); overflow-wrap: anywhere; }
+.dt-stat-sub { font-size: var(--fs-12); color: var(--fg-3); overflow-wrap: anywhere; }
 
 .dt-meter { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .dt-meter-line { display: flex; align-items: baseline; gap: var(--space-2); }
@@ -174,8 +174,6 @@
 .dt-tag { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 2px var(--space-2); border-radius: var(--radius-xs); background: var(--dt-tile); font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
 .dt-tag .ic { flex: none; color: var(--fg-3); }
 
-.dt-control { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: var(--ctl-h); }
-.dt-control-label { flex: none; width: 64px; color: var(--fg-2); }
 .dt-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .dt-action .dt-hint { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .dt-empty { display: flex; align-items: center; gap: 10px; color: var(--fg-2); }
@@ -219,7 +217,7 @@
 .jobs .task-flag { color: var(--warn); }
 .jobs .task-flag.overdue { color: var(--bad); }
 .jobs .task-where { color: var(--fg-3); }
-.jobs .task-row > .ic { color: var(--muted); }
+.jobs .task-row > .ic { color: var(--fg-2); }
 /* One job, opened in the Jobs tab: a head that stays, its output in a box that scrolls by itself (so the
    head and the line saying how it ended never scroll away), and how it ended under them. */
 .panel-body.tab-jobs:has(> .job-view) { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -229,9 +227,9 @@
 .job-head .dot.cancelled, .job-head .dot.lost { background: var(--fg-3); animation: none; }
 .job-head-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .job-head-copy b { font-size: var(--fs-mono); font-weight: 500; }
-.job-head-copy small { color: var(--fg-3); font-size: var(--fs-11); }
+.job-head-copy small { color: var(--fg-3); font-size: var(--fs-12); }
 .job-head .task-flag { color: var(--warn); }
-.job-live { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--live); font-size: var(--fs-11); font-weight: 500; }
+.job-live { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--live); font-size: var(--fs-12); font-weight: 500; }
 .job-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pulse 1.2s ease-in-out infinite; }
 .job-log-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
 .job-log { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 8px 12px 12px; background: var(--inset); }
@@ -295,13 +293,12 @@
 /* tool picker */
 .toolpicker { margin: 8px 0; }
 .toolpicker-head { background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); padding: 6px 12px; font: inherit; font-size: var(--fs-14); cursor: pointer; width: 100%; text-align: left; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); }
-.toolpicker-head .chev { color: var(--muted); display: inline-block; transition: transform var(--t-fast); }
+.toolpicker-head .chev { color: var(--fg-2); display: inline-block; transition: transform var(--t-fast); }
 .toolpicker-head .chev.down { transform: rotate(90deg); }
 .toolpicker-body { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); padding: 8px 12px 4px; max-height: 46vh; overflow-y: auto; }
 .toolgroup { margin-bottom: 8px; }
 .toolrow { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); align-items: center; gap: 8px; padding: 4px 0; min-height: var(--row-h); font-size: var(--fs-14); cursor: pointer; }
 .toolrow.head { font-weight: 500; border-bottom: 1px solid var(--line); }
-.toolrow input { width: 16px; height: 16px; margin: 0; accent-color: var(--fg); }
 .toolrow .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* tool groups: the installation's modes in Settings → Tools, and one session's in its Details */
@@ -349,9 +346,7 @@
 .badge.loop.paused { color: var(--warn); }
 .badge.loop.stopped, .badge.loop.done { color: var(--fg-3); }
 .toggle-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: var(--fs-14); cursor: pointer; min-height: var(--row-h); }
-.toggle-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--fg); }
 .toggle-row .sub { flex: 1; min-width: 0; }
-.loop-form { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 12px 10px; margin-bottom: 8px; }
 .loop-form select.field, .loop-panel select.field { flex: 1; min-width: 140px; }
 .loop-panel { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px 10px; margin-bottom: 8px; }
 .loop-instruction { color: var(--fg); white-space: pre-wrap; margin-bottom: 4px; }
@@ -361,14 +356,10 @@
 .aside-row { display: flex; align-items: center; gap: 8px; min-height: var(--row-h-dense); font-size: var(--fs-13); color: var(--fg); width: 100%; background: none; border: 0; padding: 0; text-align: left; }
 .aside-row .ic { color: var(--fg-3); flex: none; }
 .aside-row.link { cursor: pointer; border-radius: var(--radius-sm); padding: 0 4px; margin: 0 -4px; }
-.aside-row.link:hover { background: var(--surface-2); }
+.aside-row.link:hover { background: var(--hover); }
 .aside-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aside-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; flex: none; }
 .aside-row .dot.failed { background: var(--bad); }
-/* The project root is the boundary, so it is shown whole: a path clipped after two segments says
-   nothing about which folder the agent is walled into. */
-.aside-row.project-root { align-items: flex-start; gap: 6px; padding-bottom: 4px; }
-.aside-row.project-root .mono { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .sheet-section { padding: 12px 0; border-top: 1px solid var(--line); }
 .sheet-section:first-child { border-top: 0; padding-top: 4px; }
 .sheet-section-title { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: var(--fs-14); margin-bottom: 4px; }
@@ -386,17 +377,16 @@
 .service-row { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
 .service-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .service-row:first-of-type { border-top: 0; }
-.service-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.service-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-2); flex: none; }
 .service-row .dot.running { background: var(--ok); }
 .service-row .dot.dead { background: var(--bad); }
 .service-row .dot.unknown { background: var(--warn); }
 .service-name { font-size: var(--fs-13); font-weight: 500; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.service-url { color: var(--info); font-weight: 400; font-size: var(--fs-12); text-decoration: none; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .service-name { min-width: 0; }
 /* The command wraps, up to three lines: cut to one it lost its flags ("--host 0.0.…") on a phone, and
    nothing else on the screen shows the whole line. Breaks fall anywhere because a flag is one long
    word. */
-.service-cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fs-11); }
+.service-cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: var(--fs-12); }
 
 .linkbtn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
 /* A word-sized link in the details panel is a small target for a thumb ("Move…", a shared session,

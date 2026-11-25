@@ -11,7 +11,6 @@
 .pg-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 0 16px; box-sizing: border-box; font-size: var(--fs-14); }
 .pg-row + .pg-row { border-top: 1px solid var(--line); }
 .pg-row-title { flex: 1; min-width: 0; }
-.pg-num { font-variant-numeric: tabular-nums; }
 
 /* A state as a dot and its word. `live` works, `attention` needs the operator, `idle` is off. */
 .pg-state { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); white-space: nowrap; }

@@ -17,9 +17,9 @@
 .ask-steps { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: -2px -2px 0; padding: 2px; }
 .ask-steps::-webkit-scrollbar { display: none; }
 .ask-step { flex: none; display: inline-flex; align-items: center; gap: 6px; height: var(--chip-h-dense); max-width: 168px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-12); white-space: nowrap; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.ask-step:hover { background: var(--surface-2); }
+.ask-step:hover { background: var(--hover); }
 .ask-step:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.ask-step-n { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.ask-step-n { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .ask-step-label { overflow: hidden; text-overflow: ellipsis; }
 .ask-step[data-state="done"] .ask-step-n { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .ask-step[data-state="current"] { border-color: var(--line-strong); background: var(--surface-3); color: var(--fg); }
@@ -31,7 +31,7 @@
 /* The padding is the room a focused option's ring needs inside the scrolling box. */
 .ask-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; min-height: 0; overflow-y: auto; margin: -3px -4px; padding: 3px 4px; }
 .ask-q { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
-.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-chip { flex: none; display: inline-flex; align-items: center; max-width: 100%; height: 20px; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask-text { margin: 0; color: var(--fg); font-size: var(--fs-14); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ask-kind { color: var(--fg-3); font-size: var(--fs-12); }
 
@@ -39,7 +39,7 @@
    hidden and the row is its label, so the browser keeps the radio group's arrows and Space. */
 .ask-options { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ask-opt { position: relative; display: flex; align-items: flex-start; gap: 10px; min-height: var(--row-h); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.ask-opt:hover { background: var(--surface-2); }
+.ask-opt:hover { background: var(--hover); }
 .ask-opt input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .ask-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ask-opt.on { border-color: var(--fg); background: var(--surface-2); }
@@ -51,8 +51,8 @@
 .ask-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ask-opt-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--fg); font-size: var(--fs-14); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
 .ask-opt-desc { color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; overflow-wrap: anywhere; }
-.ask-rec { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
-.ask-key { flex: none; min-width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-11); }
+.ask-rec { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 0; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.ask-key { flex: none; min-width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; padding: 0 4px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-12); }
 .ask-opt.other .ask-opt-label { color: var(--fg-2); font-weight: 400; }
 .ask-opt.other.on .ask-opt-label { color: var(--fg); }
 
@@ -139,24 +139,24 @@
   .ask.phone .ask-step[data-state="current"], .ask.phone .ask-step.review { padding: 0 10px 0 4px; }
   .ask.phone .ask-step.review { padding: 0 10px; }
   .ask.phone .ask-step.review .ask-step-label { display: inline; }
-  .ask.phone .ask-opt { min-height: var(--tap); padding: 10px 12px; border-radius: var(--radius-sm); }
+  .ask.phone .ask-opt { min-height: var(--row-h-touch); padding: 10px 12px; border-radius: var(--radius-sm); }
   .ask.phone .ask-mark { width: 20px; height: 20px; margin-top: 0; }
   .ask.phone .ask-options[role="group"] .ask-opt.on .ask-mark::after { left: 6px; top: 2px; width: 5px; height: 10px; }
   .ask.phone .ask-opt-label { font-size: var(--fs-15); }
   .ask.phone .ask-opt-desc { font-size: var(--fs-13); }
   .ask.phone .ask-rec { font-size: var(--fs-12); }
-  .ask.phone .ask-options[data-layout="pair"] .ask-opt { min-height: var(--tap); }
+  .ask.phone .ask-options[data-layout="pair"] .ask-opt { min-height: var(--row-h-touch); }
   .ask.phone .ask-field { font-size: var(--fs-16); border-radius: var(--radius-md); }
   .ask.phone .ask-split { grid-template-columns: minmax(0, 1fr); }
   .ask.phone .ask-preview { max-height: 200px; }
   .ask.phone .ask-review-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; row-gap: 2px; padding: 8px 12px; min-height: var(--list-row-h); }
   .ask.phone .ask-review-q { grid-column: 1; grid-row: 1; }
   .ask.phone .ask-review-a { grid-column: 1; grid-row: 2; font-size: var(--fs-14); }
-  .ask.phone .ask-review-edit { grid-column: 2; grid-row: 1 / 3; min-height: var(--tap); padding: 0 8px; font-size: var(--fs-14); }
+  .ask.phone .ask-review-edit { grid-column: 2; grid-row: 1 / 3; min-height: var(--row-h-touch); padding: 0 8px; font-size: var(--fs-14); }
   .ask.phone .ask-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -14px; padding: 10px 14px 12px; background: var(--card); }
   .ask.phone .ask-hint { text-align: left; white-space: normal; font-size: var(--fs-13); line-height: 1.3; }
-  .ask.phone .ask-foot .btn { min-height: var(--tap); border-radius: var(--radius-sm); font-size: var(--fs-15); }
+  .ask.phone .ask-foot .btn { min-height: var(--row-h-touch); border-radius: var(--radius-sm); font-size: var(--fs-15); }
   .ask.phone .ask-go { padding: 0 20px; }
-  .ask.phone .ask-back { min-width: var(--tap); justify-content: center; padding: 0; }
+  .ask.phone .ask-back { min-width: var(--row-h-touch); justify-content: center; padding: 0; }
   .ask-record-body { font-size: var(--fs-14); }
 }

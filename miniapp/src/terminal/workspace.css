@@ -63,7 +63,6 @@
 .tp-row:hover { background: var(--hover); }
 .tp-row.on { background: var(--selected); }
 .tp-row-check { flex: none; display: inline-flex; padding: 0 0 0 12px; }
-.tp-row-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
 .tp-row-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 10px 0 12px; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .tp-row-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .tp-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -170,7 +169,7 @@ button.tp-attn:hover { background: color-mix(in srgb, var(--attention) 22%, tran
  * first: cache and output, then the effort, then the meter's numbers (the bar stays) and what a wait
  * is for, then the cost. What is dropped is still in the line's tooltip. Between those steps only the
  * long texts give way, a wait's reason first. */
-.tsl { container-type: inline-size; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; overflow: hidden; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.tsl { container-type: inline-size; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; overflow: hidden; white-space: nowrap; font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 .tsl-seg { flex: none; display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .tsl-seg:not(:first-child)::before { content: ""; flex: none; width: 1px; height: 10px; margin: 0 4px; background: var(--line-strong); }
 .tsl-wait { color: var(--data-wait); }

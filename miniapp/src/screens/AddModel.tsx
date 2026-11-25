@@ -599,10 +599,9 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
 /**
  * The first-run page: the app opens here until a model exists, because nothing else can work yet.
  *
- * Outside the shell on purpose, the way the login page is. The wide shell is a grid whose first
- * column is the rail's, and a page drawn inside it without a rail sits in the second column with the
- * rail's width of nothing beside it — which is exactly what a 2000 px window showed. One centred
- * column, as the start page is: the question, then the steps under it.
+ * Outside the shell on purpose, the way the login page is: until a model exists the sidebar has
+ * nothing to lead to, and a page drawn inside the shell sat beside a column of destinations that
+ * could not work yet. One centred column, as the start page is: the question, then the steps under it.
  */
 export function OnboardingScreen({ onDone, toast }: { onDone: () => void; toast: (t: string) => void }) {
   useLang();

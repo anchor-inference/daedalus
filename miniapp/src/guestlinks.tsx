@@ -659,7 +659,7 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
           <Button size="sm" icon="wand" className="guest-draft" data-guest-draft="" disabled={drafting} onClick={() => void draft()}>{t(drafting ? "guest.drafting" : "guest.draft")}</Button>
           {drafted && (
             <label className="toggle-row" data-guest-read="">
-              <input type="checkbox" className="check" checked={read} onChange={(e) => setRead(e.target.checked)} />
+              <input type="checkbox" checked={read} onChange={(e) => setRead(e.target.checked)} />
               <span>{t("guest.read.tick")}</span>
             </label>
           )}

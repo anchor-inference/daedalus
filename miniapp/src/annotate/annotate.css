@@ -61,4 +61,4 @@
   .composer[data-shape] .attachment-markup::after { content: ""; position: absolute; inset: -2px -8px -8px -2px; }
 }
 /* The phone browser's bar: the Snapshot button at its right edge, a round target like its Back. */
-.bp-phonebar-snap { width: var(--tap); height: var(--tap); margin-right: -10px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: none; color: var(--fg); cursor: pointer; }
+.bp-phonebar-snap { width: var(--row-h-touch); height: var(--row-h-touch); margin-right: -10px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: none; color: var(--fg); cursor: pointer; }

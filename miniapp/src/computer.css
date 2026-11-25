@@ -181,7 +181,7 @@ button.cu-map-tile:hover .cu-thumb { box-shadow: 0 0 0 1px var(--fg-3); }
   color: var(--primary-ink);
   animation: cu-pop 220ms var(--ease-out);
 }
-.cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 500; }
+.cu-badge { display: inline-flex; align-items: center; flex: none; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
 
 .cu-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 12px; color: var(--fg-3); font-size: var(--fs-13); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
 .cu-warn { display: flex; align-items: flex-start; gap: 8px; align-self: stretch; padding: 10px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--attention) 12%, transparent); color: var(--attention); font-size: var(--fs-13); }

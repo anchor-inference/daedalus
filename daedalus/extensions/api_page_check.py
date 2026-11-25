@@ -39,7 +39,7 @@ from daedalus.host.pages import PageError, PageStore, Served, title_text
 
 CHECK_COOKIE = "daedalus_page_check"
 VIEWS: tuple[tuple[str, int, int], ...] = (("phone", 390, 844), ("desktop", 1440, 900))
-"""The sizes a page is looked at: a common phone, and a desktop window wide enough for the rail."""
+"""The sizes a page is looked at: a common phone, and a desktop window wide enough for the sidebar."""
 SCHEMES: tuple[str, ...] = ("dark", "light")
 """The app's default theme, and the light scheme a page most often forgets."""
 REPORT_SECONDS = 25.0

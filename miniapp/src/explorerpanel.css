@@ -14,7 +14,7 @@
    the one part the reader looks for. */
 .explorer-where { display:inline-flex; align-items:center; flex:0 1 auto; min-width:0; height:var(--ctl-h-sm); padding:0 6px; margin-left:-6px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg); font:var(--fs-12) var(--mono); font-weight:500; white-space:nowrap; cursor:pointer; }
 span.explorer-where { cursor:default; font-family:inherit; font-size:var(--fs-13); font-weight:600; overflow:hidden; text-overflow:ellipsis; }
-button.explorer-where:hover { background:var(--surface-2); }
+button.explorer-where:hover { background: var(--hover); }
 .explorer-where:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .explorer-where-head { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--fg-3); }
 .explorer-where-tail { flex:0 0 auto; max-width:100%; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
@@ -38,7 +38,7 @@ button.explorer-where:hover { background:var(--surface-2); }
 
 .explorer-tree { flex:1; min-height:0; overflow:auto; padding:2px 6px 8px; }
 .files.explorer .tree-row { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-height:28px; margin:0; padding-right:4px; border:1px solid transparent; border-radius:var(--radius-xs); background:none; color:var(--fg-2); cursor:pointer; animation:row-enter 180ms var(--ease-out); }
-.files.explorer .tree-row:hover { background:var(--surface-2); color:var(--fg); }
+.files.explorer .tree-row:hover { background: var(--hover); color:var(--fg); }
 .files.explorer .tree-row.selected { background:var(--surface-3); border-color:var(--line); color:var(--fg); }
 .files.explorer .tree-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .files.explorer .tree-row .title { min-width:0; font-size:inherit; font-weight:400; }
@@ -49,22 +49,22 @@ button.explorer-where:hover { background:var(--surface-2); }
 .tree-chevron .ic { transform:rotate(-90deg); transition:transform var(--t-fast) var(--ease-out); }
 .tree-chevron.open .ic { transform:none; }
 .written-badge { width:6px; height:6px; flex:none; border-radius:50%; background:var(--live); }
-.file-size { flex:none; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; visibility:hidden; }
+.file-size { flex:none; color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; white-space:nowrap; visibility:hidden; }
 .explorer-actions { display:inline-flex; flex:none; visibility:hidden; }
 .explorer-actions .iconbtn { width:22px; height:22px; min-width:22px; min-height:22px; }
 .tree-row:hover .file-size, .tree-row.selected .file-size, .tree-row:focus-within .file-size,
 .tree-row:hover .explorer-actions, .tree-row.selected .explorer-actions, .tree-row:focus-within .explorer-actions,
 .explorer-actions:has([aria-expanded="true"]) { visibility:visible; }
-.explorer-count { display:inline-flex; align-items:center; justify-content:center; flex:none; min-width:18px; height:18px; padding:0 5px; border-radius:4px; background:var(--surface-3); color:var(--fg-2); font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
+.explorer-count { display:inline-flex; align-items:center; justify-content:center; flex:none; min-width:18px; height:18px; padding:0 5px; border-radius:4px; background:var(--surface-3); color:var(--fg-2); font-size:var(--fs-12); font-variant-numeric:tabular-nums; }
 .tree-error { flex:none; color:var(--bad); }
 
 /* A found line: its number, then the line with the match marked, under its file. */
 .files.explorer .tree-row.grep-row { height:auto; min-height:24px; gap:8px; padding-top:2px; padding-bottom:2px; }
-.explorer-ln { flex:none; min-width:20px; text-align:right; color:var(--fg-3); font:var(--fs-11) var(--mono); font-variant-numeric:tabular-nums; }
-.grep-snippet { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; background:none; color:var(--fg-2); font:var(--fs-11)/1.5 var(--mono); }
+.explorer-ln { flex:none; min-width:20px; text-align:right; color:var(--fg-3); font:var(--fs-12) var(--mono); font-variant-numeric:tabular-nums; }
+.grep-snippet { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; background:none; color:var(--fg-2); font:var(--fs-12)/1.5 var(--mono); }
 .grep-snippet mark { padding:0; border-radius:2px; background:color-mix(in srgb, var(--warn) 24%, transparent); color:var(--fg); }
 
-.explorer-status { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 12px; border-top:1px solid var(--line); color:var(--fg-3); font-size:var(--fs-11); }
+.explorer-status { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 12px; border-top:1px solid var(--line); color:var(--fg-3); font-size:var(--fs-12); }
 .explorer-status-path { display:flex; flex:1; min-width:0; font-family:var(--mono); white-space:nowrap; }
 .explorer-status-path > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .explorer-status-path > span:last-child { flex:none; max-width:100%; }
@@ -75,9 +75,6 @@ button.explorer-where:hover { background:var(--surface-2); }
 .explorer-status-written { display:inline-flex; align-items:center; gap:5px; flex:none; white-space:nowrap; }
 .explorer-status-written::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--live); }
 
-/* A folder's badges at the end of its row in the folder list. */
-.menu .menu-aside { display:inline-flex; align-items:center; gap:4px; flex:none; margin-left:auto; padding-left:12px; }
-.menu .menu-aside .term-env { margin-right:0; }
 
 /* Rows enter quietly without changing their measured height or delaying hover feedback. */
 @keyframes row-enter { from { opacity:0; } to { opacity:1; } }

@@ -22,7 +22,10 @@
 .schedrow { display: flex; align-items: center; gap: var(--space-2); height: 56px; padding-right: var(--space-2); border-radius: var(--radius-md); }
 .schedrow:hover { background: var(--hover); }
 .schedrow.on { background: var(--selected); }
-.schedrow-open { flex: 1; min-width: 0; height: 100%; display: grid; grid-template-columns: 32px minmax(0, 1fr) 96px 168px; align-items: center; column-gap: var(--space-3); padding: 0 0 0 14px; border: 0; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* The last column holds the longest Russian words ("Выполнено 37 минут назад", about 175 px with its dot);
+   at 168 px with no inset at the right it was cut at the row's edge, so it is wider and the row's face
+   keeps the same 14 px inset at both ends. */
+.schedrow-open { flex: 1; min-width: 0; height: 100%; display: grid; grid-template-columns: 32px minmax(0, 1fr) 96px 200px; align-items: center; column-gap: var(--space-3); padding: 0 6px 0 14px; border: 0; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .schedrow-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .schedrow-tile { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); }
 .schedrow.approval .schedrow-tile { color: var(--attention); }
@@ -35,6 +38,7 @@
 .schedrow-state.attention { color: var(--attention); font-weight: 500; }
 .schedrow-state.quiet { color: var(--fg-3); }
 .schedrow-last { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--fs-12); color: var(--fg-3); }
+.schedrow-last-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .schedrow-last.failed { color: var(--attention); }
 .schedrow-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 .schedrow.approval .schedrow-open { grid-template-columns: 32px minmax(0, 1fr) 124px; }
@@ -147,6 +151,6 @@
   .sched-kv-row { min-height: var(--row-h-touch); }
   .sched-kv dt { width: 96px; }
   .schedform-pair { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .schedform-days button { height: var(--tap); }
+  .schedform-days button { height: var(--row-h-touch); }
   .sched-sheet .sched-pane-head { padding: 0 0 var(--space-2); }
 }

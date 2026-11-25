@@ -474,12 +474,12 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
           items={presets.map((p) => ({ id: p.id, label: p.label }))} />
       </WithEffort>
       <div className="sub form-hint">{t("focus.enable.model.hint")}</div>
-      <fieldset className="autonomy-choice">
+      <fieldset className="autonomy-choice access-options">
         <legend className="field">{t("focus.enable.autonomy")}</legend>
         {AUTONOMIES.map((level) => (
-          <label key={level} className={`autonomy-option ${autonomy === level ? "on" : ""}`}>
+          <label key={level} className={`access-option autonomy-option ${autonomy === level ? "on" : ""}`}>
             <input type="radio" name="autonomy" value={level} checked={autonomy === level} onChange={() => setAutonomy(level)} />
-            <span className="autonomy-text">
+            <span>
               <b>{t(`focus.autonomy.${level}`)}</b>
               <span className="sub">{t(`focus.autonomy.${level}.hint`)}</span>
             </span>

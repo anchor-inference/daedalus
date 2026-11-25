@@ -33,7 +33,7 @@
 .orp-head { display: none; }
 .orp-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: var(--space-2); align-items: start; padding: 6px 10px; cursor: pointer; }
 .orp-row + .orp-row, .orp-head + .orp-row { border-top: 1px solid var(--line); }
-.orp-row:hover { background: var(--surface-2); }
+.orp-row:hover { background: var(--hover); }
 .orp-row.on { background: var(--surface-3); }
 .orp-row .switch { margin: 3px 0 0; }
 .orp-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -153,7 +153,6 @@
 .project-name { display: flex; align-items: center; gap: 6px; font-size: var(--fs-14); }
 .project-open .sub { font-size: var(--fs-12); }
 .menu-item.on { border-color: var(--fg); }
-.readonly-path { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-13); word-break: break-all; }
 /* A folder is a card of its own inside the settings sheet: the name line carries the chips and the
    remove button, the path wraps rather than truncates (a path cut in the middle names the wrong
    folder), and the sentence under it says who can reach it. */
@@ -203,7 +202,6 @@
 .dir-form { margin-top: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--inset); box-shadow: var(--shadow-ring); }
 .dir-form-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .dir-add-open { margin-top: 8px; }
-.dir-mount { margin-top: 6px; }
 .project-ephemeral { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .project-ephemeral .sub { flex: 1 1 200px; }
 
@@ -354,42 +352,32 @@ input.field[type="range"] {
 .computer-sheet .sheet-body { display:flex; flex-direction:column; gap:var(--space-2); }
 .computer-sheet .section-title { margin:var(--space-3) 2px 0; }
 .computer-grant, .computer-permissions { display:flex; flex-direction:column; gap:var(--space-2); }
-.computer-line { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
-.computer-label { color:var(--fg-2); font-size:var(--fs-13); min-width:96px; }
-.computer-line input.computer-minutes { width:84px; flex:none; margin:0; padding:6px 10px; text-align:right; font-variant-numeric:tabular-nums; }
-.computer-line input.computer-minutes.invalid { border-color:var(--bad); }
-.computer-list { display:flex; flex-direction:column; max-height:240px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); }
-.computer-list > .sub { padding:var(--space-2) var(--space-3); }
 .computer-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--row-h-2); padding:0 var(--space-3); min-width:0; }
-.computer-list .computer-row + .computer-row { border-top:1px solid var(--line); }
-.computer-list .computer-row { cursor:pointer; }
 .computer-row.off { opacity:0.55; cursor:default; }
 .computer-row-main { display:flex; flex-direction:column; flex:1; min-width:0; }
 .computer-row-main b { font-weight:500; }
-.computer-actions { display:flex; justify-content:flex-end; }
 .run-outcome { display:flex; align-items:flex-start; gap:var(--space-2); margin-top:var(--space-2); padding:var(--space-2) var(--space-3); border:0; border-radius:var(--radius-sm); background:color-mix(in srgb, var(--bad) 12%, var(--card)); color:var(--fg); font-size:var(--fs-13); overflow-wrap:anywhere; }
 .run-outcome svg { flex:none; margin-top:2px; color:var(--bad); }
 .run-outcome.cause-cancelled { background:var(--surface-2); }
-.run-outcome.cause-cancelled svg { color:var(--muted); }
-.run-outcome-detail { margin-top:2px; color:var(--muted); }
+.run-outcome.cause-cancelled svg { color:var(--fg-2); }
+.run-outcome-detail { margin-top:2px; color:var(--fg-2); }
 .run-outcome-more { margin-top:2px; }
-.run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--muted); cursor:pointer; }
+.run-outcome-more summary { width:fit-content; min-height:var(--row-h-dense); display:flex; align-items:center; color:var(--fg-2); cursor:pointer; }
 .run-outcome-more summary:hover { color:var(--fg); }
-.run-outcome-count { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.run-outcome-count { color:var(--fg-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .run-outcome-failures { margin:2px 0 0; padding:0; list-style:none; }
 /* Recovered: a later turn answered, so the stop is history. One neutral line in the run's quiet grey
    that opens onto its details; the red card is kept for a stop nothing has answered yet. */
-.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--muted); }
+.run-outcome.recovered { display:block; padding:0; border:0; background:none; color:var(--fg-2); }
 .run-outcome.recovered .run-outcome-line { display:flex; align-items:center; gap:var(--space-2); width:fit-content; max-width:100%; min-height:var(--row-h-dense); cursor:pointer; list-style:none; }
 .run-outcome.recovered .run-outcome-line::-webkit-details-marker { display:none; }
 .run-outcome.recovered .run-outcome-line:hover { color:var(--fg); }
-.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--muted); }
+.run-outcome.recovered svg { flex:none; margin-top:0; color:var(--fg-2); }
 .run-outcome.recovered[open] .run-outcome-line .chev { transform:rotate(90deg); }
 .run-outcome.recovered .run-outcome-body { padding-left:calc(14px + var(--space-2)); }
 
-.menu-heading { padding:var(--space-1) 10px; font-size:var(--fs-12); font-weight:400; }
 /* The mark of a session with every check bypassed, beside its title in the header. */
-.bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
+.bypass-mark { display:inline-flex; align-items:center; gap:4px; flex:none; height:18px; padding:0 6px; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--bad) 12%, transparent); color:var(--bad); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 @media (min-width: 1024px) {
   .composer-box, .composer > .steers, .composer > .dock, .composer > .ask, .composer > .palette { width:min(100%, var(--chat-w)); margin-inline:auto; }
 }
@@ -400,10 +388,8 @@ input.field[type="range"] {
 @media (max-width: 1023px) { .composer-jump-anchor .jump-down { right: var(--gutter); width: var(--ctl-round); height: var(--ctl-round); } .composer-jump-anchor .jump-down::after { content: ""; position: absolute; inset: -4px; } }
 .session-row-menu { flex: none; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .session-row-menu .iconbtn { min-width: var(--row-h-touch); min-height: var(--row-h-touch); } }
-.search-passage { font-size: var(--fs-12); color: var(--muted); margin-top: var(--space-1); }
+.search-passage { font-size: var(--fs-12); color: var(--fg-2); margin-top: var(--space-1); }
 .search-notice { padding: var(--space-2) var(--space-3); }
-.folder-add { width:var(--ctl-h-sm); height:var(--ctl-h-sm); min-width:var(--ctl-h-sm); min-height:var(--ctl-h-sm); margin:var(--space-1); padding:0; flex-shrink:0; display:grid; place-items:center; line-height:0; color:var(--fg-2); border-color:transparent; background:transparent; box-shadow:none; }
-.folder-add:hover { background:var(--surface-2); color:var(--fg); }
 .folder-add .ic, .pagehead-actions .iconbtn .ic { display:block; margin:auto; }
 @media (max-width:600px) { .folder-top .folder-add { min-width:44px; min-height:var(--row-h-touch); padding:8px; } }
 
@@ -446,26 +432,12 @@ input.field[type="range"] {
   .changed-file-row .list-row-t { font-family:var(--mono); font-size:var(--fs-13); }
   .folder .erow { border:0; border-radius:0; background:transparent; margin-inline:0; }
   .folder.single:not(.open) { border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; }
-  .folder-expand { order:2; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .folder-actions { order:1; min-width:var(--row-h-touch); min-height:var(--row-h-touch); }
-  .folder-root { display:none; }
-  .folder-add { order:2; display:grid; place-items:center; width:var(--row-h-touch); height:var(--row-h-touch); min-width:var(--row-h-touch); min-height:var(--row-h-touch); padding:0; }
-  .folder-head > .chev { order:2; margin-left:auto; }
-  /* One order of controls on every row: the chevron inside the row, then its menu, then the new
-     agent. A project of one agent carries its menu inside the agent's row, which is why the
-     project's own menu comes before + rather than after it. The Voice folder's chevron is its own
-     button, and it moves to the same place at the right. */
-  .folder-head.linked > .folder-disclose { order:2; padding:4px 12px 4px 2px; }
-  /* Opening a project of one agent shows its folder's path and nothing else, and the path is not
-     drawn here: the chevron opened nothing, and it was a third, different control on that row. */
-  .folder.single .folder-expand { display:none; }
-  .folder.single .folder-top > .erow { padding-right:0; }
 }
 
 /* Subagents are peers of files and jobs, but opening one is navigation rather than panel content.
    Keep the roster at the session edge where it is visible without occupying the Details tab. */
 .subagents-trigger { position:relative; }
-.subagents-count { position:absolute; right:2px; bottom:2px; display:grid; place-items:center; min-width:15px; height:15px; padding:0 3px; border:1px solid var(--bg); border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg); font-size:var(--fs-11); font-weight:600; line-height:1; scale:.82; transform-origin:right bottom; }
+.subagents-count { position:absolute; right:2px; bottom:2px; display:grid; place-items:center; min-width:15px; height:15px; padding:0 3px; border:1px solid var(--bg); border-radius:var(--radius-pill); background:var(--surface-3); color:var(--fg); font-size:var(--fs-12); font-weight:600; line-height:1; scale:.82; transform-origin:right bottom; }
 .subagents-live { position:absolute; top:3px; right:3px; width:7px; height:7px; border:1px solid var(--bg); border-radius:50%; background:var(--live); }
 /* A subagent's state, the same dot in the left column and the Subagents tab: hollow at rest. */
 .sub-dot { flex:none; width:7px; height:7px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--fg-3); }
@@ -496,11 +468,11 @@ input.field[type="range"] {
    said the same thing again, in a stripe on every card. */
 .subagent-card { position:relative; display:flex; flex-direction:column; gap:var(--space-2); min-width:0; padding:0 var(--space-3) 10px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--card); box-shadow:var(--drop-xs); overflow:hidden; }
 .subagent-card-head { display:flex; align-items:center; gap:8px; min-width:0; min-height:var(--ctl-h-lg); margin:0 calc(-1 * var(--space-3)) -4px; padding:0 var(--space-3); border:0; border-radius:0; background:none; color:var(--fg); font:inherit; text-align:left; cursor:pointer; transition:background var(--t-fast); }
-.subagent-card-head:hover { background:var(--surface-2); }
+.subagent-card-head:hover { background: var(--hover); }
 .subagent-card-head:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .subagent-card-head > .ic { flex:none; color:var(--fg-3); }
 .subagent-name { min-width:0; font-size:var(--fs-14); font-weight:500; }
-.subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:2px 7px 2px 6px; border:0; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--tone) 12%, transparent); color:var(--tone); font-size:var(--fs-11); font-weight:500; white-space:nowrap; }
+.subagent-chip { --tone:var(--fg-2); display:inline-flex; flex:none; align-items:center; gap:4px; padding:2px 7px 2px 6px; border:0; border-radius:var(--radius-xs); background:color-mix(in srgb, var(--tone) 12%, transparent); color:var(--tone); font-size:var(--fs-12); font-weight:500; white-space:nowrap; }
 .subagent-chip .sub-dot { display:none; }
 .subagent-chip[data-phase="working"] { --tone:var(--info); }
 .subagent-chip[data-phase="working"] .sub-dot { display:inline-block; }
@@ -525,18 +497,18 @@ input.field[type="range"] {
 /* What the helper brought back, in a recessed well; how it ended is the card's tag. */
 .subagent-report { display:flex; flex-direction:column; gap:4px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--inset); box-shadow:var(--shadow-ring); }
 .subagent-report p { margin:0; color:var(--fg); font-size:var(--fs-13); line-height:1.4; overflow-wrap:anywhere; }
-.subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-delivery { display:inline-flex; align-items:center; gap:5px; color:var(--fg-3); font-size:var(--fs-12); }
 .subagent-delivery.ok .ic { color:var(--ok); }
 .subagent-delivery.wait { color:var(--warn); }
 .subagent-run { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; color:var(--fg-2); font-size:var(--fs-12); }
 .subagent-model { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; }
 .subagent-model .provider-mark { width:18px; height:18px; border-radius:var(--radius-xs); }
 .subagent-model .provider-mark svg { width:12px; height:12px; }
-.subagent-effort { display:inline-flex; flex:none; align-items:center; gap:3px; padding:0 6px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-11); line-height:16px; }
+.subagent-effort { display:inline-flex; flex:none; align-items:center; gap:3px; padding:0 6px; border-radius:var(--radius-xs); background:var(--surface-2); color:var(--fg-2); font-size:var(--fs-12); line-height:16px; }
 .subagent-effort.off { color:var(--fg-3); }
 .subagent-spend { display:inline-flex; flex:none; align-items:baseline; gap:8px; color:var(--fg-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .subagent-spend b { color:var(--fg); font-weight:500; }
-.subagent-context { display:flex; align-items:center; gap:8px; color:var(--fg-3); font-size:var(--fs-11); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.subagent-context { display:flex; align-items:center; gap:8px; color:var(--fg-3); font-size:var(--fs-12); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .subagent-bar { flex:1; height:4px; border-radius:2px; background:var(--surface-3); overflow:hidden; }
 .subagent-bar i { display:block; height:100%; border-radius:2px; background:var(--fg); }
 .subagent-bar.attn i { background:var(--warn); }
@@ -553,7 +525,7 @@ input.field[type="range"] {
 .subagent-head { position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:8px; margin:0 -12px; padding:6px 8px 6px 6px; border-bottom:1px solid var(--line); background:var(--bg); }
 .subagent-head-copy { display:flex; flex-direction:column; flex:1; min-width:0; }
 .subagent-head-copy b { font-size:var(--fs-13); }
-.subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-11); }
+.subagent-head-copy small { color:var(--fg-3); font-size:var(--fs-12); }
 /* An open helper: the list of the leader's helpers down its left side, its conversation in a column that
    scrolls by itself so the list stands still beside it. With the room the list is docked; without it
    (a narrow panel, a phone) it folds into the head's button and opens over the conversation. */
@@ -565,11 +537,11 @@ input.field[type="range"] {
 .subagent-rail-scrim { position:absolute; inset:0; z-index:3; background:color-mix(in srgb, var(--bg) 45%, transparent); }
 .subagent-rail-row { display:flex; flex:none; align-items:center; gap:8px; min-height:var(--row-h); padding:0 8px; border:0; border-radius:var(--radius-sm); background:none; color:var(--fg-2); font:inherit; font-size:var(--fs-13); text-align:left; cursor:pointer; }
 /* A pointer's hover only: a tap on a phone left the row it opened the list from shaded like a second current one. */
-@media (hover: hover) { .subagent-rail-row:hover { background:var(--surface-2); color:var(--fg); } }
+@media (hover: hover) { .subagent-rail-row:hover { background: var(--hover); color:var(--fg); } }
 .subagent-rail-row[aria-current="true"] { background:var(--surface-3); color:var(--fg); font-weight:500; }
 .subagent-rail-row:focus-visible { outline: 2px solid var(--ring); outline-offset:-2px; }
 .subagent-rail-copy { display:flex; flex-direction:column; min-width:0; line-height:1.25; }
-.subagent-rail-copy small { color:var(--fg-3); font-size:var(--fs-11); font-weight:400; }
+.subagent-rail-copy small { color:var(--fg-3); font-size:var(--fs-12); font-weight:400; }
 .subagent-rail-toggle.on { color:var(--fg); background:var(--surface-3); }
 .subagent-chat { padding-top:12px; }
 .subagent-chat .msg-wrap, .subagent-chat .answer { max-width:none; }
@@ -597,16 +569,13 @@ h1.start-greeting { margin:0; max-width:18em; font-size:var(--fs-18); font-weigh
 .start-agent-loop textarea.field { resize:vertical; }
 .start-agent-loop-row { display:flex; flex-wrap:wrap; gap:6px; }
 .start-agent-loop-row .field { flex:1 1 110px; min-width:0; width:auto; }
+.start-agent-loop-row .start-loop-mode, .start-agent-loop-row .start-loop-mode .dropdown-btn { flex:1 1 110px; min-width:0; max-width:none; }
 /* Where the attachments were while they upload: the percentage, in figures that do not jitter. */
 .composer .upload-progress { font-variant-numeric: tabular-nums; }
 .composer .upload-progress { padding: 8px 14px 0; }
 /* A phone searching its chats: the list takes the screen and the composer waits (Start.tsx, useFinding). */
 .start.finding { display:none; }
-.start.finding + .start-list { padding-top:calc(var(--space-3) + env(safe-area-inset-top)); }
-.start-list-head { display:flex; align-items:center; gap:var(--space-2); padding:0 14px; }
-.start-list-head .section-title { flex:1; margin-bottom:0; }
 /* The list below keeps its 14 px gutter; the search field ran from one edge of the glass to the other. */
-.start-list > .field.search { display:block; width:calc(100% - 28px); margin:2px 14px 6px; }
 /* A phone's hero is the upper half of the space above the tab bar (50 px of tab, 12 of padding and
    a hairline, then the home indicator), with the composer at its foot: the field sits in the middle
    of the screen where a thumb reaches it, and the chats begin under it at the middle line. At the

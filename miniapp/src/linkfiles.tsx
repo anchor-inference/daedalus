@@ -107,7 +107,7 @@ export function LinkFileRow({ file, toast, pick }: { file: LinkFile; toast: (tex
     <div className="link-file" data-link-file={file.id} data-state={file.state} data-image={file.image || undefined}>
       {pick ? (
         <label className="link-file-pick">
-          <input type="checkbox" className="check" checked={pick.checked} disabled={pick.disabled} aria-label={file.name} onChange={(e) => pick.onChange(e.target.checked)} />
+          <input type="checkbox" checked={pick.checked} disabled={pick.disabled} aria-label={file.name} onChange={(e) => pick.onChange(e.target.checked)} />
           {mark}
           <span className="link-file-text">{meta}</span>
         </label>

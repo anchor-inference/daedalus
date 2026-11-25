@@ -236,7 +236,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           <Segmented label={t("staff.mode")} value={shown} onChange={pick}
             options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} className="ph-seg" />
         </div>
-        <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText} compact>
+        <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText}>
           {flagged > 0 && (
             <button className={`staff-attention ${need.failed.length > 0 ? "failed" : "pending"}`} data-attention={need.failed.length > 0 ? "failed" : "pending"} onClick={showMessages} aria-label={`${flaggedText} · ${t("staff.attention.open")}`} title={flaggedText}>
               <Icon name={need.failed.length > 0 ? "alert" : "send"} size={14} />
@@ -577,12 +577,13 @@ function StaffPanel({ projectId, staffId, member, turns, name, view, notes, inst
   const tabs: SideTab[] = browser ? ["session", "details", "changes", "notes", "browser"] : ["session", "details", "changes", "notes"];
   return (
     <div className={`staff-panel ${tab === "browser" ? "with-browser" : ""}`}>
-      <div className="panel-tabs">
+      <div className="panel-tabs" data-tabs={tabs.length}>
         <div className="panel-tablist" role="tablist">
+          {/* The name rides on the button too: a narrow column draws the tabs it is not on as icons. */}
           {tabs.map((name) => (
-            <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} onClick={() => setTab(name)}>
+            <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} aria-label={t(`staff.tab.${name}`)} title={t(`staff.tab.${name}`)} onClick={() => setTab(name)}>
               <Icon name={SIDE_ICON[name]} size={16} />
-              <span>{t(`staff.tab.${name}`)}</span>
+              <span className="panel-tab-word">{t(`staff.tab.${name}`)}</span>
             </button>
           ))}
         </div>

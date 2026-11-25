@@ -494,12 +494,14 @@ describe("a page's header", () => {
   const DESKTOP = "min-width: 1024px";
   const desktopRule = (selector: string) => all.filter((r) => r.media.includes(DESKTOP) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("is one 52 px row with its title 24 px in, on every page, whatever the column under it", () => {
+  it("is one 52 px row with its title and its actions 24 px in, on every page, whatever the column under it", () => {
     // --head-h is every header's height: a page's, the conversation's, the panel's tabs. It was 48
     // until the design set 52 for all of them.
     expect(all.find((r) => r.selector === ":root" && !r.media)!.body).toContain("--head-h: 52px");
     expect(desktopRule(".pagehead-row")).toContain("min-height: var(--head-h)");
-    expect(desktopRule(".pagehead")).toContain("padding: 0 12px 0 24px");
+    // The same 24 px at both ends: with 12 at the right a page's primary button stood half as far from
+    // the window's edge as its title stood from the sidebar, and the header read as lopsided.
+    expect(desktopRule(".pagehead")).toContain("padding: 0 24px");
     // The header once followed the page's column (padding in to the 1120 or 1680 px column's edge), so
     // the titles stood at six different x positions. No rule may pad it by the column again.
     expect(all.filter((r) => /\.pagehead:has\(\+ \.screen\.(narrow|wide)\)/.test(r.selector)).map((r) => r.selector)).toEqual([]);
@@ -636,6 +638,12 @@ describe("every size", () => {
   it("names a step of the scale rather than a number", () => {
     expect(numericFonts(all)).toEqual([]);
   });
+
+  // --fs-11 is 12 px and stays in the tokens only because published pages were promised the name;
+  // an app rule that writes it reads as a size under the floor and invites a smaller one back.
+  it("never writes --fs-11, the name kept for published pages", () => {
+    expect(all.filter((r) => /--fs-11\b/.test(r.body) && r.selector !== ":root").map((r) => r.selector)).toEqual([]);
+  });
 });
 
 describe("every box", () => {
@@ -679,8 +687,8 @@ describe("the phone", () => {
     expect(phoneRule(".pagehead")).not.toMatch(/border/);
     expect(all.filter((r) => selectors(r).some((selector) => selector.startsWith(".ph-top")))).toEqual([]);
     expect(phoneRule(".pagehead")).toContain("backdrop-filter: none");
-    expect(phoneRule(".ph-ib")).toContain("width: var(--tap)");
-    expect(phoneRule(".ph-ib")).toContain("height: var(--tap)");
+    expect(phoneRule(".ph-ib")).toContain("width: var(--row-h-touch)");
+    expect(phoneRule(".ph-ib")).toContain("height: var(--row-h-touch)");
     expect(phoneRule(".list-row")).toContain("min-height: var(--list-row-h)");
     expect(phoneRule(".list-row.one")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".list-row")).not.toMatch(/border/);
@@ -691,8 +699,8 @@ describe("the phone", () => {
     expect(phoneRule(".sheet-head")).toContain("flex: none");
     expect(phoneRule(".menu-row")).toContain("min-height: var(--list-row-h-1)");
     expect(phoneRule(".composer[data-shape] .composer-box")).toContain("border-radius: var(--radius-composer)");
-    expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--tap)");
-    expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--tap)");
+    expect(phoneRule(".composer[data-shape] .composer-row")).toContain("height: var(--row-h-touch)");
+    expect(phoneRule(".composer[data-shape] .iconbtn.plus")).toContain("width: var(--row-h-touch)");
     expect(phoneRule(".composer[data-shape] .roundbtn")).toContain("width: 40px");
     expect(all.filter((r) => r.selector.includes('data-shape="idle"'))).toEqual([]);
     expect(all.filter((r) => r.selector === ".project-tabs .tab" && !r.media).map((r) => r.body).join(" ")).toContain("height: var(--tabbar-h)");
@@ -700,8 +708,8 @@ describe("the phone", () => {
     // The drawer is the sidebar: 330 px of it, its rows the phone's 44 px ones at 15 px.
     expect(declaredRoot()).toContain("--drawer-w: min(86vw, 330px)");
     expect(phoneRule(".sb-nav")).toContain("font-size: var(--fs-15)");
-    expect(phoneRule(".sb-sec")).toContain("height: var(--tap)");
-    expect(phoneRule(".sidebar-foot")).toContain("height: calc(var(--tap) + var(--space-3))");
+    expect(phoneRule(".sb-sec")).toContain("height: var(--row-h-touch)");
+    expect(phoneRule(".sidebar-foot")).toContain("height: calc(var(--row-h-touch) + var(--space-3))");
   });
 
   it("keeps every phone rule inside the phone media query, so a desktop never reads one", () => {
@@ -753,7 +761,7 @@ describe("the sidebar", () => {
     // The desktop's kind tabs became the Show part of the Chats label's menu; the phone's Chats page
     // keeps them as the shared page tabs, each the 44 px a finger needs there.
     const phone = (selector: string) => all.filter((r) => r.media.includes(PHONE) && selectors(r).includes(selector)).map((r) => r.body).join(";");
-    expect(phone(".tabs-page .tab")).toContain("height: var(--tap)");
+    expect(phone(".tabs-page .tab")).toContain("height: var(--row-h-touch)");
     expect(all.filter((r) => selectors(r).some((selector) => selector.includes("kind-tab")))).toEqual([]);
   });
 
@@ -884,13 +892,12 @@ describe("rows and controls", () => {
   });
 
   it("give a phone's terminal and project the thumb's sizes from the tokens, and the visible height", () => {
-    // The keys row is a row of controls, and a banner's answers and a project's rows are touch rows:
+    // The keys row is a row of controls, and a banner's answers are touch rows:
     // on a phone the tokens make them 40 and 44 px, so nothing here states a size of its own. The
     // terminal is as tall as what the phone shows, which is what keeps its keys above the keyboard.
     expect(decl(".term-key")).toContain("height: var(--ctl-h)");
     expect(decl(".term-phone")).toContain("height: var(--vh, 100dvh)");
     expect(decl(".ask-answers-row .btn")).toContain("min-height: var(--row-h-touch)");
-    expect(decl(".phone-staff-row")).toContain("min-height: calc(var(--row-h-touch)");
     expect(decl(".project-tabs")).toContain("flex: none");
   });
 
@@ -915,9 +922,6 @@ describe("rows and controls", () => {
     expect(decl(".bp-pip")).toContain("width: var(--pip-w)");
     expect(decl(".bp-pip")).not.toMatch(/position: fixed/);
     expect(decl(".bp-pip-foot")).toContain("height: 24px");
-    // The phone's header thumbnail is a control, not a picture: 28 × 18 inside an icon button.
-    expect(decl(".browser-headbtn-thumb")).toContain("width: 28px");
-    expect(decl(".browser-headbtn-thumb")).toContain("height: 18px");
   });
 
   it("fold a step of the run into 28 px", () => {
@@ -1021,7 +1025,8 @@ describe("the side panel", () => {
   const value = (name: string) => Number(new RegExp(`${name}: (\\d+(?:\\.\\d+)?)px`).exec(scale?.body ?? "")?.[1] ?? Number.NaN);
 
   it("redefines every step at or under the desktop's, with a 13 px body and 12 px meta", () => {
-    for (const [name, px] of Object.entries(TOKENS)) {
+    // --fs-11 is the published pages' name and nothing in the app writes it, so the panel has no reason to redefine it.
+    for (const [name, px] of Object.entries(TOKENS).filter(([name]) => name !== "--fs-11")) {
       expect(value(name), name).toBeLessThanOrEqual(px);
     }
     expect(value("--fs-prose")).toBe(13);

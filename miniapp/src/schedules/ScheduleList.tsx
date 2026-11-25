@@ -68,7 +68,7 @@ function Row({ item, on, onSelect, titles, actions }: { item: Item; on: boolean;
         <span className={`schedrow-state ${state.tone}`} title={state.title}>{state.word}</span>
         {!answers && (
           <span className={`schedrow-last ${last?.status ?? "none"}`} title={last?.at ? absTime(last.at) : undefined}>
-            {last && <><span className="dot" aria-hidden="true" />{last.status === "running" ? t("sched.running") : t(last.status === "failed" ? "sched.last.failed" : "sched.last.ok", { t: relTimeLong(last.at) })}</>}
+            {last && <><span className="dot" aria-hidden="true" /><span className="schedrow-last-words">{last.status === "running" ? t("sched.running") : t(last.status === "failed" ? "sched.last.failed" : "sched.last.ok", { t: relTimeLong(last.at) })}</span></>}
           </span>
         )}
       </button>

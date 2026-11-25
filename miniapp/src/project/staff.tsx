@@ -30,21 +30,9 @@ export function useMember(staffId: string | null) {
   return member;
 }
 
-/**
- * `facts` goes after the status in the pill ("turn 4 · 18 min"); `details` replaces the line under the
- * name with what the caller knows better (a command-line member's version, worktree and task).
- */
-export function StaffHeader({ projectId, staffId, toast, facts, details, children, compact = false }: { projectId: string; staffId: string; toast: (text: string) => void; facts?: string; details?: ReactNode; children?: ReactNode; compact?: boolean }) {
-  const { data: member } = useMember(staffId);
-  const { board } = useFocus(projectId);
-  if (!member) return null;
-  const live = member.live;
-  const tone = staffTone(member);
-  const task = live?.task_id ? board?.tasks.find((x) => x.id === live.task_id) : undefined;
-  const wait = firstWait(member);
-  const runs = [HARNESS_NAMES[member.harness], member.model, member.permission_mode].filter(Boolean).join(" · ");
-  async function act(what: "interrupt" | "pause" | "release") {
-    if (!member) return;
+/** Interrupt, pause after the turn, and release: the three controls of a member's turn. */
+function useStaffAct(projectId: string, toast: (text: string) => void) {
+  return async function act(member: Staff, what: "interrupt" | "pause" | "release") {
     if (what === "release" && !(await confirmAsync(t("focus.staff.release.title", { name: member.name }), { body: t("focus.staff.release.body"), action: t("focus.staff.release") }))) return;
     try {
       await api.post(`/api/staff/${encodeURIComponent(member.id)}/${what}`, what === "release" ? { keep_worktree: true } : undefined);
@@ -53,62 +41,95 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
     } catch (e) {
       toast(errorText(e));
     }
-  }
-  const state = wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : live?.pause_requested ? t("focus.staff.paused") : t(`team.status.${member.status}`);
-  // A phone's member page names the member in its bar, so the header is only the state and the two
-  // controls a turn needs; Release, the weightiest, is in the details sheet beside the rest.
-  if (compact) {
-    return (
-      <div className="staff-head compact">
-        <div className="staff-head-row">
-          <span className={`focus-dot tone-${tone}`} aria-hidden />
-          <span className="staff-head-state truncate" data-status={member.status} title={wait?.detail || live?.waiting_for || undefined}>{state}{facts && !wait && ` · ${facts}`}</span>
-          {live && (
-            <span className="staff-head-actions">
-              <Button size="sm" icon="pause" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("ph.member.pause")}</Button>
-              <Button size="sm" icon="stop" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</Button>
-            </span>
-          )}
-        </div>
-        {children}
-      </div>
-    );
-  }
-  // The member's head in its own session, as the command-line member's view draws it: one row (who,
-  // how it goes, the turn's three controls) and a line of facts under it (what runs it, where, on what).
+  };
+}
+
+const stateWords = (member: Staff) => {
+  const wait = firstWait(member);
+  return { wait, state: wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : member.live?.pause_requested ? t("focus.staff.paused") : t(`team.status.${member.status}`) };
+};
+
+/**
+ * A phone's member page names the member in its bar, so this header is only the state and the two
+ * controls a turn needs; Release, the weightiest, is in the command-line member's details sheet beside
+ * the rest, and only a Daedalus member's chat, which has no such sheet, asks for it here (`release`).
+ * `facts` goes after the status ("turn 4 · 18 min").
+ */
+export function StaffHeader({ staffId, projectId, toast, facts, release = false, children }: { projectId: string; staffId: string; toast: (text: string) => void; facts?: string; release?: boolean; children?: ReactNode }) {
+  const { data: member } = useMember(staffId);
+  const act = useStaffAct(projectId, toast);
+  if (!member) return null;
+  const live = member.live;
+  const { wait, state } = stateWords(member);
   return (
-    <div className="staff-head">
+    <div className="staff-head compact">
       <div className="staff-head-row">
-        <StaffAvatar name={member.name} color={member.color} />
-        <span className="staff-head-who">
-          <span className="staff-head-name truncate">{member.name}{member.role && <span className="staff-head-role"> · {member.role}</span>}</span>
-        </span>
-        <span className={`focus-pill tone-${tone}`} title={wait?.detail || live?.waiting_for || undefined} data-status={member.status}>
-          <span className={`focus-dot tone-${tone}`} aria-hidden />
-          <span className="staff-head-state truncate">{state}</span>
-          {facts && !wait && <span className="staff-head-facts"> · {facts}</span>}
-        </span>
-        <span className="grow" />
+        <span className={`focus-dot tone-${staffTone(member)}`} aria-hidden />
+        <span className="staff-head-state truncate" data-status={member.status} title={wait?.detail || live?.waiting_for || undefined}>{state}{facts && !wait && ` · ${facts}`}</span>
         {live && (
-          <div className="staff-head-actions">
-            <Button size="sm" icon="stop" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</Button>
-            <Button size="sm" icon="pause" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("focus.staff.pause")}</Button>
-            {/* The danger colour: releasing the member is the weightiest of the three. */}
-            <Button size="sm" variant="danger" onClick={() => void act("release")}>{t("focus.staff.release")}</Button>
-          </div>
-        )}
-      </div>
-      <div className="staff-facts">
-        {details ?? (
-          <span className="staff-head-meta truncate">
-            <HarnessBadge harness={member.harness} />
-            <span>{runs}</span>
-            {live?.branch && <span className="mono">{t("focus.staff.branch", { branch: live.branch })}</span>}
-            {task && <span>{t("focus.staff.task", { title: task.title })}</span>}
+          <span className="staff-head-actions">
+            <Button size="sm" icon="pause" onClick={() => void act(member, "pause")} disabled={live.pause_requested}>{t("ph.member.pause")}</Button>
+            <Button size="sm" icon="stop" onClick={() => void act(member, "interrupt")}>{t("focus.staff.interrupt")}</Button>
+            {release && <Button size="sm" variant="danger" onClick={() => void act(member, "release")}>{t("focus.staff.release")}</Button>}
           </span>
         )}
-        {children}
       </div>
+      {children}
+    </div>
+  );
+}
+
+/** The member where a chat's header has its title: its face, name and role, and how its work goes. */
+export function StaffWho({ staffId }: { staffId: string }) {
+  const { data: member } = useMember(staffId);
+  if (!member) return null;
+  const { wait, state } = stateWords(member);
+  const tone = staffTone(member);
+  return (
+    <span className="staff-who">
+      <StaffAvatar name={member.name} color={member.color} />
+      <span className="staff-head-name truncate">{member.name}{member.role && <span className="staff-head-role"> · {member.role}</span>}</span>
+      <span className={`focus-pill tone-${tone}`} title={wait?.detail || member.live?.waiting_for || undefined} data-status={member.status}>
+        <span className={`focus-dot tone-${tone}`} aria-hidden />
+        <span className="staff-head-state truncate">{state}</span>
+      </span>
+    </span>
+  );
+}
+
+/** The turn's three controls, at the head of a member's chat header while it works. */
+export function StaffControls({ projectId, staffId, toast }: { projectId: string; staffId: string; toast: (text: string) => void }) {
+  const { data: member } = useMember(staffId);
+  const act = useStaffAct(projectId, toast);
+  if (!member?.live) return null;
+  return (
+    // Each names itself on the button too: in a chat column narrower than the three words and the
+    // header's own glyphs, the words give way and the controls are their icons.
+    <span className="staff-head-actions staff-controls">
+      <Button size="sm" icon="stop" aria-label={t("focus.staff.interrupt")} title={t("focus.staff.interrupt")} onClick={() => void act(member, "interrupt")}><span className="staff-control-word">{t("focus.staff.interrupt")}</span></Button>
+      <Button size="sm" icon="pause" aria-label={t("focus.staff.pause")} title={t("focus.staff.pause")} onClick={() => void act(member, "pause")} disabled={member.live.pause_requested}><span className="staff-control-word">{t("focus.staff.pause")}</span></Button>
+      {/* The danger colour: releasing the member is the weightiest of the three. */}
+      <Button size="sm" variant="danger" icon="unlink" aria-label={t("focus.staff.release")} title={t("focus.staff.release")} onClick={() => void act(member, "release")}><span className="staff-control-word">{t("focus.staff.release")}</span></Button>
+    </span>
+  );
+}
+
+/** The line under a member's header: what runs it, the branch it works on, the card it works for. */
+export function StaffFacts({ projectId, staffId }: { projectId: string; staffId: string }) {
+  const { data: member } = useMember(staffId);
+  const { board } = useFocus(projectId);
+  if (!member) return null;
+  const live = member.live;
+  const task = live?.task_id ? board?.tasks.find((x) => x.id === live.task_id) : undefined;
+  const runs = [HARNESS_NAMES[member.harness], member.model, member.permission_mode].filter(Boolean).join(" · ");
+  return (
+    <div className="staff-facts">
+      <span className="staff-head-meta truncate">
+        <HarnessBadge harness={member.harness} />
+        <span>{runs}</span>
+        {live?.branch && <span className="mono">{t("focus.staff.branch", { branch: live.branch })}</span>}
+        {task && <span>{t("focus.staff.task", { title: task.title })}</span>}
+      </span>
     </div>
   );
 }

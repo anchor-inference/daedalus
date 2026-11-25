@@ -6,7 +6,9 @@ Checked here: the scope control asks the host for one project's or one chat's ca
 address, so a chat's own board can link to its place here; the pane sets the priority, the due date
 and the assignee with one PUT each; a card the operator keeps can be dragged into work; a move the host
 refuses is said under the button that asked, not in a toast; the history of the card is listed, and a
-card older than the week the host keeps says why its history is short.
+card older than the host's history table says that its earlier history was not recorded. A column's
+"+" makes the card in that column where the host allows it (not Review), and a refusal is the host's
+words under the form.
 """
 
 from __future__ import annotations
@@ -29,11 +31,13 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 WORDS = {
     "en": {"scope": "Board scope", "project": "Project", "chat": "Chat", "all": "All", "priority": "Priority", "high": "High · P2", "due": "Due",
-           "assignee": "Assignee", "you": "You", "doing": "Doing", "activity": "Activity", "kept": "Created in To do", "old": "a card's history is kept for 7 days",
-           "search": "Search tasks", "late": "overdue", "yours": "Yours", "clear": "Clear the due date"},
+           "assignee": "Assignee", "you": "You", "doing": "Doing", "activity": "Activity", "kept": "Created in To do", "old": "Earlier history was not recorded",
+           "search": "Search tasks", "late": "overdue", "yours": "Yours", "clear": "Clear the due date",
+           "title": "Title", "create": "Create", "agent": "The chat's agent"},
     "ru": {"scope": "Область доски", "project": "Проект", "chat": "Чат", "all": "Все", "priority": "Приоритет", "high": "Высокий · P2", "due": "Срок",
-           "assignee": "Исполнитель", "you": "Вы", "doing": "В работе", "activity": "Активность", "kept": "Создана в колонке «К работе»", "old": "история задачи хранится 7 дней",
-           "search": "Поиск по задачам", "late": "просрочена", "yours": "Ждёт вас", "clear": "Убрать срок"},
+           "assignee": "Исполнитель", "you": "Вы", "doing": "В работе", "activity": "Активность", "kept": "Создана в колонке «К работе»", "old": "Более ранняя история не записывалась",
+           "search": "Поиск по задачам", "late": "просрочена", "yours": "Ждёт вас", "clear": "Убрать срок",
+           "title": "Название", "create": "Создать", "agent": "Агент чата"},
 }
 REFUSED = "this task still has unfinished dependencies"
 # The app says the host's reason as a sentence, its first letter raised.
@@ -54,7 +58,9 @@ def board() -> BoardStub:
     ]
     stub = BoardStub(project(), staff=[], tasks=tasks)
     stub._own(stub.tasks[1], True)
-    stub.history["t-water"] = []
+    # A card older than the history table: its creation was rebuilt without its column.
+    stub.history["t-water"] = [{"seq": 1, "type": "task.created", "at": "2026-09-01T09:00:00Z", "actor": {"kind": "system", "id": None, "name": None},
+                                "from": None, "to": None, "text": "Created", "operation": None, "backfilled": True}]
     stub.refusals["t-taste"] = REFUSED
     return stub
 
@@ -156,6 +162,26 @@ def check(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(pane.locator(".task-block").filter(has_text=words["activity"])).to_contain_text(words["kept"])
     page.keyboard.press("Escape")
     expect(pane).to_have_count(0)
+
+    # Review is reached only through a result, so it has no "+"; Blocked takes a card from anyone.
+    expect(page.locator(".kanban-col[data-column='review'] .kanban-add")).to_have_count(0)
+    page.locator(".kanban-col[data-column='blocked'] .kanban-add").click()
+    sheet = page.locator(".board-new")
+    sheet.get_by_label(words["title"], exact=True).fill("Wait for the quote")
+    with page.expect_response(lambda r: urlsplit(r.url).path.endswith("/api/board") and r.request.method == "POST"):
+        sheet.get_by_role("button", name=words["create"], exact=True).click()
+    assert stub.created[-1]["status"] == "blocked", stub.created[-1]
+    expect(page.locator(".kanban-col[data-column='blocked'] .task-card")).to_have_count(1)
+    # Doing takes only a card the operator keeps: the sheet starts with "You", and handing it to the
+    # agent is refused in the host's words under the form.
+    page.locator(".kanban-col[data-column='doing'] .kanban-add").click()
+    sheet.get_by_label(words["title"], exact=True).fill("Renew the domain")
+    sheet.get_by_role("radio", name=words["agent"]).click()
+    with page.expect_response(lambda r: urlsplit(r.url).path.endswith("/api/board") and r.request.method == "POST" and r.status == 409):
+        sheet.get_by_role("button", name=words["create"], exact=True).click()
+    expect(sheet.locator(".task-refusal[role=alert]")).to_contain_text("dedicated result or launch command")
+    page.keyboard.press("Escape")
+    expect(sheet).to_have_count(0)
     overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 0, f"{lang}: the page scrolls sideways by {overflow}px"
 

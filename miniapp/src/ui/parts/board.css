@@ -96,7 +96,6 @@
 .task-card-who.you { color: var(--fg); font-weight: 500; }
 .task-card-due.late { color: var(--attention); }
 .task-card-prio { color: var(--fg-3); font-weight: 500; }
-.task-card-prio.p1, .task-card-prio.p2 { color: var(--attention); font-weight: 600; }
 .task-card-refusal, .task-refusal { font-size: var(--fs-13); line-height: 1.45; color: var(--attention); overflow-wrap: anywhere; }
 /* The compact card of a narrow column: the title and one line of state. */
 .task-card.compact { padding: 10px 12px; gap: 4px; border-radius: 10px; background: var(--card); }
@@ -204,6 +203,7 @@
 .task-log-row:last-child .task-log-rail i { visibility: hidden; }
 .task-log-body { flex: 1; min-width: 0; padding-bottom: 10px; display: flex; flex-direction: column; }
 .task-log-text { font-size: var(--fs-14); overflow-wrap: anywhere; }
+.task-log-cause { font-size: var(--fs-13); color: var(--fg-2); overflow-wrap: anywhere; }
 .task-log-time { font-size: var(--fs-12); color: var(--fg-3); }
 .task-pane-foot { flex: none; height: 64px; box-sizing: border-box; padding: 0 20px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 .task-pane-foot .btn.quietly, .task-sheet .btn.quietly { font-weight: 400; }
@@ -232,8 +232,10 @@
 .cb-sub { margin-top: 2px; font-size: var(--fs-12); color: var(--fg-3); }
 .cb-bar { height: 6px; margin-top: 8px; border-radius: 3px; background: var(--selected); overflow: hidden; }
 .cb-bar i { display: block; height: 100%; background: var(--live); }
-.cb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px; scrollbar-width: thin; }
-.cb-add-wrap { flex: none; margin: 12px; }
+/* The cards stand 24 px from the panel's edges, where the Overview's rows put their words and the
+   heading above starts; at 12 they ran wider than everything else in the panel. */
+.cb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; scrollbar-width: thin; }
+.cb-add-wrap { flex: none; margin: 12px 24px; }
 .cb-add { height: 52px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; display: flex; align-items: center; gap: 10px; color: var(--fg-3); }
 .cb-add:focus-within { border-color: var(--accent); color: var(--fg-2); }
 .cb-add.refused { border-color: var(--attention); }
@@ -265,7 +267,7 @@
   .ph-bar { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
   .ph-bar i { display: block; height: 100%; width: calc(var(--v, 0) * 1%); background: var(--fg-2); border-radius: 2px; }
   .ph-bar.ok i { background: var(--ok); }
-  .ph-board-more { display: block; width: 100%; min-height: var(--tap); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; text-align: left; cursor: pointer; }
+  .ph-board-more { display: block; width: 100%; min-height: var(--row-h-touch); padding: 0 var(--gutter); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 500; text-align: left; cursor: pointer; }
   .ph-board-none { padding: 0 var(--gutter) var(--space-2); font-size: var(--fs-14); color: var(--fg-3); }
   .ph-board-sk { padding-top: var(--space-4); }
   .ph-board-sk-sec { display: block; height: 14px; margin: var(--space-4) var(--gutter) var(--space-3); }
@@ -298,7 +300,7 @@
   .ph-taskpage-body { flex: 1; padding: var(--space-2) var(--gutter) var(--space-6); }
   .ph-taskpage-body[hidden] { display: none; }
   .ph-taskpage label.field { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .ph-taskpage input.field, .ph-taskpage select.field { height: var(--tap); border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
+  .ph-taskpage input.field, .ph-taskpage select.field { height: var(--row-h-touch); border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
   .ph-taskpage textarea.field { border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: var(--fs-16); }
   .ph-taskpage .pboard-brief legend, .ph-taskpage .pboard-contract-title { font-size: var(--fs-13); text-transform: none; letter-spacing: 0; }
   .ph-taskpage .sheet-foot { position: static; margin-top: var(--space-4); }
@@ -315,7 +317,7 @@
   .ph-result-sk { display: flex; flex-direction: column; gap: 10px; padding: var(--space-2) 0; }
   .ph-result-sk-card { height: 60px; border-radius: var(--radius-md); margin-top: var(--space-2); }
   .ph-taskpage .result-flow .ph-empty { padding: 48px 16px; }
-  .ph-taskpage .result-details > summary { min-height: var(--tap); display: flex; align-items: center; font-size: var(--fs-14); }
+  .ph-taskpage .result-details > summary { min-height: var(--row-h-touch); display: flex; align-items: center; font-size: var(--fs-14); }
   /* The decision footer, at the bottom of every tab. */
   .ph-decide { position: sticky; bottom: 0; z-index: 3; background: var(--bg); }
   .ph-decide:empty { display: none; }

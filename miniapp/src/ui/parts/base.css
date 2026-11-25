@@ -5,7 +5,7 @@
    under it would have to prove its box drawing and powerline glyphs on that grid first. */
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
-:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--r-sm); }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* A scroll bar is a thin thumb with no track, on every scroller: the platform's wide grey one cut a
    lane out of every panel and popover it appeared in. */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
@@ -54,7 +54,7 @@ a { color: var(--accent); text-decoration: none; }
 .pagehead .sub { font-size: var(--fs-12); color: var(--fg-3); }
 .pagehead-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .pagehead .iconbtn { background: transparent; color: var(--fg-2); }
-.pagehead .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.pagehead .iconbtn:hover { background: var(--hover); color: var(--fg); }
 .pagehead .iconbtn.on { background: var(--surface-3); color: var(--fg); }
 .pagehead .iconbtn.primary { background: var(--primary); color: var(--primary-ink); }
 /* A finger gets no hover to find a target by, so the header's plain icons show the box they are
@@ -68,9 +68,10 @@ a { color: var(--accent); text-decoration: none; }
    titles at six different x positions, which is what made the product read as six products. The
    column is the page's business; the header is not. Its height is --head-h, the 52 px every header
    of the app shares (a page's, a conversation's, a pane's), so the line under a page's header meets
-   the line under the sidebar's head and the chat's; the 24 px inset is the page's side margin. */
+   the line under the sidebar's head and the chat's; the 24 px inset is the page's side margin, at both
+   ends, so the last action stands as far from the window's edge as the title from the sidebar. */
 @media (min-width: 1024px) {
-  .pagehead { padding: 0 12px 0 24px; }
+  .pagehead { padding: 0 24px; }
   .pagehead-row { min-height: var(--head-h); gap: 8px; }
   .pagehead-title { flex: 0 1 auto; display: flex; align-items: baseline; gap: 10px; }
   .pagehead h1 { font-size: var(--fs-15); letter-spacing: 0; line-height: 1.3; }
@@ -97,10 +98,10 @@ a { color: var(--accent); text-decoration: none; }
   .pagehead-t .ic { vertical-align: -2px; margin-left: 4px; color: var(--fg-2); }
   .pagehead-t .chat-title { display: inline; font: inherit; }
   .pagehead-over, .pagehead .sub { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1.25; }
-  .pagehead-tb { display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: var(--tap); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .pagehead-tb { display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: var(--row-h-touch); padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .pagehead-tb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .pagehead-actions { gap: 0; }
-  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; }
+  .pagehead .iconbtn:not(.primary), .pagehead .pagehead-row > .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; background: none; }
   .pagehead > :not(.pagehead-row) { margin-left: var(--space-3); margin-right: var(--space-3); }
 }
 /* The page's own column: the list is a centred 880 px, reading prose 760, and a board, table or

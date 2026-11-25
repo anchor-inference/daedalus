@@ -2,6 +2,15 @@
 
 Notable changes, newest first. The repository's `main` is the released version.
 
+## Unreleased
+
+- **One interface for every screen.** Inter and JetBrains Mono, bundled; text from 12 px up, rows and buttons 32 px, page and pane headers 52 px with the title 24 px in. Six neutral themes recolour the frame and leave the three accents alone: violet for what is chosen and the one primary action, cyan for what runs or was added, orange for what needs you, has full access or was removed. Icons come from one set, every list, menu, sheet, tick and confirmation is drawn by the same controls, and no screen uses the browser's own list or dialog any more.
+- **A sidebar instead of the icon rail.** One 300 px column, still draggable: New chat, the destinations you pinned, More, then the chats or the orchestrated projects. More opens a launcher of every screen and page with a pin on each; ⌘K opens a palette that finds chats by name and by meaning, places, actions and settings. On a phone the same sidebar is the drawer.
+- **Chats.** The conversation is one 760 px column at every width, with the composer under it; the header carries the place, the title and the run. The right panel opens on an Overview of the chat (its state, model, changes, board, helpers, context and spend) and keeps each tool as a tab: Changes reverts or commits the chat's own working tree, Board lists the tasks the chat and its helpers made, and a Daedalus member's chat names the member in its one header.
+- **Inbox, Board, Changes, Terminals.** The Inbox is a list beside the entry it opens, with a done view and mark-unread. The Board opens a card in a pane beside the columns, makes a card straight into To do, Doing or Blocked, and shows a card's whole recorded history: who moved it, a changed title or priority, and why a dependent moved. Changes lists proposals beside a single diff with viewed marks. Terminals is a list of every terminal beside up to four live panes.
+- **Settings as a page.** Its sections in seven groups beside it, models and providers in one section with a connection test per provider, and a search that shows the rows themselves.
+- **The other screens follow.** Home and projects, calendar, memory, schedules, canvas, notes and previews, the companion, sign-in and first run, Quick Chat and the Chrome side panel, the orchestration mode and its project pages are drawn from the same headers, rows, panes and sheets.
+
 ## 2026-11-17 — desktop-v0.25.0
 
 - **Talk to the agent in your own language.** A chat can have the agent work in another language than yours, set from the language chip in the composer (on a phone, from the + sheet). A separate, cheap translator model stands in between: your message is translated before the agent reads it, and its answer is translated back after the run. The agent only ever reads its own language, so its history and the prompt cache stay intact. Your own words stay in the chat, with what the agent got one click away. Any note between steps, any answer and any question can also be translated on request. Settings → Translation holds the answer language and the translator.

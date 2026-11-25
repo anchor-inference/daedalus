@@ -55,7 +55,6 @@
   /* "No shadow" is written as a transparent one, never `none`: a rule that lists a drop after an
      inset edge (a host terminal's amber line) loses its whole box-shadow when one item is `none`. */
   --shadow-xs: 0 0 transparent;
-  --shadow-sm: 0 0 transparent;
   --shadow-md: 0 16px 48px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-lg: var(--shadow-md);
   --shadow-xl: var(--shadow-md);
@@ -136,7 +135,6 @@
   --card-row-h: 44px;   /* a row of a settings card on a desktop: a name and its value or switch */
   --card-row-h-lg: 56px; /* a settings card's row that leads a group: a provider, with its models under it */
   --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
-  --composer-toolbar-h: 32px;
   --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */
   --chip-h-dense: 24px; /* a dense chip: memory pills, a terminal pane's chips, a question's steps */
   --ctl-h-lg: 40px;     /* large icon buttons and voice actions */
@@ -176,13 +174,7 @@
   --t-fast: 150ms; --t-base: 180ms; --t-slow: 220ms;
   --ease-out: cubic-bezier(.23, 1, .32, 1); --ease-in: cubic-bezier(.4, 0, 1, 1);
   --press-scale: .97; --press-scale-icon: .94;
-  /* the names the older rules still use */
-  --radius: var(--radius-md);
-  --r-sm: var(--radius-sm);
-  --r-lg: var(--radius-lg);
-  --tap: var(--row-h-touch);
-  --bg-2: var(--surface-1);
-  --card-2: var(--surface-2);
+  /* Two names the Widget tool tells an agent its widget can read; the app itself writes --fg-2 and --primary-ink. */
   --muted: var(--fg-2);
   --accent-fg: var(--primary-ink);
 }
@@ -232,7 +224,6 @@
   --scrim: rgba(0, 0, 0, 0.35);
   --shadow-ring: 0 0 0 1px rgba(0, 0, 0, 0.08);
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 16px 48px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   --drop-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
   --drop-sm: 0 1px 2px rgba(0, 0, 0, 0.04);

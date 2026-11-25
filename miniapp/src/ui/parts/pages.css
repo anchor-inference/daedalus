@@ -9,26 +9,12 @@
 .settings-col .card .section-title { color: var(--fg); font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; line-height: var(--lh-ui); margin: 0 0 2px; }
 /* A sentence between a label and its card belongs to the label, not to the page above it. */
 .settings-col > .section-title + .sub, .settings-groups > .section-title + .sub { margin: -4px 2px 10px; max-width: 75ch; }
-/* Several groups under one deep-link target (the key proxy's): a column of labels and cards. */
-.settings-groups { display: flex; flex-direction: column; }
-.settings-groups > .card:last-child { margin-bottom: 0; }
-.settings-groups > .sub { max-width: 75ch; margin: 0 2px 16px; }
-.settings-groups > .sub.attn { margin-top: -8px; }
-.settings-col > .settings-groups { margin-bottom: 16px; }
-/* The foot of a card that adds one more: recessed, under a hairline, across the card's whole width. */
-.settings-col .card > .card-foot > .sub { flex: 1 1 200px; min-width: 0; }
-/* What follows is the desktop card's own arithmetic: a row or a list at the card's edge gives back the
-   padding it doubles, and the foot runs to the card's edges. A phone draws a group as its own list
-   (the phone block of settings.css) with no padding to give back, so none of it applies there. */
-.settings-col .card > .card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+/* The desktop card's own arithmetic: a row at the card's edge gives back the padding it doubles. A
+   phone draws a group as its own list (the phone block of settings.css) with no padding to give back,
+   so none of it applies there. */
 @media (min-width: 1024px) {
   .settings-col .card > .settings-row:first-child { margin-top: -8px; }
   .settings-col .card > .settings-row:last-child { margin-bottom: -8px; }
-  .settings-col .card > .mlist:first-child { margin-top: -8px; }
-  .settings-col .card > .mlist:last-child { margin-bottom: -8px; }
-  .settings-col .card > .card-foot { margin: 12px -16px -12px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--inset); }
-  .settings-col .card > .mlist + .card-foot, .settings-col .card > .settings-row + .card-foot { margin-top: 0; }
-  .settings-col .card > .mlist:empty + .card-foot { margin-top: 12px; }
   .settings-col .card > :is(.section-title, .sub) + .settings-row { margin-top: 10px; border-top: 1px solid var(--line); }
   /* A row after anything that is not a row (a disclosure, a meter, a list) starts under a hairline too,
      or the thing above it read as part of the row. */
@@ -41,11 +27,6 @@
    foot's whole width once it is open and needs no frame of its own inside it. */
 .provider-add > .opencode-add { flex: 1 1 100%; margin: 0; }
 .provider-add > .mpanel.add { flex: 1 1 100%; margin: 0; padding: 0; border: 0; background: none; }
-/* The key proxy: a new upstream is filled in under the ones there are, in their card. */
-.settings-col .card > .keyproxy-add:not(:first-child) { margin-top: 12px; }
-.settings-col .card > .sub + .keyproxy-add { padding-top: 12px; border-top: 1px solid var(--line); }
-.keyproxy-add > .sub { margin-bottom: 10px; }
-.keyproxy-add > .btnrow { margin-top: 12px; }
 /* Six themes, three to a row: at any width a fill of 148 px columns left the sixth alone on a row. */
 .settings-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
 .settings-themes button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: var(--row-h); padding: 8px 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; text-align: left; cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
@@ -81,14 +62,12 @@
 /* Settings → Chat: the learned style, as the host wrote it. */
 .style-profile { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); max-height: 240px; overflow: auto; }
 .prose-stepper { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0; }
-.prose-stepper-ctl { display: inline-flex; align-items: center; gap: 6px; }
 .prose-stepper-value { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }
 .prose-stepper-preview { margin: 0; max-width: 100%; color: var(--fg-2); font-family: var(--font-prose, var(--font)); line-height: var(--lh-prose); text-align: right; }
 .settings-unit { min-width: 64px; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; }
 .settings-row-ctl input.field:not([type="number"]) { margin: 0; }
 /* A short text value in the lane numbers use, ending where their fields end (before the units' slot). */
 .settings-inline-field { width: 180px; padding: 6px 10px; margin-right: 72px !important; }
-.settings-name-field { width: 220px; padding: 6px 10px; }
 .mpanel-rows { margin-top: 8px; border-top: 1px solid var(--line); }
 /* A model's price: three rates side by side wherever they fit, which on a phone is still one line each. */
 .model-price { border-top: 1px solid var(--line); }
@@ -114,10 +93,6 @@
 .settings-row + .btnrow { margin-top: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings-block { padding: 6px 0 10px; }
 .settings-row + .settings-block, .settings-block + .settings-row { border-top: 1px solid var(--line); }
-/* What opens beneath a row that needs more than one control (the cloud endpoint under a transcriber
-   set to it): indented and fenced by the same hairline, so it reads as that row's own. */
-.settings-disclosure { margin: 0 0 8px; padding: 4px 0 10px 14px; border-left: 1px solid var(--line); }
-.settings-disclosure label.field:first-child { margin-top: 4px; }
 .settings-subhead { margin: 18px 0 2px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
 /* A phone keeps a compact control beside its words; a control that cannot be compact takes its own
    right-aligned line under them (Row's `stack`), rather than squeezing the title to a word a line. */
@@ -138,34 +113,18 @@
   .settings-row-ctl > input.field, .settings-row-ctl > textarea, .settings-row-ctl > .keyproxy-key { flex: 1 1 100%; width: 100%; }
   /* A number and its unit are one box across the row, the unit inside it after the digits: fields
      with and without a unit then share both edges. */
-  .settings-row-ctl > .settings-num { flex: 1 1 100%; gap: 0; min-height: var(--ctl-h-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card-2); }
+  .settings-row-ctl > .settings-num { flex: 1 1 100%; gap: 0; min-height: var(--ctl-h-sm); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
   .settings-row-ctl > .settings-num:focus-within { border-color: var(--fg-3); }
   .settings-row-ctl > .settings-num:has(input[aria-invalid="true"]) { border-color: var(--bad); }
   .settings-row-ctl > .settings-num input.field { flex: 1; width: auto; min-width: 0; border: 0; background: transparent; box-shadow: none; outline: none; }
   .settings-row-ctl > .settings-num .settings-unit { min-width: 0; padding-right: 10px; }
   .settings-row-ctl > .settings-num .settings-unit:empty { padding: 0; }
   .settings-inline-field { width: min(100%, 260px); margin-right: 0 !important; }
-  .settings-name-field { flex: 1 1 160px; width: auto; }
 }
 .settings-color { display: inline-flex; align-items: center; gap: 8px; }
 .settings-color input { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
-.settings-faces { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }
-.settings-faces button { display: flex; align-items: baseline; gap: 8px; min-height: var(--row-h); padding: 6px 10px; border: 0; background: transparent; color: var(--fg); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
-.settings-faces button:hover { background: var(--surface-2); }
-.settings-font { display: flex; flex-direction: column; gap: 16px; }
-.settings-font > .segmented { align-self: flex-start; margin: 0; }
-.settings-font-preview { padding: 16px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
-.settings-font-preview h2.settings-specimen { margin: 0 0 8px; }
-.settings-font-catalogue { display: grid; gap: 8px; }
-.settings-font .field { margin: 0; }
-.settings-font-url { display: flex; align-items: center; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
-.settings-font-url .field { flex: 1; min-width: 0; }
-.settings-font-url .btn { flex: none; }
 @media (max-width: 599px) {
-  .settings-font-url { flex-direction: column; align-items: stretch; }
 }
-.settings-faces button.on { background: var(--surface-3); }
-h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; }
 
 
 /* On a phone: Settings and its grouped cards. */
@@ -185,12 +144,9 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
   .main .settings-col .card > .settings-row { min-height: var(--set-row-h); }
   .main .settings-col .card > :is(.settings-row, .settings-block):not(:is(.settings-row, .settings-block) + *) { border-top-left-radius: var(--radius-xl); border-top-right-radius: var(--radius-xl); }
   .main .settings-col .card > :is(.settings-row, .settings-block):not(:has(+ :is(.settings-row, .settings-block))) { border-bottom-width: 1px; border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl); box-shadow: var(--drop-xs); }
-  .main .settings-col .card > :not(.section-title):not(.sub):not(.settings-row):not(.settings-block):not(.btnrow):not(.card-foot):not(details):not(label):not(.field) { border-radius: var(--radius-xl); }
   .main .settings-col .card > :is(.loadbar, .integrations-list, .tgroups, ul) { padding: 12px var(--space-4); border: 1px solid var(--line); background: var(--card); box-shadow: var(--drop-xs); }
   .main .settings-col .card > .btnrow { margin: var(--space-2) 0 0; padding: 0; border: 0; }
   /* A card's foot is the desktop card's recessed last band; here the card is only a group, so the foot
-     is a plain row of its button and note under the list. */
-  .main .settings-col .card > .card-foot { margin: var(--space-3) 4px 0; padding: 0; border: 0; border-radius: 0; background: none; }
   /* The lists inside a card (models, keys, devices, the kinds of notification) are one card each, with
      hairlines between their rows. The default model is named by its tag; the blue stripe down the
      row's side said it a second time in a colour kept for what is live. An open row is tinted, so
@@ -202,9 +158,7 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
   .main .settings-col .card :is(.mlist, .nrows) > :first-child { border-top-left-radius: calc(var(--radius-xl) - 1px); border-top-right-radius: calc(var(--radius-xl) - 1px); }
   .main .settings-col .card :is(.mlist, .nrows) > :last-child { border-bottom-left-radius: calc(var(--radius-xl) - 1px); border-bottom-right-radius: calc(var(--radius-xl) - 1px); }
   .main .settings-col .card :is(.mlist, .nrows) > :is(.mrow, .nrow):not(:first-child) { border-top: 1px solid var(--line); }
-  .main .settings-col .card .mlist > .mrow.open { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
   .main .settings-col .card :is(.settings-row, .settings-block) + :is(.mlist, .nrows) { margin-top: var(--space-2); }
-  .main .settings-col .card > .mrow { margin: 0 0 var(--space-2); padding: 8px var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--drop-xs); }
   .main .settings-col .card .nrow-head { min-height: var(--set-row-h); }
   /* A model's or a provider's card leads with the provider's mark, as the model sheet does. */
   .mtitle { font-weight: 500; font-size: var(--fs-15); }
@@ -220,27 +174,22 @@ h2.settings-specimen { margin: 8px 0; font-size: var(--fs-18); font-weight: 500;
   /* Every control in a Settings row reaches 44 px to the finger: the segmented choices and the
      switches by an invisible margin (6 px on each side of the 32 px switch), the fields by their own
      height. */
-  .main .settings-col .segmented button { position: relative; min-height: 32px; min-width: var(--tap); }
+  .main .settings-col .segmented button { position: relative; min-height: 32px; min-width: var(--row-h-touch); }
   .main .settings-col .segmented button::after { content: ""; position: absolute; inset: -6px 0; }
   .main .settings-col .switch { position: relative; }
   .main .settings-col .switch::after { content: ""; position: absolute; inset: -6px; }
   .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn) { position: relative; }
   .main .settings-col .settings-row-ctl :is(.btn, .dropdown-btn)::after { content: ""; position: absolute; inset: -6px 0; }
-  .main .settings-col .card input.field:not([type="checkbox"]):not([type="range"]), .main .settings-col .card select.field { min-height: var(--tap); }
+  .main .settings-col .card input.field:not([type="checkbox"]):not([type="range"]), .main .settings-col .card select.field { min-height: var(--row-h-touch); }
   /* Inside a tile a long unit ("characters") would push a full-width number past the tile's edge at
      360 px; the field gives way instead. */
   .main .settings-col .card .settings-num { max-width: 100%; min-width: 0; }
   .main .settings-col .card .settings-num input.field { min-width: 0; }
   .main .settings-col .card .settings-unit { min-width: 0; }
   .main .settings-col .card > :is(input, select, textarea).field { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
-  /* A group that is not itself a card (a catalogue, the key proxy's lists) reads as the cards do: the
-     same grey label and line of words over it, and its tiles with the grouped card's corners. */
-  .main .settings-col .settings-groups > .section-title { margin: var(--space-5) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .main .settings-col .settings-groups > .section-title:first-child { margin-top: var(--space-2); }
-  .main .settings-col .settings-groups > .sub { margin: 0 4px var(--space-2); font-size: var(--fs-13); line-height: 1.4; color: var(--fg-2); }
   /* Settings and Usage in grouped cards */
   /* The language switch is a pair of small pills; each reaches 44 px to the finger. */
-  .segmented.lang button { position: relative; min-height: var(--chip-h); min-width: var(--tap); }
+  .segmented.lang button { position: relative; min-height: var(--chip-h); min-width: var(--row-h-touch); }
   .segmented.lang button::after { content: ""; position: absolute; inset: -8px 0; }
   .settings-col .card { border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--card); }
   .settings-row { min-height: var(--set-row-h); }

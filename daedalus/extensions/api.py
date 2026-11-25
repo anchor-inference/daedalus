@@ -1815,7 +1815,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     )
 
     install_routes(api, app, auth)
-    # Settings → Rules: the action categories, their levels and the review's decision log.
+    # Settings → Approvals: the action categories, their levels and the review's decision log.
     api_action_rules.register(api, app, auth)
     api_attempt_diagnostics.register(api, app, auth)
     api_board.register(api, app, auth)

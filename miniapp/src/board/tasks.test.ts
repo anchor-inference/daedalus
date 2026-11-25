@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n";
-import { assigneeName, cardState, dueDay, dueLabel, dueValue, eventText, movesFor, taskText, type BoardTask } from "./tasks";
+import { assigneeName, cardState, dueDay, dueLabel, dueValue, eventCause, eventText, movesFor, taskText, type BoardTask } from "./tasks";
 
 const task = (extra: Partial<BoardTask> = {}): BoardTask => ({
   id: "7f2a1c", title: "Order form", status: "todo", priority: 3, acceptance: "", checklist: [], depends_on: [], session_id: null, origin_session_id: "s1",
@@ -63,6 +63,15 @@ describe("a board card", () => {
     expect(eventText({ seq: 1, type: "task.moved", at, actor, from: "todo", to: "doing", text: "todo → doing" })).toBe("To do → Doing");
     expect(eventText({ seq: 2, type: "task.assigned", at, actor, from: null, to: null, text: "", assignee: { kind: "operator" } })).toBe("You kept it for yourself");
     expect(eventText({ seq: 3, type: "task.changed", at, actor, from: null, to: null, text: "", due_at: null })).toBe("Due date cleared");
+    expect(eventText({ seq: 5, type: "task.changed", at, actor, from: null, to: null, text: "", field: "priority", change: { from: 3, to: 1 } })).toBe("Priority Normal → Urgent");
+    expect(eventText({ seq: 6, type: "task.changed", at, actor, from: null, to: null, text: "", field: "title", change: { from: "a", to: "Book the venue" } })).toBe("Renamed to “Book the venue”");
+    expect(eventText({ seq: 7, type: "task.removed", at, actor, from: null, to: null, text: "" })).toBe("Removed from the board");
+    // A creation rebuilt from an old card names no column rather than guessing To do.
+    expect(eventText({ seq: 8, type: "task.created", at, actor, from: null, to: null, text: "Created", backfilled: true })).toBe("Created");
+    const moved = { seq: 9, type: "task.moved", at, actor, from: "blocked", to: "todo", text: "", cause: { task_id: "3f2a1c", title: "Book the venue" } };
+    expect(eventCause({ ...moved, operation: "board.task.close" })).toBe("because “Book the venue” was closed");
+    expect(eventCause({ ...moved, operation: "review.verdict" })).toBe("because “Book the venue” was finished");
+    expect(eventCause({ ...moved, cause: undefined })).toBe("");
     setLang("ru");
     expect(eventText({ seq: 4, type: "task.created", at, actor, from: null, to: "todo", text: "" })).toBe("Создана в колонке «К работе»");
   });

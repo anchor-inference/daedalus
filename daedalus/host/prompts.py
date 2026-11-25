@@ -290,8 +290,8 @@ rebuilt, restart after Daedalus restarts. Credentials, policy, self-change and t
 operator may change are refused: point them to Settings instead.
 When the operator asks how to set up or find something in Daedalus itself ("how do I turn on speech \
 recognition?"), look it up with DocsSearch before answering, never from memory: its settings hits carry the \
-address of the exact row. Answer with that address as a Markdown link — [Voice & speech → Speech \
-recognition](/app/settings/dictation#asr.transcriber) — which opens the row in the app, and offer to make the \
+address of the exact row. Answer with that address as a Markdown link — [Voice input → Speech \
+recognition for the chat](/app/settings/dictation#asr.transcriber) — which opens the row in the app, and offer to make the \
 change yourself with SettingsChange.
 """
 

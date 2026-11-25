@@ -68,7 +68,7 @@
 .fb-crumbs.edit { border: 0; outline: 0; color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); padding-left: 8px; font: inherit; font-family: var(--mono); font-size: var(--fs-12); }
 .fb-crumb-wrap { display: inline-flex; align-items: center; min-width: 0; }
 .fb-crumb { background: none; border: 0; padding: 2px 4px; border-radius: 4px; color: inherit; font: inherit; cursor: pointer; }
-.fb-crumb:hover { background: var(--surface-3); color: var(--fg); }
+.fb-crumb:hover { background: var(--hover); color: var(--fg); }
 .fb-crumb.last { color: var(--fg); }
 .fb-sep { color: var(--fg-3); }
 .fb-crumb-edit { margin-left: auto; background: none; border: 0; padding: 2px 4px; color: var(--fg-3); cursor: pointer; display: inline-flex; }
@@ -77,15 +77,15 @@
 .fb-main { display: grid; grid-template-columns: 188px minmax(0, 1fr); min-height: 0; }
 .sheet .fb-main { height: 264px; }
 .fb-places { border-right: 1px solid var(--line); padding: 6px; overflow-y: auto; display: flex; flex-direction: column; }
-.fb-places-h { padding: 8px 8px 3px; font-size: var(--fs-11); color: var(--fg-3); }
+.fb-places-h { padding: 8px 8px 3px; font-size: var(--fs-12); color: var(--fg-3); }
 .fb-place { height: var(--ctl-h-sm); flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; min-width: 0; }
-.fb-place:hover { background: var(--surface-3); }
+.fb-place:hover { background: var(--hover); }
 .fb-place.on { background: var(--surface-3); color: var(--fg); }
 .fb-place .ic, .fb-place > svg { color: var(--fg-3); flex: none; }
 .fb-place.fav > svg { color: var(--warn); }
 .fb-list { overflow-y: auto; padding: 4px 6px; display: flex; flex-direction: column; min-width: 0; }
 .fb-row { height: var(--row-h-dense); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; min-width: 0; }
-.fb-row:hover { background: var(--surface-3); }
+.fb-row:hover { background: var(--hover); }
 .fb-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .fb-row > svg { color: var(--fg-3); flex: none; }
 .fb-row.sel { background: var(--surface-3); }
@@ -93,9 +93,9 @@
 .fb-row.dim { color: var(--fg-3); }
 .fb-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fb-row.sub .fb-name { display: flex; gap: var(--space-2); align-items: baseline; }
-.fb-hash { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
-.fb-time { font-size: var(--fs-11); color: var(--fg-3); width: 56px; text-align: right; flex: none; }
-.fb-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: var(--fs-11); font-weight: 500; background: var(--surface-3); color: var(--fg-2); flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fb-hash { font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
+.fb-time { font-size: var(--fs-12); color: var(--fg-3); width: 56px; text-align: right; flex: none; }
+.fb-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: var(--fs-12); font-weight: 500; background: var(--surface-3); color: var(--fg-2); flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-badge.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
 .fb-badge.acc { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
 .fb-group { height: 30px; flex: none; display: flex; align-items: center; gap: var(--space-2); margin-top: 4px; padding: 0 8px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; }
@@ -121,7 +121,7 @@
 .fb-okline, .fb-warnline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .fb-okline { color: var(--ok); }
 .fb-warnline { color: var(--warn); }
-.fb-host { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-11); font-weight: 600; flex: none; }
+.fb-host { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); font-size: var(--fs-12); font-weight: 600; flex: none; }
 .fb-warn { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 8px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-12); }
 .fb-warn > svg { color: var(--warn); flex: none; }
 /* A folder other projects use already: a question, not a fault, so it wears the colour of a note rather than the
@@ -142,7 +142,7 @@
   .sheet.np-sheet.ph-sheet .sheet-body { padding-bottom: 0; }
   .sheet.np-sheet .np-foot { flex-wrap: wrap; }
   .sheet.np-sheet .np-hint { flex-basis: 100%; }
-  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--tap); border-radius: 12px; }
+  .sheet.np-sheet .np-foot .btn { flex: 1; min-height: var(--row-h-touch); border-radius: 12px; }
   .np-choice, .np-two, .np-extras-body { grid-template-columns: 1fr; }
   .np-extras-body { padding-left: 0; }
   .np-card { padding: var(--space-3); }
@@ -180,5 +180,5 @@
 .moves-now { display: flex; flex-direction: column; padding: var(--space-1) 0; }
 .moves-now-head { padding: 0 var(--space-2); font-size: var(--fs-12); }
 .moves-now-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--row-h); padding: 0 var(--space-2); background: none; border: 0; border-radius: var(--radius-sm); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
-.moves-now-row:hover { background: var(--surface-2); }
+.moves-now-row:hover { background: var(--hover); }
 .moves-now-row .sub { white-space: nowrap; }

@@ -205,8 +205,8 @@
   .sidebar-head { gap: var(--space-2); padding: 0 var(--space-1) 0 14px; }
   .sb-mark { position: relative; }
   .sb-mark::after { content: ""; position: absolute; inset: -11px; }
-  .sb-mode { height: var(--tap); font-size: var(--fs-16); }
-  .sidebar-head .iconbtn, .sidebar-foot .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .sb-mode { height: var(--row-h-touch); font-size: var(--fs-16); }
+  .sidebar-head .iconbtn, .sidebar-foot .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; }
   .sidebar-head .iconbtn > .ic, .sidebar-foot .iconbtn > .ic { width: 20px; height: 20px; }
   .sb-pinned-nav { gap: 0; }
   .sb-nav, .sb-row, .sb-account { font-size: var(--fs-15); }
@@ -214,22 +214,22 @@
   .sb-newchat .sb-new-more { display: none; }
   .sidebar .screen { padding: var(--space-3) var(--space-2) var(--space-4); }
   .sidebar .sb-acts { display: none; }
-  .sb-sec { height: var(--tap); padding: 0 0 0 var(--space-3); }
+  .sb-sec { height: var(--row-h-touch); padding: 0 0 0 var(--space-3); }
   .sb-sec + .sb-sec, .sb-list > * + .sb-sec { margin-top: var(--space-2); }
-  .sb-sec-link { height: var(--tap); }
-  .sb-sec .iconbtn.sb-sec-add { width: var(--tap); height: var(--tap); border-radius: 12px; }
+  .sb-sec-link { height: var(--row-h-touch); }
+  .sb-sec .iconbtn.sb-sec-add { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; }
   .sb-sec .iconbtn.sb-sec-add > .ic { width: 20px; height: 20px; }
   .sb-kids > .sb-row { padding-left: 40px; }
-  .sb-sub, .sb-kids > .sb-row.sb-sub { height: var(--tap); }
+  .sb-sub, .sb-kids > .sb-row.sb-sub { height: var(--row-h-touch); }
   .sb-subs { position: relative; }
   .sb-subs::after { content: ""; position: absolute; inset: -12px -6px; }
   .sb-tools { padding: var(--space-2) var(--space-2) var(--space-1); }
-  .sb-search, .sb-lens { height: var(--tap); }
+  .sb-search, .sb-lens { height: var(--row-h-touch); }
   .sb-search input { font-size: var(--fs-16); }
-  .sb-clear, .sb-lens-clear { height: var(--tap); }
-  .sb-clear { width: var(--tap); }
-  .sidebar-foot { height: calc(var(--tap) + var(--space-3)); }
-  .sb-account { height: var(--tap); }
+  .sb-clear, .sb-lens-clear { height: var(--row-h-touch); }
+  .sb-clear { width: var(--row-h-touch); }
+  .sidebar-foot { height: calc(var(--row-h-touch) + var(--space-3)); }
+  .sb-account { height: var(--row-h-touch); }
   .sb-avatar { width: 24px; height: 24px; }
 }
 

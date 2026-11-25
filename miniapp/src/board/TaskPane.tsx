@@ -16,12 +16,11 @@ import { closeCard, closeItems } from "./operatorClose";
 import type { ChatInfo } from "./BoardColumns";
 import type { TaskWrites } from "./useTaskWrites";
 import {
-  cardState, columnLabel, dueLabel, dueValue, eventActor, eventText, isFinished, movesFor, priorityLabel, shortId, taskText,
+  cardState, columnLabel, dueLabel, dueValue, eventActor, eventCause, eventText, isFinished, movesFor, priorityLabel, shortId, taskText,
   type BoardTask, type TaskEvent,
 } from "./tasks";
 
 /** How far back a card's history goes: the host keeps its events this long and no longer. */
-const HISTORY_DAYS = 7;
 
 export type TaskPaneProps = {
   task: BoardTask;
@@ -287,22 +286,24 @@ function History({ task, live }: { task: BoardTask; live: boolean }) {
     if (seen.current !== now) { seen.current = now; invalidate(key); }
   }, [key, task.updated_at]);
   const events = [...(data ?? [])].reverse();
-  const old = Date.now() - Date.parse(task.created_at) > HISTORY_DAYS * 86400_000;
-  // The host keeps events a week: an older card's earliest lines are gone, and the list says so.
-  const cut = old && !(data ?? []).some((e) => e.type === "task.created");
+  // The host records every change from the day its history table was made; the lines it rebuilt then
+  // from what the card still carried are marked, and the list says that what came before is incomplete.
+  const cut = (data ?? []).some((e) => e.backfilled);
   return (
     <Block title={t("board.activity")}>
       {error && !data && <div className="task-none">{error}</div>}
-      {data && events.length === 0 && <div className="task-none">{t("board.activity.none", { n: HISTORY_DAYS })}</div>}
+      {data && events.length === 0 && <div className="task-none">{t("board.activity.none")}</div>}
       {events.length > 0 && (
         <ol className="task-log">
           {events.map((event, i) => {
             const actor = eventActor(event);
+            const cause = eventCause(event);
             return (
               <li key={event.seq} className="task-log-row">
                 <span className="task-log-rail" aria-hidden="true"><span className={`kanban-dot ${i === 0 && live ? "live" : ""}`} /><i /></span>
                 <span className="task-log-body">
                   <span className="task-log-text">{eventText(event)}</span>
+                  {cause && <span className="task-log-cause">{cause}</span>}
                   <span className="task-log-time">{[absTime(event.at), actor].filter(Boolean).join(" · ")}</span>
                 </span>
               </li>
@@ -310,7 +311,7 @@ function History({ task, live }: { task: BoardTask; live: boolean }) {
           })}
         </ol>
       )}
-      {cut && events.length > 0 && <div className="task-none">{t("board.activity.cut", { n: HISTORY_DAYS })}</div>}
+      {cut && events.length > 0 && <div className="task-none">{t("board.activity.cut")}</div>}
     </Block>
   );
 }
