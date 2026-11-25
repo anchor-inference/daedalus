@@ -136,6 +136,7 @@ from daedalus.host.policy import (
     Rule,
     approval_key,
     canonical,
+    project_scope_refusal,
     server_grant,
     similar_covers,
     similar_grant,
@@ -186,6 +187,7 @@ from daedalus.stores.inference_budget import InferenceBudget
 from daedalus.stores.knowledge import KnowledgeStore, project_facts_note
 from daedalus.stores.media import MediaStore
 from daedalus.stores.persistent import PersistentMemory, PersistentWorkspace
+from daedalus.stores.project_approvals import ProjectApprovals
 from daedalus.stores.project_environment import EnvironmentStore
 from daedalus.stores.projects import FolderSpec, Project, ProjectFolder, ProjectSettings, ProjectStore
 from daedalus.stores.provider_holds import (
@@ -881,6 +883,9 @@ class SessionManager:
             home=Path.home(),
             local_env="host" if settings.native else "container",
         )
+        self.project_rules = ProjectApprovals(db)
+        """What the operator allowed for every chat of a project; the gate reads it without a query."""
+        self.projects.on_removed.append(self.project_rules.forget)
         personas = settings.bot_repo_dir / "personas"
         # Read through the live configuration, not a copy: a preset added in Settings is a model a
         # staff member may be given at once, without a restart.
@@ -1093,6 +1098,7 @@ class SessionManager:
         # roots it compares against are read — and where a folder of our own that is not on disk is
         # put back, so the first run after a start is not the thing that discovers it missing.
         await self.projects.ensure_roots()
+        await self.project_rules.load()
         if interrupted := await InferenceBudget(self.db).recover_interrupted():
             logger.warning("%d provider call(s) were open when the last process stopped; their spend is unknown", interrupted)
         # New runs wait until resume_unfinished() has continued what the previous process left behind;
@@ -8093,6 +8099,11 @@ class SessionManager:
             # A grant made for a span ("every tool of this server, for six hours") stops answering at
             # its end, and the next call is asked again like the first.
             similar = [g for g in state.metadata.get("policy_similar") or [] if standing_alive(g, now)] if state is not None and turn is None else []
+            if state is not None and turn is None:
+                # The project's own rules answer after the session's, in every chat of the project and
+                # for a member of its team; they pass through the same filters below, so a run that
+                # read another agent's words uses neither.
+                similar += self._project_standing(state)
             if touch is not None:
                 # Only what the operator allowed knowing about the reply: a grant a touched turn could
                 # spend from before would answer a question nobody was shown, and so would a standing one.
@@ -8655,9 +8666,7 @@ class SessionManager:
         standing = [g for g in (state.metadata.get("policy_similar") or [])
                     if standing_alive(g) and {k: v for k, v in g.items() if k != "at"} != {k: v for k, v in family.items() if k != "at"}]
         standing.append(family)
-        resolved = [k for k, refused in (state.metadata.get("policy_pending") or {}).items()
-                    if isinstance(refused.get("similar"), dict)
-                    and similar_covers(family, str(refused.get("tool") or ""), str(refused["similar"].get("rule") or ""), refused["similar"])]
+        resolved = self._covered_requests(state, family)
         approves = [self._drop_pending(state, k) for k in resolved]
         for meta in (state.metadata, state.session.metadata):
             meta["policy_similar"] = standing[-20:]
@@ -8669,6 +8678,110 @@ class SessionManager:
             await self._resume_after_grant(session_id, [item for item in approves if item])
         return {"key": key, "similar": family, "resolved": resolved, "approves": approves,
                 "standing": list(state.metadata["policy_similar"])}
+
+    @staticmethod
+    def _covered_requests(state: SessionState, family: dict[str, Any]) -> list[str]:
+        """The keys of the requests still open that a standing grant for ``family`` answers."""
+        return [k for k, refused in (state.metadata.get("policy_pending") or {}).items()
+                if isinstance(refused.get("similar"), dict)
+                and similar_covers(family, str(refused.get("tool") or ""), str(refused["similar"].get("rule") or ""), refused["similar"])]
+
+    def _project_standing(self, state: SessionState) -> list[dict[str, Any]]:
+        """The rules of the chat's own project, or none for a chat that is not in one.
+
+        A lone chat lives in a scratch project of its own and the installation's own project is a
+        system one: neither has rules, since neither can be granted any (:meth:`grant_project`)."""
+        project = state.project
+        if project is None or project.settings.ephemeral or project.settings.system:
+            return []
+        return self.project_rules.standing(project.id)
+
+    def project_approvals(self, state: SessionState) -> list[dict[str, Any]]:
+        """The standing approvals of the chat's project as the app lists them: empty for a chat that is in none."""
+        project = state.project
+        if project is None or project.settings.ephemeral or project.settings.system:
+            return []
+        return self.project_rules.rows(project.id)
+
+    def _project_grant_basis(self, state: SessionState, key: str, via: str) -> tuple[Project, dict[str, Any]]:
+        """The project and the family a project grant for an open request would be made of, or ``ValueError`` saying why not.
+
+        One place for the refusals, so the card's offer (:meth:`project_scope_of`) and the grant itself cannot disagree."""
+        project = state.project
+        if project is None or project.settings.ephemeral or project.settings.system:
+            raise ValueError("this chat belongs to no project, so there is nothing to allow it for; allow similar calls in this chat instead")
+        if via == "orchestrator":
+            raise ValueError("only the operator allows calls for a whole project")
+        if agent_talk.touch_of(state.metadata) is not None or state.guest_turn is not None:
+            raise ValueError("another agent's or a guest's text reached this run, so nothing standing is granted in it; allow the call once instead")
+        key = self._approval_key(key)
+        if ((state.metadata.get("policy_pending") or {}).get(key) or {}).get("blocked"):
+            raise ValueError("the auto-review blocked this call; the operator lets it through once at a time, not for a project")
+        family = self.similar_of(state.session.id, key)
+        if family is None:
+            raise ValueError("this request has no narrower family of calls to allow; allow it once instead")
+        if (why := project_scope_refusal(str(family.get("rule") or ""), [r.id for r in self.policy().rules if r.source == "config"])) is not None:
+            raise ValueError(why)
+        return project, family
+
+    def project_scope_of(self, session_id: str, key: str) -> dict[str, Any]:
+        """Whether "Allow similar in this project" is on offer for an open request, and why not when it is not."""
+        state = self._states.get(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        try:
+            project, _family = self._project_grant_basis(state, key, "app")
+        except ValueError as exc:
+            return {"available": False, "reason": str(exc)}
+        return {"available": True, "project": {"id": project.id, "name": project.name}}
+
+    async def grant_project(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
+        """The operator allows calls like a refused one in every chat of the chat's project, until they take it back.
+
+        The family is the one :meth:`grant_similar` would grant, fixed when the call was refused, and
+        no wider: it is stored as it is and read by the same matcher. What is refused here and not there
+        is what a grant that outlives the chat must not carry (:meth:`_project_grant_basis`):
+
+        - a lone chat or the installation's own project, which has no project to grant to;
+        - a call the auto-review blocked, whose override is one call at a time (:meth:`_overridable`);
+        - a question outside :data:`daedalus.host.policy.PROJECT_SCOPE_RULES` and the operator's own rules;
+        - a run another agent's or a guest's words reached, for the reason a standing grant is refused there;
+        - anyone but the operator: a team's orchestrator answers for its members' work, not for the project's future.
+
+        Bypass and the policy's refusals are untouched: a grant only answers a question, and the gate
+        gives it to a call only after the policy asked one.
+        """
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        key = self._approval_key(key)
+        project, family = self._project_grant_basis(state, key, via)
+        rule = await self.project_rules.add(project.id, family, session_id=session_id, via=via)
+        resolved = self._covered_requests(state, family)
+        approves = [self._drop_pending(state, k) for k in resolved]
+        await self.sessions.update_metadata(session_id, state.session.metadata)
+        for k in resolved:
+            await self._publish(state, "permission.resolved", {"request_id": k, "request_ref": f"policy:{session_id}:{k}", "decision": "allow", "via": via,
+                                                                "scope": "project", "rule_id": rule["id"]})
+        await self._announce_approvals(project.id)
+        logger.warning("project %s: calls like %s allowed for every chat of it (rule %s) from session %s via %s", project.id, family.get("label"), rule["id"], session_id, via)
+        await self._resume_after_grant(session_id, [item for item in approves if item])
+        return {"key": key, "rule": rule, "resolved": resolved, "approves": approves, "rules": self.project_rules.rows(project.id)}
+
+    async def revoke_project_rule(self, project_id: str, rule_id: str, *, via: str) -> list[dict[str, Any]]:
+        """Take one of a project's rules back; the next call it would have answered is asked again, in any chat."""
+        if not await self.project_rules.revoke(project_id, rule_id):
+            raise KeyError(f"no standing approval {rule_id!r} in this project")
+        logger.warning("project %s: the standing approval %s was taken back via %s", project_id, rule_id, via)
+        await self._announce_approvals(project_id)
+        return self.project_rules.rows(project_id)
+
+    async def _announce_approvals(self, project_id: str) -> None:
+        """Tell the windows showing the project that its list of standing approvals changed."""
+        try:
+            await self.bus.publish("project.changed", {"change": "approvals", "actor": "operator"}, project_id=project_id)
+        except Exception:  # noqa: BLE001 — the list is stored; a window that misses the event reads it on its next visit
+            logger.warning("could not announce the approvals of project %s", project_id, exc_info=True)
 
     async def refuse(self, session_id: str, key: str, *, via: str) -> dict[str, Any]:
         """The operator leaves a refused call refused. Nothing changes for the agent, which was already

@@ -7,7 +7,7 @@ import json
 import os
 import sqlite3
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -506,7 +506,7 @@ _HELD = {
     "recurring_cycles": "automation history", "project_briefs": "a brief", "watches": "watches",
     "asks": "questions", "knowledge_fact_versions": "project knowledge", "actor_grants": "granted authority",
     "planning_budgets": "a budget", "project_goal_budgets": "a budget", "project_goal_revisions": "a goal", "resource_profile_versions": "a resource profile",
-    "project_environments": "an environment",
+    "project_environments": "an environment", "project_approval_rules": "standing approvals",
 }
 
 
@@ -660,6 +660,8 @@ class ProjectStore:
         self._managed_root = Path(os.path.normpath(managed_root.expanduser())) if managed_root is not None else None
         self.local_env = local_env or db.local_env
         """The environment this process runs in; its folders are the ones its own tools can reach."""
+        self.on_removed: list[Callable[[str], None]] = []
+        """Told the id of each project :meth:`delete` has removed, for what is held in memory about it."""
 
     @property
     def roots(self) -> tuple[Path, ...]:
@@ -1274,6 +1276,8 @@ class ProjectStore:
             purge = Purge(conn)
             await purge.rows("projects", "id = ?", (project_id,))
             await purge.finish()
+        for told in self.on_removed:
+            told(project_id)
         await self.list()
 
     # -- folders ---------------------------------------------------------------------

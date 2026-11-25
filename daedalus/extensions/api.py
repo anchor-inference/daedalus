@@ -109,6 +109,7 @@ from daedalus.extensions import (
     api_pages,
     api_panel,
     api_plugins,
+    api_project_approvals,
     api_project_environment,
     api_project_start,
     api_projects,
@@ -1805,6 +1806,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
+    api_project_approvals.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
     # Moving a folder between the container and the host, as a background job.
     api_folder_move.register(api, app, auth)
@@ -5613,7 +5615,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # ``server``: the MCP server "Allow all from <server>" would allow, with the spans offered.
             server = manager.server_of(session_id, key)
             return {"similar": manager.similar_of(session_id, key),
-                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None}
+                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None,
+                    # Whether "Allow similar in this project" is offered, and the reason when it is not.
+                    "project": manager.project_scope_of(session_id, key)}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -5632,11 +5636,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/sessions/{session_id}/policy/standing")
     async def policy_standing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left."""
+        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left,
+        and beside them, as ``project``, the rules its project holds for every chat (taken back from the project)."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        return {"standing": manager.standing(state)}
+        return {"standing": manager.standing(state), "project": manager.project_approvals(state)}
 
     @api.delete("/api/sessions/{session_id}/policy/standing/{grant_id}")
     async def policy_revoke_standing(session_id: str, grant_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

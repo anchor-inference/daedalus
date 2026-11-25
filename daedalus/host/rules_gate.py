@@ -45,6 +45,7 @@ from daedalus.host.policy import (
     canonical,
     similar_covers,
     similar_grant,
+    standing_words,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,7 @@ class RulesGate:
             family = similar_grant(tool, arguments, rule)
             standing = next((g for g in similar or () if similar_covers(g, tool, rule, family)), None)
             if standing is not None:
-                return Decision(ALLOW, f"allowed by the operator for this session: {standing.get('label')}", rule, hosts=decision.hosts)
+                return Decision(ALLOW, f"allowed by the operator {standing_words(standing)}: {standing.get('label')}", rule, hosts=decision.hosts)
         if talk and (ruled.level in ("ask", "handoff") or ruled.reviewed):
             decision.review = ruled
             return decision

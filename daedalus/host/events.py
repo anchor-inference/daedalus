@@ -208,6 +208,10 @@ class PermissionResolved(TypedDict):
     """``done``: a handoff the operator did themselves (or put aside)."""
     via: str
     by: NotRequired[str]
+    scope: NotRequired[str]
+    """``project`` when the answer was "allow similar calls in this project", which outlives the chat."""
+    rule_id: NotRequired[str]
+    """The project's standing approval the answer created."""
 
 
 class TerminalCreated(TypedDict):

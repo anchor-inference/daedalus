@@ -113,7 +113,17 @@ tool the same answer carries `server`: `{"name", "hours", "default_hours"}`, and
 for the rest of the session) allows every tool of that server for that long. `GET …/policy/standing`
 lists the session's standing grants of both kinds with the time each has left, and `DELETE
 …/policy/standing/{id}` takes one back. A guest's turn, and a run that has read another agent's reply,
-neither uses nor makes one. An action the
+neither uses nor makes one. The same answer carries `project`: `{"available": true, "project": {"id",
+"name"}}` when the family can also be allowed for every chat of the chat's project, or `{"available":
+false, "reason"}`; `POST …/policy/grant-project` with `{"key"}` does it, with the same family and the same
+matcher as the session grant, until it is taken back, and answers 400 with the reason for a chat in no
+project, a call the auto-review blocked, a question that is always asked again (anything but a host outside
+the egress allowlist, an MCP tool's annotations and the operator's own rules) and an orchestrator's
+request. `GET /api/projects/{id}/approval-rules` lists a project's rules (`{"rules": [{"id", "tool",
+"rule", "kind", "value", "hosts", "label", "created_at", "session_id", "via"}]}`) and `DELETE
+…/approval-rules/{rule_id}` takes one back for every chat; `GET …/policy/standing` lists them too, as
+`project`. Granting announces `permission.resolved` with `scope: "project"` and `rule_id`, and a change of the
+list `project.changed` with `change: "approvals"`. An action the
 operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
 `kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
 granted. A call the auto-review blocked arrives as `permission.pending` with `blocked: {"reason",
