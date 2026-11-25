@@ -139,9 +139,20 @@ class FakeProviders:
         return {}
 
 
+class FakeHealth:
+    """No model is marked: the settings routes here are about providers, not their models' health."""
+
+    def broken(self, _config: Any, _preset_id: str) -> None:
+        return None
+
+    async def view(self, _config: Any) -> dict[str, Any]:
+        return {}
+
+
 class FakeManager:
     def __init__(self) -> None:
         self.providers = FakeProviders()
+        self.model_health = FakeHealth()
 
     async def list_sessions(self, limit: int = 100) -> list[dict[str, Any]]:
         return []

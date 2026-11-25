@@ -144,8 +144,10 @@ def desktop(page: Page, lang: str) -> None:
     expect(rows).to_have_count(1)
     row = rows.first
     expect(row).to_have_attribute("data-project", PID)
-    expect(row.locator(".orch-row-meta")).to_contain_text(words["staff"])
-    expect(row.locator(".orch-row-meta")).to_contain_text(words["working"])
+    # One line a project: its state at the right edge, the team's size and who works in its tooltip.
+    expect(row).to_have_attribute("title", re.compile(words["staff"]))
+    expect(row).to_have_attribute("title", re.compile(words["working"]))
+    assert row.evaluate("el => el.getBoundingClientRect().height") <= 32, "a project is one 32 px row"
     expect(row.locator(".needs-badge")).to_have_text("1")
     expect(orch.locator(f"[data-project='{GARDEN}']")).to_have_count(0)
     assert page.evaluate("localStorage.getItem('daedalus.mode')") == "orchestration"
@@ -249,33 +251,33 @@ def phone(page: Page, lang: str) -> None:
     expect(drawer.locator(f".orch-row[data-project='{PID}'] .needs-badge")).to_have_text("1")
     page.keyboard.press("Escape")
     listing = page.locator(".ph-orch")
-    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
+    expect(listing.locator("[data-main-entry]")).to_be_visible()
     # Main opens the chat as a detail of the list: no bar, and its back returns to the list.
-    listing.locator("[data-main-entry] .list-row").click()
+    listing.locator("[data-main-entry]").click()
     page.wait_for_url(re.compile(r"/app/orchestration(\?|$)"))
     expect(page.locator(".timeline > .questions-line")).to_be_visible()
     expect(page.locator("nav.tabbar")).to_have_count(0)
     fits(page, f"{lang} phone main chat")
     page.locator(".chat-head .pagehead-row > .ph-ib, .chat-head > button.iconbtn").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
+    expect(listing.locator("[data-main-entry]")).to_be_visible()
     # Remembered by the phone too: a bare /app opens orchestration at its list.
     go(page, "/", lang)
     page.wait_for_url("**/app/orchestration/projects**")
-    expect(listing.locator("[data-main-entry] .list-row")).to_be_visible()
-    expect(listing.locator("[data-project] .list-row")).to_have_count(1)
-    expect(listing.locator("[data-project] .ph-badge")).to_have_text("1")
+    expect(listing.locator("[data-main-entry]")).to_be_visible()
+    expect(listing.locator("[data-project]")).to_have_count(1)
+    expect(listing.locator("[data-project] .needs-badge")).to_have_text("1")
     fits(page, f"{lang} phone orchestration list")
-    listing.locator("[data-project] .list-row").first.click()
+    listing.locator("[data-project]").first.click()
     page.wait_for_url(re.compile(rf"/app/orchestration/project/{PID}(\?|$)"))
-    project_tabs = page.locator("nav.tabbar.project-tabs > a, nav.tabbar.project-tabs > button")
+    project_tabs = page.locator("nav.project-tabs .tabs-list > .tab")
     expect(project_tabs).to_have_count(5)
     assert project_tabs.evaluate_all("els => els.map(e => e.dataset.tab)") == ["orchestrator", "board", "team", "terminals", "more"]
-    expect(project_tabs.nth(0)).to_have_class(re.compile(r"\bactive\b"))
+    expect(project_tabs.nth(0)).to_have_class(re.compile(r"\bon\b"))
     go(page, f"/orchestration/project/{PID}/team", lang)
     # The board is a tab of its own, and the project's other pages are in More's sheet.
-    expect(page.locator("nav.tabbar.project-tabs a[data-tab='board']")).to_have_text(words["board"])
-    page.locator("nav.tabbar.project-tabs button[data-tab='more']").click()
+    expect(page.locator("nav.project-tabs [data-tab='board']")).to_have_text(words["board"])
+    page.locator("nav.project-tabs [data-tab='more']").click()
     expect(page.locator(".sheet.more-sheet .menu-row[data-more='journal']")).to_be_visible()
     page.keyboard.press("Escape")
     # The project's hamburger opens the same drawer, in orchestration mode.
@@ -294,7 +296,7 @@ def phone(page: Page, lang: str) -> None:
     page.locator("[data-notice='77'] .list-row").first.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}/board**")
     expect(page.locator(".ph-board")).to_be_visible()
-    expect(page.locator("nav.tabbar.project-tabs .active")).to_have_attribute("data-tab", "board")
+    expect(page.locator("nav.project-tabs .tab.on")).to_have_attribute("data-tab", "board")
     fits(page, f"{lang} phone deep link")
 
 

@@ -228,7 +228,8 @@ class Predictor:
 
     async def _call(self, prompt: str, preset: str, session_id: str, instructions: str, max_tokens: int, timeout: float) -> str:
         return await asyncio.wait_for(
-            self.manager.small_model(prompt, preset, purpose=PURPOSE, session_id=session_id, max_tokens=max_tokens, temperature=0.3, instructions=instructions),
+            self.manager.small_model(prompt, preset, purpose=PURPOSE, session_id=session_id, max_tokens=max_tokens, temperature=0.3, instructions=instructions,
+                                     effort=self.manager.config.assist.predict_effort),
             timeout=timeout,
         )
 

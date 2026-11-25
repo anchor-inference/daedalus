@@ -12,7 +12,7 @@ import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, projectSessionPath } from "../router";
 import { useQuery } from "../store";
-import { TopBar } from "../ui/phone";
+import { TopBar } from "../shell";
 import { IconButton, Menu, Segmented } from "../ui/primitives";
 import { useProject } from "../project/data";
 import { relTime } from "../format";

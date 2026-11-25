@@ -7,19 +7,23 @@
 .staff-avatar.small { width: var(--avatar); height: var(--avatar); border-radius: var(--radius-xs); font-size: var(--fs-11); }
 .harness-badge { display: inline-flex; align-items: center; justify-content: center; min-width: var(--avatar); padding: 1px 6px; border-radius: var(--radius-xs); border: 0; background: var(--surface-3); color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-11); font-weight: 500; flex: none; }
 .harness-badge.daedalus { color: var(--fg); }
-.staff-list { display: flex; flex-direction: column; margin-top: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); overflow: hidden; }
+/* The team page is a list page (880 wide): the members in one card with a hairline between rows, as
+   Settings draws its cards; each row is the face, the name with the role under it and what runs it,
+   and at the right the state in its colour and the executor's badge. */
+.staff-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); overflow: hidden; }
 .staff-list.archived { opacity: 0.7; }
 /* Who edits what in the shared folders: one compact line per agent; a file two agents hold is marked. */
-.team-editing { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2); font-size: var(--fs-12); }
-.team-editing-row { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; padding: 4px 12px; }
-.team-editing-who { flex: none; max-width: 40%; font-weight: 600; }
-.team-editing-files { flex: 1; min-width: 0; color: var(--fg-2); font-family: var(--mono); }
-.team-editing-files .overlap { color: var(--warn); font-weight: 600; }
-.team-editing-age { flex: none; color: var(--fg-3); }
-.staff-row { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; min-height: var(--row-h); padding: 12px 14px; border: 0; border-radius: 0; background: transparent; color: var(--fg); font: inherit; text-align: left; }
+.team-editing { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-13); overflow: hidden; }
+.team-editing-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: var(--row-h); padding: 0 16px; }
+.team-editing-row + .team-editing-row { border-top: 1px solid var(--line); }
+.team-editing-who { flex: none; max-width: 40%; font-weight: 500; }
+.team-editing-files { flex: 1; min-width: 0; color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-12); }
+.team-editing-files .overlap { color: var(--attention); font-weight: 600; }
+.team-editing-age { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
+.staff-row { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; min-height: var(--card-row-h-lg); padding: 12px 16px; border: 0; border-radius: 0; background: transparent; color: var(--fg); font: inherit; text-align: left; }
 .staff-row + .staff-row { border-top: 1px solid var(--line); }
 button.staff-row { cursor: pointer; transition: background var(--t-fast); }
-button.staff-row:hover { background: var(--surface-2); }
+button.staff-row:hover { background: var(--hover); }
 button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .staff-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .staff-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
@@ -29,26 +33,25 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .staff-meta { display: flex; flex-wrap: wrap; column-gap: var(--space-4); row-gap: 2px; color: var(--fg-3); font-size: var(--fs-12); min-width: 0; }
 .staff-meta > span { min-width: 0; max-width: 100%; }
 .staff-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+.staff-side .status, .staff-status-inline .status { font-size: var(--fs-13); font-weight: 500; }
 .staff-status-inline { display: none; }
 .staff-sheet-who { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 4px; }
 .executor-choice { border: 0; padding: 0; margin: 0; min-width: 0; }
 .executor-choice legend { padding: 0; margin: 14px 0 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.executor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+/* As many tiles a row as their names fit: six squeezed into the sheet cut every name to four letters. */
+.executor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 6px; }
 .executor { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: var(--row-h); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; min-width: 0; transition: background var(--t-fast); }
 .executor:hover:not(:disabled) { background: var(--surface-2); }
 .executor.on { border-color: var(--fg); }
 .executor:disabled { cursor: not-allowed; opacity: 0.55; }
 .executor-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.executor-why { color: var(--fg-3); font-size: var(--fs-11); }
+.executor-why { color: var(--fg-3); font-size: var(--fs-12); }
 .staff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-3); }
 .branch-preview { font-family: var(--mono); font-size: var(--fs-12); word-break: break-all; }
 .colour-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: 4px; }
 .colour-swatch { --c: var(--staff-blue); width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: var(--radius-sm); border: 2px solid transparent; background: var(--c); cursor: pointer; padding: 0; }
 .colour-swatch.on { border-color: var(--fg); box-shadow: inset 0 0 0 2px var(--surface-1); }
 .staff-sheet textarea.field { resize: vertical; font: inherit; }
-@media (min-width: 720px) {
-  .executor-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-}
 @media (max-width: 479px) {
   .staff-grid { grid-template-columns: minmax(0, 1fr); }
   .staff-row { padding: 10px; gap: var(--space-2); }
@@ -166,147 +169,6 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
   .term-screen { padding-left: 4px; }
 }
 
-/* A project's board. On a phone and in a narrow panel it is one list under chips; from 1024 px the
-   columns stand side by side and each scrolls with the page, so a long queue never hides the review. */
-.pboard-list { display: flex; flex-direction: column; gap: var(--space-2); }
-.pboard-unknown-stops { min-width: 0; margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-12); }
-.pboard-unknown-stops > summary { cursor: pointer; color: var(--warn); font-weight: 600; }
-.pboard-unknown-stops > p { margin: 8px 0; }
-.pboard-unknown-row { min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-.pboard-unknown-row:first-of-type { margin-top: 8px; }
-.pboard-unknown-row > details { margin: 6px 0; }
-.pboard-unknown-row > details summary { cursor: pointer; color: var(--fg-2); }
-.pboard-unknown-row dl { margin: 8px 0; }
-.pboard-unknown-row dl > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 6px; padding: 2px 0; }
-.pboard-unknown-row dt { color: var(--fg-3); }
-.pboard-unknown-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.pboard-unknown-stops > .linkbtn { margin-right: 12px; }
-.pboard-section { display: flex; flex-direction: column; gap: var(--space-2); }
-.pboard-section .section-title, .pboard-list > .section-title { margin: 10px 2px 2px; }
-.pboard-none { color: var(--fg-3); font-size: var(--fs-12); padding: 6px 4px; }
-.pboard-fold { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: var(--fs-12); color: var(--fg-2); align-items: center; }
-.pboard-fold .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
-.pboard-fold[aria-expanded="true"] .ic { transform: none; }
-.pboard-chips .chip.need:not([aria-pressed="true"]) { color: var(--warn); }
-.pcard { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.pcard:hover { background: var(--surface-2); border-color: var(--line-strong); }
-.pcard:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pcard.done, .pcard.dropped { opacity: 0.75; }
-.pcard.need { cursor: default; border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
-.pcard.need:hover { background: var(--card); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
-.pcard-head { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
-/* The issue number is a link inside a clickable card; it keeps the chip's look and does not shrink away. */
-.pcard-issue { flex: none; text-decoration: none; color: inherit; font-variant-numeric: tabular-nums; }
-.pcard-issue:hover { text-decoration: underline; }
-.issue-import-repo { display: flex; gap: var(--space-2); align-items: center; }
-.issue-import-repo input.field { flex: 1; min-width: 0; }
-.issue-import-repo .btn { flex: none; }
-.issue-import-head { display: flex; align-items: center; gap: var(--space-2); margin-top: 12px; }
-.issue-row { align-items: flex-start; margin: 8px 0 0; }
-.issue-row input { margin-top: 2px; flex: none; }
-.issue-row.is-off { cursor: default; }
-.issue-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.issue-row-title { overflow-wrap: anywhere; }
-.issue-row-number { color: var(--muted); font-variant-numeric: tabular-nums; }
-.pboard-import { display: block; margin: 0 0 8px; }
-.pcard-title { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; overflow-wrap: anywhere; }
-.pcard-line { font-size: var(--fs-12); min-width: 0; }
-.pcard-meta { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--fg-3); font-size: var(--fs-12); }
-.pcard-meta > .truncate, .pcard-meta > .pcard-status { min-width: 0; }
-.pcard-status .dot { flex: none; }
-.pcard-who { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.pcard-short { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); flex: none; }
-.pcard-branch { font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-2); min-width: 0; display: block; }
-.pcard .btn.small { flex: none; }
-.btn.warn { color: var(--warn); background: transparent; border-color: var(--line); font-weight: 500; }
-.btn.warn:hover { background: color-mix(in srgb, var(--warn) 12%, transparent); }
-.pboard-sheet-status { margin-bottom: 8px; flex-wrap: wrap; }
-.host-capacity { margin: 4px 0 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); color: var(--fg-2); font-size: var(--fs-12); min-width: 0; }
-.host-capacity.waiting { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); color: var(--fg); }
-.host-capacity-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
-.host-capacity-line > span { min-width: 0; overflow-wrap: anywhere; }
-.host-capacity-details { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
-.host-capacity-details ol { margin: 6px 0 0; padding-left: 22px; }
-.host-capacity-details li { padding: 2px 0; }
-.task-workflow, .task-context { border-top: 1px solid var(--line); padding: 12px 0; }
-/* The section-title carries a two-pixel inline margin on board sections; alongside a full-width
-   button it widened the sheet's scroll area on a phone. Keep the whole heading tappable. */
-.task-workflow > .section-title, .task-context > .section-title { width: 100%; margin-inline: 0; text-align: left; }
-.task-workflow-body { display: grid; gap: 10px; min-width: 0; }
-.task-workflow-body p { margin: 0; }
-.task-workflow-create, .task-workflow-run { display: grid; gap: 10px; min-width: 0; }
-.task-workflow-step { display: grid; grid-template-columns: auto minmax(100px, 1fr) minmax(120px, 2fr); gap: 6px; align-items: center; margin: 8px 0; }
-.task-workflow-step > .field { min-width: 0; }
-.task-workflow-step > button, .task-workflow-step > select:nth-of-type(3) { grid-column: 2 / -1; justify-self: start; }
-.task-workflow .pboard-item { min-width: 0; }
-@media (max-width: 440px) { .task-workflow-step { grid-template-columns: auto minmax(0, 1fr); } .task-workflow-step > select, .task-workflow-step > button { grid-column: 2; } }
-.pboard-moves { margin: 0 0 6px; flex-wrap: wrap; }
-.pboard-brief { border: 0; padding: 0; margin: 0; min-width: 0; }
-.pboard-brief legend, .pboard-contract-title { padding: 0; margin: 14px 0 0; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.pboard-moves .sub { align-self: center; }
-.pboard-sheet textarea.field { resize: vertical; font: inherit; }
-.pboard-deps { margin-bottom: 4px; min-width: 0; }
-.pboard-notes { max-height: 180px; overflow: auto; }
-.pcard-review { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.pcard-review .chip { flex: none; }
-.pcard-accept .ic { width: 11px; height: 11px; }
-/* The acceptance and the requirements of a card in its sheet: read-only blocks drawn like the review's.
-   Each item is its label in a narrow column and everything about it beside, so the text of a check
-   lines up under itself on a phone instead of wrapping back under "C1". */
-.pboard-contract { margin-top: 12px; }
-.pboard-contract-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.pboard-contract-head .pboard-contract-title { margin: 0; }
-.pboard-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--fs-13); }
-.pboard-item { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: baseline; min-width: 0; }
-.pboard-item > * { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
-.pboard-item > .pboard-label { grid-column: 1; grid-row: 1; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
-.pboard-item-line { display: flex; align-items: baseline; gap: 6px; }
-.pboard-item-text { flex: 1; min-width: 0; }
-.pboard-item-line .chip { flex: none; }
-.pboard-item .sub { font-size: var(--fs-12); }
-.pboard-item.superseded .pboard-item-text, .pboard-item.withdrawn .pboard-item-text { text-decoration: line-through; color: var(--fg-3); }
-.pboard-item.superseded, .pboard-item.withdrawn { opacity: 0.75; }
-.pboard-req-file { display: flex; align-items: center; gap: 4px; }
-.pboard-req-file .ic { flex: none; }
-.pboard-deliveries { display: flex; flex-wrap: wrap; gap: 4px; }
-.pboard-deliveries .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-/* The review of a staff branch in the task sheet: a bordered block over the move buttons, every row
-   free to shrink so a long branch name or path never widens the sheet on a phone. */
-.review-panel, .pboard-contract { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.review-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); }
-.review-head .pcard-branch { flex: 0 1 auto; }
-.review-stat { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-13); }
-.review-commits, .review-files, .review-receipts, .review-blockers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-12); min-width: 0; }
-.review-commits li, .review-files li, .review-receipts li { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.review-commits li > .truncate, .review-files li > .truncate, .review-receipts li > .truncate { flex: 1; min-width: 0; }
-.review-files li > .num { flex: none; }
-.review-receipts li.ok { color: var(--ok); }
-.review-receipts li.bad, .review-blockers li.bad { color: var(--bad); }
-.review-blockers li.attn { color: var(--warn); }
-.review-blockers li::before { content: "· "; }
-.review-actions { flex-wrap: wrap; margin: 2px 0 0; }
-.review-why { font-size: var(--fs-12); }
-.review-reject { display: flex; flex-direction: column; gap: 4px; }
-.review-reject textarea.field { resize: vertical; font: inherit; }
-.review-diff .diff-view { font-size: var(--fs-mono); }
-.review-diff-scope { max-width: 420px; margin-bottom: 8px; }
-.review-base { font-size: var(--fs-12); overflow-wrap: anywhere; }
-.review-why.bad { color: var(--bad); }
-.review-why.attn { color: var(--warn); }
-.review-ci-setup { min-width: 0; font-size: var(--fs-12); }
-.review-ci-setup summary { color: var(--link); cursor: pointer; }
-.review-ci-fields { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
-.review-ci-fields p { margin: 0; }
-.review-ci-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.review-ci-fields .field { width: 100%; min-width: 0; box-sizing: border-box; }
-.review-ci-fields textarea.field { resize: vertical; font: inherit; }
-.review-ci-fields .btn { align-self: flex-start; }
-@media (min-width: 1024px) {
-  .pboard-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)) minmax(170px, 0.8fr); gap: 12px; align-items: start; }
-  .pboard-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: 0 0 8px; }
-  .pboard-col .section-title { margin: 6px 2px 4px; }
-}
-
 /* Push on this device: the Settings card and the phone's nudge above the notification list. */
 .push-steps { margin: 8px 0 0; padding-left: 20px; color: var(--fg-2); font-size: var(--fs-13); line-height: var(--lh-ui); display: grid; gap: 4px; }
 .push-error { color: var(--bad); }
@@ -361,3 +223,49 @@ button.staff-row:focus-visible { outline: 2px solid var(--ring); outline-offset:
 .term-phone-end { color: var(--bad); }
 
 .pagehead .loadbar { margin: 6px 0 2px; }
+
+/* On a phone: the team page and the hire sheet. */
+@media (max-width: 1023px) {
+  /* the team: a member's row, its long-press sheet, a big team's groups */
+  .ph-member-av { position: relative; display: inline-grid; }
+  .ph-member-av .staff-avatar { width: 40px; height: 40px; font-size: var(--fs-13); }
+  .ph-member-av .ph-st { position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--bg); background: var(--fg-3); }
+  .ph-st[data-tone="working"] { background: var(--live); } .ph-st[data-tone="review"], .ph-st[data-tone="free"] { background: var(--ok); }
+  .ph-st[data-tone="waiting"] { background: var(--warn); } .ph-st[data-tone="error"] { background: var(--bad); }
+  .ph-st[data-tone="off"] { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fg-3); }
+  .ph-srow-member { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+  .ph-srow-member .list-row-lead { margin-top: 2px; }
+  .ph-srow-member .list-row-trail { padding-top: 3px; }
+  .ph-member-t { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ph-member-t b { flex: none; font-weight: 600; }
+  .ph-member-role { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg-3); }
+  .ph-member-t .harness-badge { flex: none; }
+  .ph-host { flex: none; gap: 3px; height: 22px; padding: 0 6px; font-size: var(--fs-12); }
+  .ph-member-st { flex: none; }
+  .ph-member-st[data-tone="working"] { color: var(--live); } .ph-member-st[data-tone="review"] { color: var(--ok); }
+  .ph-member-st[data-tone="waiting"], .ph-member-st[data-tone="queued"] { color: var(--warn); } .ph-member-st[data-tone="error"] { color: var(--bad); }
+  .list-row-m .ph-ell.waiting { color: var(--warn); }
+  .ph-member-spend { display: block; margin-top: 2px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-member-tm { white-space: nowrap; }
+  .ph-member-wait { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; font-size: var(--fs-13); line-height: 1.35; color: var(--warn); overflow-wrap: anywhere; }
+  .ph-member-pv { display: inline-flex; align-items: center; gap: 10px; }
+  .ph-showmore { width: 100%; justify-content: space-between; min-height: var(--tap); }
+  .ph-team > .empty { min-height: 60vh; align-content: center; }
+  /* The members are the team page's card of rows, a hairline between them; a row is the long-press
+     row, so its own background gives way to the card's. */
+  .staff-list > .list-row-wrap + .list-row-wrap { border-top: 1px solid var(--line); }
+  .staff-list .list-row { border-radius: 0; background: transparent; }
+  .staff-list .list-row:active, .staff-list .list-row.pressed { background: var(--surface-2); }
+  .staff-list .list-row.current { background: var(--selected); }
+  /* Hiring and editing a member: labelled fields in the phone's field shape, choices as segmented
+     tracks, and the decision as two wide buttons at the foot. */
+  .staff-sheet:not(.ph-member-sheet) label.field, .staff-sheet:not(.ph-member-sheet) legend.field { margin: var(--space-3) 4px 6px; font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
+  .staff-sheet:not(.ph-member-sheet) input.field, .staff-sheet:not(.ph-member-sheet) select.field, .staff-sheet:not(.ph-member-sheet) textarea.field { min-height: var(--tap); padding: 10px 14px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .staff-sheet:not(.ph-member-sheet) .segmented { gap: 2px; margin: 0; padding: 2px; border: 0; border-radius: 10px; background: var(--surface-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button { position: relative; min-height: 38px; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
+  .staff-sheet:not(.ph-member-sheet) .segmented button::after { content: ""; position: absolute; inset: -3px 0; }
+  .staff-sheet:not(.ph-member-sheet) .segmented button.on { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot { flex-wrap: nowrap; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn { flex: 1; min-height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .staff-sheet:not(.ph-member-sheet) .sheet-foot .btn.danger { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+}

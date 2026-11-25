@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "re
 import { api, type Notification } from "./api";
 import { lang, t } from "./i18n";
 import { navigate, pathFor } from "./router";
+import { Button, Popover, Select } from "./ui/primitives";
 import { usePetModel, usePetPreference } from "./ui/pet";
 import type { PetPose } from "./petstage";
 
@@ -53,6 +54,10 @@ function savedPosition(activity: string, scale: number): Placement {
 function savePosition(position: Placement) {
   try { localStorage.setItem(storageKey(), JSON.stringify(position)); } catch { /* Private mode. */ }
 }
+
+// The menu is a popover drawn in the page's overlay layer, so the bubble finds it by its class at the
+// moment it is placed rather than holding a reference to a box it does not own.
+const menuBox = () => document.querySelector<HTMLElement>(".pet-menu");
 
 function placePopup(popup: HTMLElement | null, anchor: HTMLElement | null, fallback: HTMLElement | null, scale: number, obstacle?: HTMLElement | null) {
   if (!popup || !fallback) return;
@@ -108,7 +113,6 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
   const hostRef = useRef<HTMLDivElement>(null);
   const figureRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const viewport = useRef(mobile());
 
   const say = (text: string, next: PetPose, entry: Notification | null = null, duration = entry ? 12000 : 7000) => {
@@ -182,16 +186,6 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
     }
   }, [activity, enabled, model]);
   useEffect(() => () => { window.clearTimeout(lineTimer.current); window.clearTimeout(poseTimer.current); window.clearTimeout(holdTimer.current); }, []);
-  useEffect(() => {
-    if (!menu) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest(".pet-menu, .pet-figure")) setMenu(false);
-    };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(false); };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", escape); };
-  }, [menu]);
   useLayoutEffect(() => {
     if (!enabled) return;
     const update = () => {
@@ -202,8 +196,7 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
         const next = current.corner === "custom" ? boundPosition(current, activity, scale) : cornerPosition(current.corner, activity, scale);
         return next.x === current.x && next.y === current.y ? current : next;
       });
-      placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale);
-      placePopup(menuRef.current, figureRef.current, hostRef.current, scale, bubbleRef.current);
+      placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale, menuBox());
     };
     update();
     window.addEventListener("resize", update);
@@ -211,15 +204,14 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
   }, [activity, enabled, scale]);
   useLayoutEffect(() => {
     if (!enabled) return;
-    const update = () => {
-      placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale);
-      placePopup(menuRef.current, figureRef.current, hostRef.current, scale, bubbleRef.current);
-    };
+    const update = () => placePopup(bubbleRef.current, figureRef.current, hostRef.current, scale, menuBox());
     update();
+    // The popover is placed by its own layer a frame after it mounts; the bubble steps aside for the
+    // box where it stands then, not where it was first drawn.
+    const frame = menu ? requestAnimationFrame(() => requestAnimationFrame(update)) : 0;
     const observer = new ResizeObserver(update);
     if (bubbleRef.current) observer.observe(bubbleRef.current);
-    if (menuRef.current) observer.observe(menuRef.current);
-    return () => observer.disconnect();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [enabled, line, notice, menu, position, activity, scale]);
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || menu) return;
@@ -262,26 +254,41 @@ export function PetHost({ needsReply, activity }: { needsReply: boolean; activit
       onPointerCancel={endDrag}>
       <Suspense fallback={null}><PetStage pose={pose} speaking={speaking} /></Suspense>
     </div>}
-    {menu && activity !== "companion" && <div ref={menuRef} className="pet-menu" role="dialog" aria-label={t("pet.title")}>
-      <div className="pet-menu-head"><strong>{t("pet.title")}</strong><button className="pet-menu-close" onClick={() => setMenu(false)} aria-label={t("common.close")}>×</button></div>
-      <div className="pet-menu-fields">
-      <label>{t("pet.emotion")}<select value={pose.emotion} onChange={(event) => setPose({ ...pose, emotion: event.target.value })}>{EMOTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
-      <label>{t("pet.action")}<select value={pose.action} onChange={(event) => setPose({ ...pose, action: event.target.value })}>{ACTIONS.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
-      <label>{t("pet.prop")}<select value={pose.prop} onChange={(event) => setPose({ ...pose, prop: event.target.value })}>{PROPS.map((id) => <option key={id} value={id}>{id || t("pet.none")}</option>)}</select></label>
-      <label>{t("pet.move")}<select value={position.corner} onChange={(event) => { const next = cornerPosition(event.target.value as Corner, activity, scale); setPosition(next); savePosition(next); }}>
-        {(["br", "bl", "tr", "tl"] as const).map((id) => <option key={id} value={id}>{t(`pet.corner.${id}`)}</option>)}
-        {position.corner === "custom" && <option value="custom">{t("pet.corner.custom")}</option>}
-      </select></label>
-      <label className="pet-menu-size">{t("pet.size")}<span><input type="range" min="60" max="100" step="5" value={Math.round(scale * 100)} onChange={(event) => {
-        const next = Number(event.target.value) / 100;
-        setScale(next);
-        try { localStorage.setItem("daedalus.pet.scale", String(next)); } catch { /* Private mode. */ }
-      }} /><output>{Math.round(scale * 100)}%</output></span></label>
-      </div>
-      <div className="pet-menu-actions">
-        <button className="pet-menu-generate" onClick={() => { setMenu(false); void generateReaction("operator asks for a brief greeting", true); }} disabled={!model || busy}>{t("pet.generate")}</button>
-        <button className="pet-menu-hide" onClick={() => { setEnabled(false); setMenu(false); }}>{t("pet.off")}</button>
-      </div>
-    </div>}
+    {menu && activity !== "companion" && (
+      <Popover anchor={figureRef.current} onClose={() => setMenu(false)} label={t("pet.title")} role="dialog" width={300} className="pet-menu">
+        <div className="pet-menu-rows">
+          <PetChoice label={t("pet.emotion")} value={pose.emotion} options={EMOTIONS.map((id) => ({ id, label: id }))} onChange={(emotion) => setPose({ ...pose, emotion })} />
+          <PetChoice label={t("pet.action")} value={pose.action} options={ACTIONS.map((id) => ({ id, label: id }))} onChange={(action) => setPose({ ...pose, action })} />
+          <PetChoice label={t("pet.prop")} value={pose.prop} options={PROPS.map((id) => ({ id, label: id || t("pet.none") }))} onChange={(prop) => setPose({ ...pose, prop })} />
+          <PetChoice label={t("pet.move")} value={position.corner} options={[...(["br", "bl", "tr", "tl"] as const).map((id) => ({ id: id as string, label: t(`pet.corner.${id}`) })), ...(position.corner === "custom" ? [{ id: "custom", label: t("pet.corner.custom") }] : [])]}
+            onChange={(corner) => { if (corner === "custom") return; const next = cornerPosition(corner as Corner, activity, scale); setPosition(next); savePosition(next); }} />
+          <label className="pet-row pet-menu-size">
+            <span className="pet-row-name">{t("pet.size")}</span>
+            <span className="pet-size">
+              <input type="range" min="60" max="100" step="5" value={Math.round(scale * 100)} onChange={(event) => {
+                const next = Number(event.target.value) / 100;
+                setScale(next);
+                try { localStorage.setItem("daedalus.pet.scale", String(next)); } catch { /* Private mode. */ }
+              }} />
+              <output>{Math.round(scale * 100)}%</output>
+            </span>
+          </label>
+        </div>
+        <div className="pet-menu-actions">
+          <Button size="sm" variant="primary" className="pet-menu-generate" onClick={() => { setMenu(false); void generateReaction("operator asks for a brief greeting", true); }} disabled={!model || busy}>{t("pet.generate")}</Button>
+          <Button size="sm" variant="quiet" className="pet-menu-hide" onClick={() => { setEnabled(false); setMenu(false); }}>{t("pet.off")}</Button>
+        </div>
+      </Popover>
+    )}
   </div>;
+}
+
+/** One row of the menu: what is chosen, and the list it is chosen from. */
+function PetChoice({ label, value, options, onChange }: { label: string; value: string; options: { id: string; label: string }[]; onChange: (id: string) => void }) {
+  return (
+    <div className="pet-row">
+      <span className="pet-row-name">{label}</span>
+      <Select label={label} value={value} options={options} onChange={onChange} />
+    </div>
+  );
 }

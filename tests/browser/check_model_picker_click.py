@@ -125,6 +125,8 @@ def settings_single(browser, width: int, failures: list[str]) -> None:  # type: 
     row = page.locator("[data-setting='action_rules.review_preset']")
     row.wait_for()
     row.scroll_into_view_if_needed()
+    # The row holds the model's picker and, under it, its effort's; the model's is the one under test.
+    row = row.locator("#models-review-preset")
     row.locator(".sel-current button").click()
     search = row.locator(".sel-search-field")
     search.wait_for()
@@ -173,6 +175,8 @@ def inside(page: Page, container: str, inner: str, where: str, failures: list[st
         for (const el of document.querySelectorAll(inner)) {
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
+            // A list's form input is clipped to nothing and pinned to the window's corner: nothing to see.
+            if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
             if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5)
                 out.push(`${el.className || el.tagName} [${Math.round(r.left)}, ${Math.round(r.right)}] in [${Math.round(outer.left)}, ${Math.round(outer.right)}]`);
         }
@@ -196,7 +200,8 @@ def settings_multi(browser, width: int, failures: list[str]) -> None:  # type: i
         page.screenshot(path=f"{SHOTS}/quick-{width}-page.png")
     # The list sits under the words across the row: its box starts where the words start.
     text = row.locator(".settings-row-text").bounding_box()
-    box = row.locator(".sel").bounding_box()
+    # The row holds the model list and, under it, its effort's; the list is the one measured.
+    box = row.locator("#quick-models").bounding_box()
     if not text or not box or abs(box["x"] - text["x"]) > 1 or box["y"] < text["y"] + text["height"] - 1:
         failures.append(f"{where}: the list is not under the row's words: words {text}, list {box}")
     inside(page, f"{setting}", f"{setting} *", where, failures)
@@ -263,6 +268,7 @@ def sweep(browser, width: int, failures: list[str]) -> None:  # type: ignore[no-
                 for (const el of row.querySelectorAll('*')) {
                     const r = el.getBoundingClientRect();
                     if (!r.width && !r.height) continue;
+                    if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
                     if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5) { out.push(`${name}: ${String(el.className)} [${Math.round(r.left)}, ${Math.round(r.right)}] past [${Math.round(outer.left)}, ${Math.round(outer.right)}]`); break; }
                 }
             }

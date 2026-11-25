@@ -95,11 +95,6 @@
      identify people, so they are content and keep their hues. */
   --staff-blue: #5ba5f6; --staff-green: #5bcc80; --staff-amber: #f3af49; --staff-violet: #bf93f1;
   --staff-rose: #f28bab; --staff-teal: #5cc9c2; --staff-orange: #f59e5b; --staff-slate: #9aa4b5;
-  /* An attached file's type square (attachcards.tsx): the colours the office suites taught everyone to
-     read a file by, deep enough to carry a white glyph in either theme, so they are not redefined. */
-  --file-pdf: #e5484d; --file-document: #2f6fe0; --file-sheet: #1e9e56; --file-slides: #e2711d;
-  --file-archive: #a87b2c; --file-audio: #9b4dca; --file-video: #d6409f; --file-code: #0e8f80;
-  --file-text: #5b667a; --file-other: #6f7280; --file-glyph: #ffffff;
 
   /* ── the scale everything is drawn on ────────────────────────────────────────────────────
      Type: controls, lists and rows are 14, reading text 15 on a desktop and 16 on a phone, secondary
@@ -160,7 +155,7 @@
   --head-h: 52px;        /* every header: a page's, a conversation's, the sidebar's head, a pane's */
   --page-pad: 14px;     /* a page's side padding; 24 on a desktop, 40 on a wide one */
   /* The phone's own geometry. Declared here with the rest so every size has one home, and used only
-     by rules inside the phone media query (ui/phone.css, and the phone blocks of the shared parts):
+     by rules inside the phone media query (the phone blocks of the shared parts):
      a desktop never reads them. Measured from
      the two chat apps the operator holds on the same phone every day, and taken down a step after the
      operator measured the first cut as too large next to them on that phone: their single-line rows

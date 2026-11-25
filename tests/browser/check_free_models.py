@@ -47,7 +47,7 @@ def main() -> int:
         page.route("**/api/**", answer)
         page.goto(f"{BASE}/agents?token=t&lang=ru")
         expect(page.locator(".addmodel")).to_be_visible()
-        page.get_by_role("tab", name="Бесплатные").click()
+        page.get_by_role("radio", name="Бесплатные").click()
         expect(page.locator(".free-catalog .pickgrid .pick")).to_have_count(2)
         expect(page.locator(".free-catalog .mrow", has_text="Free One")).to_be_visible()
         page.locator(".free-catalog .pick", has_text="OpenRouter").click()

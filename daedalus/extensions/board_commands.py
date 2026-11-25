@@ -154,8 +154,17 @@ async def insert_task(
     folder_id: str | None = None, file_ids: list[str] | None = None,
     requirements: list[dict[str, str]] | None = None,
     due_at: str | None = None, assignee_operator: bool = False,
+    status: str | None = None, operators_own: bool = False,
 ) -> dict[str, Any]:
-    """Insert the card, its first contract and dependency gates inside the caller's receipt."""
+    """Insert the card, its first contract and dependency gates inside the caller's receipt.
+
+    ``status`` is the column asked for, or ``None`` for the one the dependencies decide (to do when
+    they are done, blocked while they are not). A card is made only where a move would take it right
+    after: to do while nothing it waits on is open, blocked whatever it waits on (a card set aside by
+    hand is blocked for a reason no dependency names), and doing only when it is the operator's own
+    (``operators_own``) and ready, as the update's move rule says. Review and done need a result and a
+    verdict, which a new card has not got, and a dropped card is not one to make.
+    """
     if not title.strip() or len(title) > 200 or len(acceptance) > 2000 or len(notes) > 4000:
         raise ValueError("task title, acceptance or notes exceed their bounds")
     if not 1 <= priority <= 5 or len(checklist) > 12 or any(not c.strip() or len(c) > 200 for c in checklist):
@@ -173,7 +182,14 @@ async def insert_task(
     ready = await _dependencies(conn, task_id, project_id, dependencies)
     if project_id:
         await check_planning_capacity(conn, project_id, dependencies)
-    status = "todo" if ready else "blocked"
+    if status is None:
+        status = "todo" if ready else "blocked"
+    elif status == "dropped":
+        raise DomainConflict("a new task starts open; drop it once it exists")
+    elif status not in ("todo", "blocked") and not (status == "doing" and operators_own):
+        raise DomainConflict("work, review and completion require their dedicated result or launch command")
+    elif status in ("todo", "doing") and not ready:
+        raise DomainConflict("this task still has unfinished dependencies")
     checks = [{"id": f"C{index}", "text": item.strip()} for index, item in enumerate(checklist, 1)]
     await conn.execute("INSERT INTO board_tasks(id,title,status,priority,acceptance,checklist,depends_on,"
                        " session_id,origin_session_id,notes,created_at,updated_at,project_id,brief_json,assignee_staff_id,"
@@ -318,7 +334,10 @@ class BoardCommands:
                      assignee_staff_id: str | None = None,
                      folder_id: str | None = None, file_ids: list[str] | None = None,
                      requirements: list[dict[str, str]] | None = None,
-                     due_at: str | None = None, assignee_operator: bool = False) -> dict[str, Any]:
+                     due_at: str | None = None, assignee_operator: bool = False,
+                     status: str | None = None) -> dict[str, Any]:
+        """Make a card; ``status`` is the column to make it in (see ``insert_task``), ``None`` for the one
+        its dependencies decide."""
         if assignee_operator and principal.origin_class != "operator":
             raise ControlDenied("only the operator keeps a task for themselves")
         payload = {"title": title, "acceptance": acceptance, "checklist": checklist or [],
@@ -327,6 +346,9 @@ class BoardCommands:
                    "assignee_staff_id": assignee_staff_id, "folder_id": folder_id,
                    "file_ids": file_ids or [], "requirements": requirements or [],
                    "due_at": normalize_due(due_at), "assignee_operator": assignee_operator}
+        if status is not None:
+            # Only when asked: a create replayed under its old identity keeps the request it was made with.
+            payload["status"] = status
 
         async def effect(conn: aiosqlite.Connection, mutation: Mutation) -> dict[str, Any]:
             return await insert_task(conn, mutation, scope=scope, title=title, acceptance=acceptance,
@@ -335,7 +357,8 @@ class BoardCommands:
                                      origin_kind=principal.origin_class,
                                      assignee_staff_id=assignee_staff_id, folder_id=folder_id,
                                      file_ids=file_ids, requirements=requirements,
-                                     due_at=due_at, assignee_operator=assignee_operator)
+                                     due_at=due_at, assignee_operator=assignee_operator, status=status,
+                                     operators_own=principal.origin_class == "operator" and assignee_operator)
 
         return await self._mutate(principal, scope, "board.task.create", client_operation_id,
                                   expected_collection_revision, Entity("collection", scope.id), payload, effect, "task.created")

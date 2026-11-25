@@ -5,8 +5,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useQuery } from "../store";
 import { locale, t } from "../i18n";
 import { Icon } from "../icons";
-import { Sheet } from "../ui/dialogs";
-import { Switch } from "../ui/components";
+import { Button, Select, Sheet, Switch } from "../ui/primitives";
 import { addDays, dayLabel, diffDays, type Day } from "./dates";
 import { allDayTimes, eventKey, type EventFields } from "./data";
 import { CalendarPicker, ColorPicker, Reminders, TimeSelect, ZonePicker } from "./fields";
@@ -156,7 +155,7 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
   ];
 
   return (
-    <Sheet title={initial.occurrence ? t("cal.edit") : t("cal.new")} onClose={onClose} className="cal-editor">
+    <Sheet title={initial.occurrence ? t("cal.edit") : t("cal.new")} onClose={onClose} size="md" className="cal-editor">
       <form className="cal-form" onSubmit={(e) => { e.preventDefault(); if (!invalid && !readOnly) onSave(d); }}>
         {conflict && initial.occurrence && (
           <div className="cal-conflict" role="alert">
@@ -165,8 +164,8 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
               <b>{t("cal.conflict.title")}</b>
               <p>{t("cal.conflict.body")}</p>
               <div className="cal-conflict-actions">
-                <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(initial.occurrence!, "local")}>{t("cal.conflict.local")}</button>
-                <button type="button" className="btn small" disabled={busy} onClick={() => onResolve(initial.occurrence!, "remote")}>{t("cal.conflict.remote.use")}</button>
+                <Button size="sm" disabled={busy} onClick={() => onResolve(initial.occurrence!, "local")}>{t("cal.conflict.local")}</Button>
+                <Button size="sm" disabled={busy} onClick={() => onResolve(initial.occurrence!, "remote")}>{t("cal.conflict.remote.use")}</Button>
               </div>
             </div>
           </div>
@@ -178,16 +177,11 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
             <div className="cal-line">
               <TypeIcon icon={type?.icon} color={type?.color} size={16} />
               <div className="cal-grow cal-type-row">
-                <select className="field" value={d.type ?? ""} aria-label={t("cal.field.type")} onChange={(e) => pickType(e.target.value)}>
-                  <option value="">{t("cal.type.none")}</option>
-                  {types.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                  {d.type && !type && <option value={d.type}>{d.type}</option>}
-                </select>
+                <Select size="md" value={d.type ?? ""} label={t("cal.field.type")} onChange={pickType}
+                  options={[{ id: "", label: t("cal.type.none") }, ...types.map((x) => ({ id: x.id, label: x.name })), ...(d.type && !type ? [{ id: d.type, label: d.type }] : [])]} />
                 {(groups.length > 0 || d.group_id) && (
-                  <select className="field" value={d.group_id ?? ""} aria-label={t("cal.field.group")} onChange={(e) => set({ group_id: e.target.value || null })}>
-                    <option value="">{t("cal.group.none")}</option>
-                    {groups.filter((g) => !g.archived || g.id === d.group_id).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
+                  <Select size="md" value={d.group_id ?? ""} label={t("cal.field.group")} onChange={(id) => set({ group_id: id || null })}
+                    options={[{ id: "", label: t("cal.group.none") }, ...groups.filter((g) => !g.archived || g.id === d.group_id).map((g) => ({ id: g.id, label: g.name }))]} />
                 )}
               </div>
             </div>
@@ -232,17 +226,14 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
           <div className="cal-line">
             <Icon name="loop" size={16} />
             <div className="cal-grow">
-              <select className="field" value={preset} onChange={(e) => pickPreset(e.target.value as Preset)} aria-label={t("cal.field.repeat")}>
-                {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
+              <Select size="md" value={preset} label={t("cal.field.repeat")} onChange={pickPreset} options={presets} />
               {preset === "custom" && (
                 <div className="cal-custom">
                   <div className="cal-custom-row">
                     <span>{t("cal.repeat.every")}</span>
                     <input type="number" className="field cal-num" min={1} max={99} value={rule.interval} aria-label={t("cal.repeat.interval")} onChange={(e) => changeRule({ interval: Math.max(1, Math.min(99, Number(e.target.value) || 1)) })} />
-                    <select className="field" value={rule.freq} aria-label={t("cal.repeat.unit")} onChange={(e) => changeRule({ freq: e.target.value as Freq, byday: e.target.value === "WEEKLY" ? (rule.byday.length ? rule.byday : [dayCode(d.startDay)]) : [] })}>
-                      {(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] as Freq[]).map((f) => <option key={f} value={f}>{t(`cal.unit.${f.toLowerCase()}`)}</option>)}
-                    </select>
+                    <Select size="md" value={rule.freq} label={t("cal.repeat.unit")} onChange={(freq) => changeRule({ freq, byday: freq === "WEEKLY" ? (rule.byday.length ? rule.byday : [dayCode(d.startDay)]) : [] })}
+                      options={(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] as Freq[]).map((f) => ({ id: f, label: t(`cal.unit.${f.toLowerCase()}`) }))} />
                   </div>
                   {rule.freq === "WEEKLY" && (
                     <div className="cal-weekdays" role="group" aria-label={t("cal.repeat.on")}>
@@ -255,11 +246,9 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
                   )}
                   <div className="cal-custom-row">
                     <span>{t("cal.repeat.ends")}</span>
-                    <select className="field" value={rule.until ? "until" : rule.count ? "count" : "never"} aria-label={t("cal.repeat.ends")} onChange={(e) => changeRule(e.target.value === "until" ? { until: addDays(d.startDay, 90), count: null } : e.target.value === "count" ? { count: 10, until: null } : { until: null, count: null })}>
-                      <option value="never">{t("cal.repeat.never")}</option>
-                      <option value="until">{t("cal.repeat.until")}</option>
-                      <option value="count">{t("cal.repeat.after")}</option>
-                    </select>
+                    <Select size="md" value={rule.until ? "until" : rule.count ? "count" : "never"} label={t("cal.repeat.ends")}
+                      onChange={(ends) => changeRule(ends === "until" ? { until: addDays(d.startDay, 90), count: null } : ends === "count" ? { count: 10, until: null } : { until: null, count: null })}
+                      options={[{ id: "never", label: t("cal.repeat.never") }, { id: "until", label: t("cal.repeat.until") }, { id: "count", label: t("cal.repeat.after") }]} />
                     {rule.until && <input type="date" className="field cal-date" value={rule.until} min={d.startDay} aria-label={t("cal.repeat.until")} onChange={(e) => e.target.value && changeRule({ until: e.target.value })} />}
                     {rule.count && <input type="number" className="field cal-num" min={1} max={999} value={rule.count} aria-label={t("cal.repeat.count")} onChange={(e) => changeRule({ count: Math.max(1, Number(e.target.value) || 1) })} />}
                   </div>
@@ -308,11 +297,11 @@ export function EventEditor({ draft: initial, calendars, types, groups, busy, on
           )}
         </fieldset>
         <div className="sheet-foot cal-foot">
-          {initial.occurrence && !readOnly && <button type="button" className="btn danger" disabled={busy} onClick={() => onDelete(initial.occurrence!)}><Icon name="trash" size={14} /> {t("common.delete")}</button>}
+          {initial.occurrence && !readOnly && <Button variant="danger" icon="trash" disabled={busy} onClick={() => onDelete(initial.occurrence!)}>{t("common.delete")}</Button>}
           {initial.occurrence?.pending_sync && <span className="cal-pending"><Icon name="reload" size={12} /> {t("cal.pending")}</span>}
           <span className="cal-spacer" />
-          <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
-          {!readOnly && <button type="submit" className="btn primary" disabled={busy || invalid || !d.title.trim()}>{t("common.save")}</button>}
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          {!readOnly && <Button variant="primary" type="submit" disabled={busy || invalid || !d.title.trim()}>{t("common.save")}</Button>}
         </div>
       </form>
     </Sheet>

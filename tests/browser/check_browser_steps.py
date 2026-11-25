@@ -73,7 +73,7 @@ def panel(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
         say(f"the start does not say secrets are never recorded: {text!r}")
     page.wait_for_timeout(400)
     shot(page, f"steps-start-{lang}")
-    pop.locator("input[type=checkbox]").check()
+    pop.locator("[role=switch]").click()
     pop.locator(".btn.primary").click()
     page.wait_for_selector(f"{ROOT} .bp-recbar", timeout=5000)
     started = bs.posted("/g1/workflow")

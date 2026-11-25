@@ -85,6 +85,8 @@ from daedalus.stores.schedule_file_pin_schema import MIGRATION as SCHEDULE_FILE_
 from daedalus.stores.schedule_proposal_schema import MIGRATION as SCHEDULE_PROPOSAL_MIGRATION
 from daedalus.stores.staff_context_schema import MIGRATION as STAFF_CONTEXT_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.task_history import SQL as TASK_HISTORY_SQL
+from daedalus.stores.task_history import backfill as backfill_task_history
 from daedalus.stores.update_drain_schema import MIGRATION as UPDATE_DRAIN_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
@@ -4149,7 +4151,18 @@ async def _session_vision(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
 
-# 173 — the board filtered by the chat that created a task. ``origin_session_id`` has had no index
+# How hard the session's vision model thinks. NULL follows ``[vision] effort``, as the preset's NULL follows
+# ``[vision] preset``; its own column for the same reason as the preset's.
+async def _session_vision_effort(conn: aiosqlite.Connection) -> None:
+    """Added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(live_control)")).fetchall()}
+    if "vision_effort" not in present:
+        await conn.execute("ALTER TABLE live_control ADD COLUMN vision_effort TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision_effort))
+
+# The board filtered by the chat that created a task. ``origin_session_id`` has had no index
 # since it was added: the only board index is by project. A chat's own board, and the plan the
 # board exports for a chat's family, read every task of the installation to find a handful. The
 # column is NULL for a task the operator posted outside any chat, which the index simply holds.
@@ -4182,6 +4195,12 @@ MIGRATIONS.append(DataMigration("SELECT 1;", _task_extras))
 # ones started later and the team's members among them, reads the same list, and it goes with the
 # project: the foreign key removes the rows when the project is removed.
 MIGRATIONS.append(PROJECT_APPROVAL_MIGRATION)
+
+# A card's own history, written by triggers in the transaction of each change (``task_history``),
+# instead of read back from the event ring, which keeps a week and never held the changes made
+# without an event. The cards that exist get what can still be told of them, marked backfilled; the
+# ring's index by task goes, since nothing reads the ring by task any more.
+MIGRATIONS.append(DataMigration(TASK_HISTORY_SQL, backfill_task_history))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

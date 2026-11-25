@@ -56,9 +56,10 @@ def check(lang: str) -> None:
         go(page, "/schedules/wk1", lang)
         action = "Approve this action" if lang == "en" else "Одобрить это действие"
         current = "Active" if lang == "en" else "Активно"
-        expect(page.get_by_role("button", name=action)).to_be_visible()
-        page.get_by_role("button", name=action).click()
-        expect(page.locator(".scheddetail .pill")).to_have_text(current)
+        sheet = page.locator(".sched-sheet")
+        expect(sheet.get_by_role("button", name=action)).to_be_visible()
+        sheet.get_by_role("button", name=action).click()
+        expect(page.locator(".sched-sheet .sched-pane .sched-state")).to_have_text(current)
 
         go(page, "/schedules", lang)
         new = "New schedule" if lang == "en" else "Новое расписание"

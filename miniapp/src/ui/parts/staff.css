@@ -1,7 +1,43 @@
 /* ── a command-line staff member's view: terminal or Feed, receipts, requests, the composer ──── */
-.staff-cli .staff-mode { flex: none; }
-.staff-head-facts { color: inherit; opacity: .85; }
+/* A staff member's head, in its own session and in a command-line member's view alike: one 52 px row
+   — the member, how it goes in a word in its colour, the turn's three controls — and under it a 32 px
+   line of facts: what runs it, where, on what, whether the host hears it. The two-line block it
+   replaces said the member's name and state twice over, once in the chat header and once under it. */
+.staff-head { flex: none; border-bottom: 1px solid var(--line); background: var(--bg); }
+.staff-head-row { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: var(--head-h); padding: 0 12px 0 20px; }
+.staff-head-who { flex: 0 1 auto; min-width: 60px; }
+.staff-head-name { display: block; font-size: var(--fs-15); font-weight: 600; }
+.staff-head-role { color: var(--fg-3); font-weight: 400; }
+.focus-pill { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-3); font-size: var(--fs-13); font-weight: 500; white-space: nowrap; }
+.focus-pill.tone-working { color: var(--live); }
+.focus-pill.tone-waiting, .focus-pill.tone-error { color: var(--attention); }
+.focus-pill.tone-review { color: var(--fg-2); }
+.staff-head-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.staff-head-facts { flex: none; color: var(--fg-3); font-weight: 400; }
+.staff-head-actions { flex: none; display: flex; gap: 6px; }
+.staff-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 16px; min-height: 32px; padding: 4px 20px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: var(--fs-12); }
+.staff-facts:empty { display: none; }
+.staff-head-meta { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--fg-3); font-size: var(--fs-12); }
+.staff-head-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .staff-head-runs { min-width: 0; }
+.staff-facts .staff-health, .staff-facts .staff-cond { margin: 0; align-items: center; }
+.staff-facts .staff-health .ic, .staff-facts .staff-cond .ic { margin-top: 0; }
+/* In the command-line view the row is also the chat's header, and holds the view and the column too. */
+.staff-cli > .staff-head > .chat-head { display: flex; align-items: center; gap: 10px; height: var(--head-h); min-height: var(--head-h); padding: 0 12px 0 20px; border: 0; flex-wrap: nowrap; }
+.staff-cli > .staff-head .head-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.staff-cli .staff-mode { flex: none; }
+/* On a narrower desktop the facts of the turn give way before the controls. */
+@container staffhead (max-width: 980px) { .staff-head-facts { display: none; } }
+/* The messages sent to a member: a line each, who sent it and when, how far it got, its words. */
+.staff-messages { display: grid; gap: 4px; width: min(100%, var(--chat-w)); margin: 0 auto; padding: 6px 16px 0; }
+.staff-message { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--fg-2); font-size: var(--fs-13); }
+.staff-message-from { flex: none; color: var(--fg-3); }
+.staff-message-text { min-width: 0; }
+/* The state is a word in its colour, as a row's state word, not a filled badge. */
+.staff-message .pill.msg-state { flex: none; padding: 0; background: none; color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.staff-message .pill.msg-state.acknowledged { color: var(--live); }
+.staff-message .pill.msg-state.failed { color: var(--attention); }
+.staff-message .pill.msg-state.submitted, .staff-message .pill.msg-state.written { color: var(--fg); }
 .staff-term { flex: 1; min-height: 0; display: flex; border-bottom: 1px solid var(--line); }
 .feed-turns { display: grid; gap: var(--space-4); width: min(100%, var(--chat-w)); margin: 0 auto; padding-bottom: var(--space-4); }
 .feed-turn { display: grid; gap: 6px; min-width: 0; }
@@ -22,13 +58,13 @@
 .feed-tool-name { flex: none; font-size: var(--fs-12); color: var(--fg); }
 .feed-tool.failed .feed-tool-name { color: var(--bad); }
 .feed-tool-summary { min-width: 0; }
-.staff-foot { flex: none; display: grid; gap: 6px; width: min(100%, var(--chat-w)); margin: 0 auto; padding: 6px 16px 12px; }
+.staff-foot { flex: none; display: grid; gap: 8px; width: min(100%, var(--chat-w)); margin: 0 auto; padding: 8px 16px 14px; }
 .staff-message-retry { flex: none; }
 /* The messages live beside the terminal, not under it: a marker in the header while one is on its way
    or failed, the list in the Session tab, and in the Feed the ones the transcript cannot show yet. */
-.staff-attention { flex: none; display: inline-flex; align-items: center; gap: 4px; height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
-.staff-attention:hover { background: var(--surface-2); }
-.staff-attention.failed { color: var(--bad); border-color: transparent; background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.staff-attention { flex: none; display: inline-flex; align-items: center; gap: 4px; height: var(--ctl-h); padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.staff-attention:hover { background: var(--hover); color: var(--fg); }
+.staff-attention.failed { color: var(--attention); }
 .staff-attention-n { font-variant-numeric: tabular-nums; }
 .staff-message-list { display: grid; }
 .staff-message-list .staff-message { flex-wrap: wrap; row-gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -36,16 +72,23 @@
 .staff-message-list .staff-message-from { flex: 1; min-width: 0; }
 .staff-message-list .staff-message-text { order: 3; flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; color: var(--fg); }
 .feed-outbox { display: grid; gap: 4px; padding-top: var(--space-2); border-top: 1px dashed var(--line); }
-.staff-keyboard { display: flex; align-items: center; gap: var(--space-2); padding: 6px 10px; border-radius: var(--radius-sm); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-12); }
-.staff-requests { display: grid; gap: 6px; }
-.staff-request { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
-.staff-request-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--warn); font-size: var(--fs-13); font-weight: 500; }
-.staff-request-text { flex: 1; min-width: 0; padding: 4px 8px; border-radius: var(--radius-xs); background: var(--inset); color: var(--fg); font-family: var(--mono); font-size: var(--fs-12); }
-.staff-request-id { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
-.staff-request-routed { color: var(--fg-2); font-size: var(--fs-12); }
-.staff-compose { display: flex; align-items: flex-end; gap: var(--space-2); min-width: 0; }
-.staff-compose-field { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 30vh; padding: 6px 10px; resize: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: var(--lh-ui); field-sizing: content; }
-.staff-compose .staff-when { flex: none; }
+.staff-keyboard { display: flex; align-items: center; gap: var(--space-2); padding: 4px 4px 4px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); color: var(--attention); background: var(--card); font-size: var(--fs-13); font-weight: 500; }
+.staff-requests { display: grid; gap: 8px; }
+/* A request is the composer's approval card (composer.css), so a member asking reads the same as a
+   chat asking; only the id at the eyebrow's end is the view's own. */
+.staff-request-id { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
+.staff-request .approval-eyebrow .grow { min-width: 0; }
+.staff-request .approval-command { margin: 0; }
+.staff-request-routed { color: var(--fg-2); font-size: var(--fs-13); }
+.staff-request .ask-answers-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The composer is the chat's card: the field over one row, the delivery time at its left and the
+   send circle at its right. */
+.staff-compose { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 12px 10px 10px 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-xl); background: var(--card); }
+.staff-compose-field { display: block; width: 100%; min-width: 0; min-height: 24px; max-height: 30vh; padding: 0 8px 0 0; resize: none; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-family: var(--font-prose, var(--font)); font-size: var(--fs-prose); line-height: 1.6; field-sizing: content; }
+.staff-compose-field::placeholder { color: var(--fg-3); }
+.staff-compose-row { display: flex; align-items: center; gap: 8px; margin-left: -8px; }
+.staff-compose .staff-when { flex: none; margin-right: auto; }
+.staff-compose .staff-compose-send { width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; }
 .staff-when button[disabled] { opacity: .45; cursor: not-allowed; }
 .staff-health { display: flex; align-items: flex-start; gap: 10px; margin-top: 6px; color: var(--fg-2); font-size: var(--fs-12); }
 .staff-health-parts { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
@@ -69,49 +112,72 @@
 .staff-cond-item.bad .staff-cond-why { color: var(--bad); }
 .staff-cond-item.wait .staff-cond-why { color: var(--warn); }
 .staff-cond-why { color: var(--fg-2); min-width: 0; overflow-wrap: anywhere; }
-.staff-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--bg); }
+.staff-aside { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--wash, var(--bg)); }
 .staff-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-/* Five tabs in Russian are wider than the narrowest column (280 px): the row scrolls sideways, as
-   the session panel's tab list does, rather than wrapping under itself or clipping the last tab. */
-.staff-panel > .panel-tabs { padding-right: 4px; }
+/* The right panel's tab row: 52 px, pills with an icon and a word, the open one filled. Five tabs in
+   Russian are wider than the narrowest column (260 px): the row scrolls sideways, as the session
+   panel's does, rather than wrapping under itself or clipping the last tab. */
+.staff-panel > .panel-tabs { height: var(--head-h); gap: 2px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
+.staff-panel .panel-tablist { flex: 1 1 auto; align-items: center; gap: 2px; }
+.staff-panel .panel-tab { flex: none; height: var(--ctl-h); gap: 7px; padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); }
+.staff-panel .panel-tab:hover { background: var(--hover); color: var(--fg); }
+.staff-panel .panel-tab.on { background: var(--selected); color: var(--fg); font-weight: 500; }
+.staff-panel .panel-tab.on::after { content: none; }
+.staff-panel .panel-actions { display: flex; gap: 2px; }
 /* The panel body is a grid, whose items grow to their longest unbroken line: a Details row would
    push the whole column past the aside. The rows wrap instead, the key taking a fixed share. */
 .staff-panel-body > .details { min-width: 0; }
-.staff-details .dt-row { flex-wrap: wrap; align-items: baseline; padding-block: 2px; }
-.staff-details .dt-key { flex: 0 0 38%; min-width: 0; }
+/* Details as the panel's Details: a quiet group label, then 34 px key and value rows, the key in the
+   secondary ink at a fixed share, the value at 14 in the ink. */
+.staff-details { display: flex; flex-direction: column; gap: 12px; }
+.staff-aside .staff-details .dt-section, .staff-aside .staff-details .dt-section:first-child { border: 0; border-radius: 0; background: none; }
+.staff-aside .staff-details summary.dt-label { min-height: 28px; margin: 0; padding: 0; border-radius: var(--radius-sm); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.staff-aside .staff-details summary.dt-label:hover { background: none; color: var(--fg-2); }
+.staff-aside .staff-details .dt-icon { display: none; }
+.staff-aside .staff-details .dt-content { display: grid; gap: 0; padding: 0; }
+.staff-details .dt-row { flex-wrap: wrap; align-items: baseline; gap: 12px; min-height: 34px; padding-block: 7px; color: var(--fg); font-size: var(--fs-14); }
+.staff-details .dt-key { flex: 0 0 38%; min-width: 0; color: var(--fg-2); }
 .staff-details .dt-row > .grow { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.staff-panel-body { display: grid; align-content: start; gap: var(--space-3); font-size: var(--fs-13); }
-.staff-aside-section { display: grid; gap: 4px; }
+.staff-details .dt-content > p.sub { margin: 4px 0; font-size: var(--fs-13); }
+/* The body reads as the task pane's: 20 px sides, a block a section, each under a 12/500 label in the
+   meta colour, text at 14. */
+.staff-panel-body { display: grid; align-content: start; gap: 20px; padding: 12px 20px 20px; font-size: var(--fs-14); }
+.staff-panel-body.tab-browser { padding: 0; }
+.staff-aside-section { display: grid; gap: 8px; }
 /* The Session tab's headings are the Details tab's (.dt-label): one heading style in one column. The
    Session tab once had small capitals and the Details tab sentence case, side by side on one panel. */
-.staff-aside-label { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.staff-session > .staff-aside-section + .staff-aside-section { padding-top: 10px; border-top: 1px solid var(--line); }
-.staff-aside-line { min-width: 0; overflow-wrap: anywhere; }
-.staff-aside-line.mono { font-size: var(--fs-12); }
-.staff-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.staff-event { display: flex; gap: var(--space-2); min-width: 0; min-height: var(--row-h-dense); align-items: center; }
-.staff-event-at { flex: none; color: var(--fg-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.staff-aside-label { display: flex; align-items: center; min-height: 20px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.staff-aside-line { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.staff-aside-line.mono { font-size: var(--fs-13); }
+.staff-aside-line.sub { color: var(--fg-3); font-size: var(--fs-13); }
+.staff-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.staff-event { display: flex; gap: 12px; min-width: 0; min-height: 32px; align-items: center; }
+.staff-event-at { flex: none; width: 32px; color: var(--fg-3); font-family: var(--font); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .staff-event-text { min-width: 0; }
-.staff-event-report { align-items: flex-start; }
+.staff-event-report { align-items: flex-start; padding-block: 6px; }
 .staff-event-report-body { flex: 1; min-width: 0; }
 .staff-event-report-body .result-original { margin-top: var(--space-2); }
 .staff-changes-head { display: flex; align-items: center; gap: var(--space-2); justify-content: space-between; }
 .staff-files { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: 2px; }
-.staff-file { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: var(--row-h-dense); }
-.staff-file-path { flex: 1; min-width: 0; font-size: var(--fs-12); }
-.staff-file-added { color: var(--ok); font-size: var(--fs-12); }
-.staff-file-removed { color: var(--bad); font-size: var(--fs-12); }
-.staff-notes { display: grid; gap: 6px; }
-.staff-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--lh-ui); }
+.staff-file { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: 32px; }
+.staff-file-path { flex: 1; min-width: 0; font-size: var(--fs-13); }
+.staff-file-added { color: var(--live); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
+.staff-file-removed { color: var(--attention); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
+.staff-changes-summary { font-size: var(--fs-14); }
+.staff-notes { display: grid; gap: 8px; }
+.staff-notes-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.staff-notes-text + .staff-aside-label { margin-top: 12px; }
 .staff-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.staff-rule { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: var(--row-h-dense); }
+.staff-rule { display: flex; gap: var(--space-2); align-items: center; min-width: 0; min-height: 32px; }
 .staff-rule .ic { flex: none; color: var(--ok); }
 .staff-rule-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .staff-rule .btn { flex: none; }
 @media (min-width: 1024px) {
   /* The column's own width until the operator drags its edge (--staff-aside-w, kept per browser);
      a dragged width still leaves the terminal 480 px when the window is made narrower later. */
-  .chat-body.with-staff-aside { display: grid; grid-template-columns: minmax(0, 1fr) max(260px, min(var(--staff-aside-w, clamp(280px, 26%, 360px)), calc(100% - 480px))); }
+  /* The right panel's width until the operator drags its edge (--staff-aside-w, kept per browser). */
+  .chat-body.with-staff-aside { display: grid; grid-template-columns: minmax(0, 1fr) max(260px, min(var(--staff-aside-w, var(--panel-w)), calc(100% - 480px))); }
+  .staff-head { container: staffhead / inline-size; }
   .staff-aside { position: relative; }
   .staff-aside > .pane-handle { position: absolute; top: 0; bottom: 0; left: -4px; margin: 0; }
   .staff-aside > .pane-handle:focus-visible { outline: none; }
@@ -119,85 +185,21 @@
   /* Laid over the whole body rather than widened: out of the grid's flow, the column it leaves
      keeps its width, so the terminal underneath keeps its size and its PTY hears no resize. */
   .chat-body.with-staff-aside > .staff-aside.expanded { position: absolute; inset: 0; z-index: 6; border-left: 0; }
-  .staff-request .ask-answers-row .btn { flex: none; min-height: var(--ctl-h); }
+  .staff-request .ask-answers-row .btn { flex: none; height: var(--ctl-h); min-height: var(--ctl-h); padding: 0 14px; border-radius: 9px; font-weight: 500; }
   .staff-request .ask-answers-own .field, .staff-request .ask-answers-own .btn { min-height: var(--ctl-h); }
 }
 @media (max-width: 1023px) {
   .staff-cli .chat-head .segmented.inline button { padding: 4px 10px; }
-  .staff-compose { flex-wrap: wrap; }
-  .staff-compose .staff-when { order: 2; }
-  .staff-compose .staff-compose-send { order: 3; margin-left: auto; }
-  .staff-compose-field { flex-basis: 100%; }
+  /* The phone's card lays its field over the row of the time and send across both of its columns. */
+  .ph-member .staff-compose-row { grid-column: 1 / -1; margin-left: 0; }
 }
 @media (hover: none) {
   .staff-compose-field { font-size: 16px; }
 }
-.staff-session { display: grid; gap: var(--space-4); }
+.staff-session { display: grid; gap: 20px; }
 
 .staff-guard { padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); line-height: var(--lh-ui); }
 
-/* The main orchestrator: its pinned entry, and the questions and dispatches above its conversation. */
-.main-entry { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; border: 1px solid transparent; }
-.main-entry:hover { background: var(--surface-2); }
-.main-entry.current { background: var(--surface-3); border-color: transparent; }
-.main-entry-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); flex: none; }
-.main-entry.working .main-entry-icon { color: var(--live); }
-.main-entry-text { display: grid; min-width: 0; flex: 1; }
-.main-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
-.main-entry-name { font-size: var(--fs-14); font-weight: 500; }
-.main-entry-sub { font-size: var(--fs-12); color: var(--fg-2); }
-.main-pill { flex: none; font-size: var(--fs-11); font-weight: 500; padding: 1px 6px; border-radius: var(--radius-xs); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); white-space: nowrap; }
-/* The main chat's open questions and the work under way, after the latest turn in the timeline. */
-.main-flow { display: grid; gap: 10px; margin: 8px 0 4px; min-width: 0; }
-.main-setup { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); font-size: var(--fs-13); }
-.main-dispatches { display: grid; gap: 6px; }
-.dispatch-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
-.dispatch-card.tone-faint { opacity: 0.8; }
-.dispatch-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-12); }
-.dispatch-project { font-weight: 500; color: var(--fg); text-decoration: none; min-width: 0; }
-.dispatch-seq { color: var(--fg-2); }
-.dispatch-state { padding: 0 6px; border-radius: var(--radius-xs); font-weight: 500; background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); }
-.dispatch-state.tone-info { color: var(--info); }
-.dispatch-state.tone-ok { color: var(--ok); }
-.dispatch-state.tone-warn { color: var(--warn); }
-.dispatch-state.tone-bad { color: var(--bad); }
-.dispatch-age { margin-left: auto; flex: none; }
-.dispatch-body { display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 0; color: var(--fg); font: inherit; cursor: pointer; min-width: 0; }
-.dispatch-title { font-size: var(--fs-13); overflow-wrap: anywhere; }
-.dispatch-last { font-size: var(--fs-12); color: var(--fg-2); }
-.dispatch-detail { display: grid; gap: 6px; padding-top: 4px; border-top: 1px solid var(--line); font-size: var(--fs-12); }
-.dispatch-asked { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); }
-.dispatch-message { display: grid; gap: 1px; }
-.dispatch-message-head { color: var(--fg-2); }
-.dispatch-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Cancel sits beside the description, not on a row of its own: on its own row it roughly doubled
-   every card's height with empty space, and on a phone pushed the questions line and the composer
-   down the screen. */
-.dispatch-head, .dispatch-detail { grid-column: 1 / -1; }
-.dispatch-body { grid-column: 1; }
-.dispatch-actions { grid-column: 2; grid-row: 2; align-self: end; display: flex; justify-content: flex-end; }
-/* ── the two modes (orchestration.tsx, mode.ts) ─────────────────────────────────────────────
-   The rail's two mode items switch between them (the first two tabs on a phone). The count on
-   Orchestration is the one trace of that mode in Agents, so it is drawn quietly — a neutral pill, not
-   the red of an unread badge. */
-.mode-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
-.tab-badge.mode-count { background: var(--surface-3); color: var(--fg-2); }
-.orch-body { padding: 0 8px 12px; gap: 1px; }
-.orch-main { flex: none; }
-.orch-section { padding: 10px 9px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.orch-empty { padding: 4px 9px; font-size: var(--fs-12); }
-.orch-row { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; }
-.orch-row:hover { background: var(--surface-2); }
-.orch-row-icon { display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); flex: none; }
-.orch-row-text { display: grid; min-width: 0; flex: 1; }
-.orch-row-name { font-size: var(--fs-14); font-weight: 500; }
-.orch-row-meta { font-size: var(--fs-12); color: var(--fg-3); }
-.orch-list { display: flex; flex-direction: column; gap: 2px; }
-/* On a phone the tab bar holds both modes, five tabs to a row; a long word ends in an ellipsis rather
-   than pushing the bar wider than the screen. */
-.tabbar.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.tabbar.five > a, .tabbar.five > button { min-width: 0; }
-.tabbar .tab-label { max-width: 100%; padding: 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* ── the Questions tab (questions/QuestionsPanel.tsx) ───────────────────────────────────────
    A list to work through, not a feed: each card is a decision with its name, its text, its options
    as selectable rows and one field. What the operator has touched says so in the card's foot (a draft
@@ -208,20 +210,25 @@
 /* Every grid on the way down to a chip has one column that may shrink below its content: an
    implicit column is sized to its widest child, and a chip that would not wrap once made a card, and
    the sheet with it, wider than a phone and scroll sideways. */
-.questions-list { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-4); }
-.questions-section, .questions-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0; }
-.questions-section-head, .questions-group-head { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 2px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.questions-section.requests .questions-section-head { color: var(--warn); }
+/* The list reads as the task pane: 20 px sides, a group under a 36 px label (12/500, the count beside
+   it in the meta colour, as the Inbox's group heads), a card a question. */
+.questions-list { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; padding: 4px 20px 20px; }
+.questions-section, .questions-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.questions-section-head, .questions-group-head { display: flex; align-items: center; gap: 6px; min-width: 0; height: 36px; padding: 0 2px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.questions-section-head > .ic, .questions-group-head > .ic { flex: none; }
+.questions-section.requests .questions-section-head { color: var(--attention); }
 .questions-group-head { text-transform: none; letter-spacing: 0; font-size: var(--fs-12); color: var(--fg-3); }
-.questions-group-head a { color: var(--fg); text-decoration: none; }
-.questions-group-head a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.questions-count { min-width: 18px; padding: 0 5px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg-2); font-size: var(--fs-11); font-weight: 600; line-height: 18px; text-align: center; letter-spacing: 0; }
+.questions-group-head a { color: var(--fg-2); text-decoration: none; }
+.questions-group-head a:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+.questions-count { min-width: 0; padding: 0; background: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .questions-count:empty { display: none; }
 
-.q-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0; padding: var(--space-3) var(--space-3) 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); transition: border-color var(--t-base) var(--ease-out), background var(--t-base) var(--ease-out); }
+/* A question is a card of the board's: radius 12, 14/16 inside, the title at 15/500 and its meta at
+   12 under it, the options as 32 px buttons, the answer field 40 px. */
+.q-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: none; transition: border-color var(--t-base) var(--ease-out), background var(--t-base) var(--ease-out); }
 .q-card:focus-within { border-color: var(--line-strong); }
 .q-card.s-ready { border-color: var(--line-strong); }
-.q-card.host { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.q-card.host { border-color: color-mix(in srgb, var(--attention) 40%, var(--line)); }
 .q-card.fresh { animation: q-arrive 1.2s var(--ease-out); }
 @keyframes q-arrive {
   0% { opacity: 0; transform: translateY(-6px); }
@@ -238,21 +245,21 @@
 .q-card.s-refused { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
 
 .q-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-.q-kind { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); }
-.q-kind.k-permission { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
-.q-kind.k-folder, .q-kind.k-project { background: var(--surface-3); color: var(--fg-2); }
+.q-kind { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 22px; color: var(--fg-3); }
+.q-kind.k-permission { color: var(--attention); }
+.q-kind .ic { width: 16px; height: 16px; }
 .q-headline { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.q-title { margin: 0; font-size: var(--fs-14); font-weight: 500; line-height: var(--lh-ui); color: var(--fg); overflow-wrap: anywhere; }
+.q-title { margin: 0; font-size: var(--fs-15); font-weight: 500; line-height: 1.45; color: var(--fg); overflow-wrap: anywhere; }
 .q-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
-.q-short { flex: none; margin-top: 2px; font-family: var(--mono); font-size: var(--fs-11); color: var(--fg-3); }
+.q-short { flex: none; margin-top: 3px; font-family: var(--mono); font-size: var(--fs-12); color: var(--fg-3); }
 .q-aside { width: var(--ctl-h-sm); height: var(--ctl-h-sm); margin: -2px -4px 0 -4px; border-radius: 50%; background: transparent; color: var(--fg-3); }
 .q-aside:hover { color: var(--fg); }
-.q-flag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: var(--radius-xs); font-size: var(--fs-11); font-weight: 500; line-height: 16px; }
-.q-flag.urgent { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
-.q-flag.updated { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
-.q-flag.host { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+/* A flag is a word in its accent, as a state word in a row, not a filled badge. */
+.q-flag { display: inline-flex; align-items: center; gap: 3px; padding: 0; font-size: var(--fs-12); font-weight: 500; line-height: 16px; }
+.q-flag.urgent, .q-flag.host { color: var(--attention); }
+.q-flag.updated { color: var(--live); }
 
-.q-text { min-width: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
+.q-text { min-width: 0; font-size: var(--fs-14); line-height: 1.5; color: var(--fg); overflow-wrap: anywhere; }
 .q-text > :first-child { margin-top: 0; }
 .q-text > :last-child { margin-bottom: 0; }
 .q-text p, .q-text ul, .q-text ol { margin: 0 0 6px; }
@@ -268,20 +275,19 @@
 .q-suggestion { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
 .q-suggestion .ic { flex: none; margin-top: 2px; color: var(--fg-3); }
 
-.q-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.q-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; line-height: 1.35; text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
+.q-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.q-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 4px 14px; border: 1px solid var(--line-strong); border-radius: 9px; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; line-height: 1.35; text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast); }
 /* An option is read whole, over as many lines as it takes: the operator chooses by it, and an
    ellipsis hid the half that told two options apart. A link with no spaces breaks anywhere. */
 .q-chip-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.q-chip:hover { background: var(--surface-2); }
+.q-chip:hover { background: var(--hover); }
 .q-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.q-chip.on { border-color: var(--fg); background: var(--surface-3); color: var(--fg); }
-.q-chip.tone-ok.on { border-color: var(--ok); }
-.q-chip.tone-bad.on { border-color: var(--bad); }
-.q-check { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1.5px solid var(--fg-3); border-radius: 4px; color: var(--bg); transition: background var(--t-fast), border-color var(--t-fast); }
-.q-chip.on .q-check { border-color: var(--fg); background: var(--fg); }
+/* The chosen option is filled in the primary colour, as the Inbox's chosen answer. */
+.q-chip.on, .q-chip.on:hover { border-color: var(--primary); background: var(--primary); color: var(--primary-ink); }
+.q-check { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1.5px solid var(--fg-3); border-radius: 4px; color: var(--primary); transition: background var(--t-fast), border-color var(--t-fast); }
+.q-chip.on .q-check { border-color: var(--primary-ink); background: var(--primary-ink); }
 
-.q-field { display: block; min-height: var(--ctl-h); margin: 0; padding: 6px 10px; resize: none; overflow-y: auto; font: inherit; font-size: var(--fs-13); line-height: 1.45; color: var(--fg); background: var(--card); transition: border-color var(--t-fast); }
+.q-field { display: block; min-height: var(--ctl-h-lg); margin: 0; padding: 9px 12px; resize: none; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 10px; font: inherit; font-size: var(--fs-14); line-height: 1.45; color: var(--fg); background: var(--inset, var(--bg)); transition: border-color var(--t-fast); }
 .q-field:focus { outline: none; border-color: var(--fg-3); }
 .q-field.role-note { border-style: dashed; }
 /* The files of an answer: the paperclip first, then each file as the composer shows it. */
@@ -289,11 +295,11 @@
 .q-attach { width: var(--ctl-h-sm); height: var(--ctl-h-sm); border-radius: 50%; color: var(--fg-2); }
 .q-files-hint { min-width: 0; font-size: var(--fs-12); color: var(--fg-3); }
 .q-files .attachment-open { max-width: min(220px, 100%); }
-.q-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: var(--fs-12); }
+.q-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: var(--fs-13); }
 .q-foot:empty { display: none; }
 .q-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .q-state i { width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; }
-.q-state.draft { color: var(--warn); }
+.q-state.draft { color: var(--attention); }
 .q-state.ready { color: var(--fg); }
 .q-why { font-weight: 400; color: var(--fg-3); }
 .q-clear { margin-left: auto; padding: 2px 0; border: 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
@@ -306,8 +312,9 @@
 .q-reason { font-weight: 400; color: var(--fg-2); }
 .q-reason::before { content: "— "; }
 
-.questions-send { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-3) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--card); }
-.questions-send-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--fg-2); }
+/* The task pane's foot: 64 px under a hairline, what Send will carry at the left, Send at the right. */
+.questions-send { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: var(--space-3); box-sizing: border-box; min-height: 64px; padding: 0 20px env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: var(--wash, var(--bg)); }
+.questions-send-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--fg-2); }
 .questions-send.ready .questions-send-info { color: var(--fg); }
 .questions-translating { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--fg-2); }
 /* The answer a card sent, while the translator has it on the way to the session. */
@@ -319,21 +326,21 @@
 .questions-empty { display: grid; justify-items: center; gap: 6px; padding: var(--space-8) var(--space-4); text-align: center; font-size: var(--fs-13); color: var(--fg-2); }
 .questions-empty b { font-size: var(--fs-14); color: var(--fg); }
 .questions-empty span:last-child { max-width: 280px; }
-.questions-empty-mark { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); margin-bottom: 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+.questions-empty-mark { display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-h); height: var(--ctl-h); margin-bottom: 4px; border-radius: 50%; background: var(--selected); color: var(--fg-2); }
 /* The badge on the tab: what waits for the operator, in the colour of a request. */
-.panel-tab .count.attn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.panel-tab .count.attn { color: var(--attention); }
 
 /* The chat's one line for the whole list: how many wait, and the way to them. */
 /* The same notice as the main chat's setup line — solid frame, icon, sentence, a small button at the
    end — told apart by its colour: the two stacked on a phone used to read as unrelated components,
    one dashed with a button, the other solid with a bare link. */
-.questions-line { display: flex; align-items: center; gap: 10px; width: 100%; margin: 10px 0 4px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.questions-line:hover { background: var(--surface-2); border-color: var(--line-strong); }
-.questions-line-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--avatar); height: var(--avatar); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+.questions-line { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin: 10px 0 4px; padding: 6px 8px 6px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); box-shadow: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.questions-line:hover { background: var(--hover); }
+.questions-line-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--attention); }
 .questions-line-text { flex: 1; min-width: 0; font-weight: 500; }
 .questions-line-open { flex: none; gap: 4px; }
 .questions-headbtn { position: relative; }
-.questions-headbtn .count { position: absolute; top: 2px; right: 2px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
+.questions-headbtn .count { position: absolute; top: 2px; right: 2px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--attention) 18%, var(--bg)); color: var(--attention); font-size: var(--fs-11); font-weight: 600; line-height: 16px; text-align: center; }
 @media (max-width: 1023px) {
   .q-chip { min-height: var(--ctl-h); padding: 6px 14px; }
   .questions-keys { display: none; }
@@ -342,5 +349,100 @@
 @media (hover: none) {
   .q-field { font-size: 16px; }
   .q-chip:hover { background: transparent; }
-  .q-chip.on:hover { background: var(--surface-3); }
+  .q-chip.on:hover { background: var(--primary); }
+}
+
+/* On a phone: a command-line member's page and the Questions tab. */
+@media (max-width: 1023px) {
+  /* A command-line member's own page: the bar with the member, Feed | Terminal, the state line, the
+     feed, the request tray and a composer in the composer's shape. */
+  .ph-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .ph-who .staff-avatar { width: 36px; height: 36px; font-size: var(--fs-13); }
+  .ph-who-w { display: flex; flex-direction: column; min-width: 0; }
+  .ph-who-n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-who-s { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); }
+  .ph-member-mode { flex: none; padding: 0 var(--gutter) var(--space-2); }
+  .staff-head.compact { padding: 0 var(--gutter) var(--space-2); border: 0; background: var(--bg); }
+  .staff-head.compact .staff-head-row { flex-wrap: nowrap; gap: 8px; }
+  .staff-head-state { flex: 1; min-width: 0; font-size: var(--fs-13); color: var(--fg-2); }
+  .staff-head.compact .staff-head-actions { display: flex; gap: var(--space-2); flex: none; }
+  .staff-head.compact .staff-attention { margin-top: 6px; min-height: 32px; font-size: var(--fs-13); }
+  .staff-head.compact .staff-health { margin-top: 4px; font-size: var(--fs-13); }
+  .ph-member .staff-foot { padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom)); gap: var(--space-2); }
+  .ph-member .staff-compose { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-sm); }
+  .ph-member .staff-compose-field { grid-column: 1 / -1; min-height: 36px; padding: 7px 10px; border: 0; background: none; font-size: var(--fs-16); line-height: 22px; }
+  .ph-member .staff-compose .staff-when { justify-self: start; display: flex; gap: 2px; padding: 2px; border: 0; border-radius: 10px; background: var(--surface-2); }
+  .ph-member .staff-compose .staff-when button { position: relative; min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-2); font-size: var(--fs-14); }
+  .ph-member .staff-compose .staff-when button::after { content: ""; position: absolute; inset: -7px 0; }
+  .ph-member .staff-compose .staff-when button.on { background: var(--card); color: var(--fg); box-shadow: var(--shadow-xs); }
+  .ph-member .staff-compose-send { position: relative; width: var(--ctl-round); height: var(--ctl-round); min-height: var(--ctl-round); border-radius: 50%; background: var(--primary); color: var(--primary-ink); }
+  .ph-member .staff-compose-send::after { content: ""; position: absolute; inset: -4px; }
+  .ph-member .staff-compose-send:disabled { background: var(--surface-3); color: var(--fg-3); opacity: 1; }
+  /* Its details: the column's tabs as words with a filled tile under the current one, and the facts as rows
+     with hairlines inside the Details tab's cards. */
+  .ph-member-sheet .staff-panel { display: flex; flex-direction: column; min-height: 0; }
+  .ph-member-sheet .panel-tabs { padding: 0 var(--space-2); border: 0; }
+  .ph-member-sheet .panel-tab { position: relative; min-height: var(--tap); padding: 0 12px; border: 0; border-radius: var(--radius-sm); font-size: var(--fs-14); color: var(--fg-2); }
+  .ph-member-sheet .panel-tab.on { background: var(--surface-3); color: var(--fg); }
+  .ph-member-sheet .panel-body { padding: var(--space-2) var(--gutter); }
+  .ph-member-sheet .staff-details { gap: var(--space-3); --dt-card: var(--surface-2); --dt-tile: var(--surface-1); }
+  .ph-member-sheet .staff-details .dt-section, .ph-member-sheet .staff-details .dt-section:first-child { border: 0; border-radius: var(--radius-md); }
+  .ph-member-sheet .staff-details summary.dt-label { min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-content { gap: 0; padding: 0 var(--space-4) var(--space-3); }
+  .ph-member-sheet .staff-details .dt-row.sub { align-items: center; min-height: var(--set-row-h); padding: 8px 0; border-top: 1px solid var(--line); color: var(--fg); font-size: var(--fs-15); }
+  .ph-member-sheet .staff-details .dt-row.sub:first-child { border-top: 0; }
+  .ph-member-sheet .staff-details .dt-key { flex: 1; color: var(--fg); }
+  .ph-member-sheet .staff-details .dt-row > .grow { flex: none; max-width: 60%; text-align: right; color: var(--fg-3); overflow-wrap: anywhere; }
+  /* The decision card is the one place on the Orchestrator tab; the chat's own line for the same list
+     would be the second. */
+  .chat.in-project.orchestrator .timeline > .questions-line { display: none; }
+  /* The decision sheet: the Questions tab, its cards as the design draws them. */
+  .ph-decisions .sheet-body { display: flex; flex-direction: column; }
+  .ph-decisions .questions-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .ph-decisions .questions-list { flex: 1; padding: 0 var(--gutter); }
+  .questions-section-head, .questions-group-head { font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); text-transform: none; letter-spacing: 0; }
+  .q-card { gap: 10px; padding: 14px; border-radius: var(--radius-md); border: 0; background: var(--surface-2); }
+  .q-card::before { display: none; }
+  /* An answered card is ringed in ink and one half answered in amber: a hairline each, since the card's
+     state line says the same in words. */
+  .q-kind .ic { width: 20px; height: 20px; }
+  .q-kind { width: var(--ctl-round); height: var(--ctl-round); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--fg-2); }
+  .q-title { font-size: var(--fs-16); line-height: 1.3; }
+  .q-meta { font-size: var(--fs-14); color: var(--fg-3); }
+  .q-short { font-size: var(--fs-13); }
+  .q-flag { font-size: var(--fs-13); line-height: 22px; padding: 0 8px; border-radius: var(--radius-xs); }
+  .q-text { font-size: var(--fs-15); line-height: 1.45; }
+  .q-text code, .q-text pre { font-size: var(--fs-13); }
+  .q-text h1, .q-text h2, .q-text h3, .q-text h4 { font-size: var(--fs-15); }
+  .q-more, .q-suggestion, .q-foot, .q-clear { font-size: var(--fs-14); }
+  .q-more { position: relative; }
+  .q-more::after { content: ""; position: absolute; inset: -11px 0; }
+  .q-suggestion { padding: 0; background: none; }
+  .q-chip { min-height: var(--tap); padding: 8px 16px; border: 0; border-radius: 12px; background: var(--surface-1); box-shadow: none; font-size: var(--fs-15); }
+  .q-chip.on, .q-chip.tone-ok.on, .q-chip.tone-bad.on { background: var(--surface-1); box-shadow: inset 0 0 0 1.5px var(--fg); }
+  /* A question's options are rows with a radio, read whole: the design's choice for answers that are
+     sentences or links. A permission's choices stay pills. */
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] { flex-direction: column; flex-wrap: nowrap; gap: var(--space-2); }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip { display: flex; width: 100%; max-width: none; min-height: var(--tap); padding: 10px 16px; border-radius: 12px; background: var(--surface-1); text-align: left; justify-content: flex-start; }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip::before { content: ""; flex: none; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+  .q-card:not(.k-permission) .q-chips[role="radiogroup"] .q-chip.on::before { box-shadow: inset 0 0 0 6px var(--fg); background: var(--surface-1); }
+  .q-card .q-field { min-height: var(--tap); padding: 10px 16px; border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-1); font-size: var(--fs-16); }
+  .q-state { font-size: var(--fs-14); }
+  .q-state i { display: none; }
+  .q-clear { min-height: var(--tap); padding: 0 4px; font-weight: 500; color: var(--fg-2); }
+  /* Round 44 px targets for the paperclip and "not needed", like every control a finger presses here.
+     A phone pastes from its own keyboard and drops nothing, so the hint about both is left out. */
+  .q-attach, .q-aside { width: var(--tap); height: var(--tap); background: var(--surface-1); -webkit-tap-highlight-color: transparent; }
+  .q-attach:hover { background: var(--surface-1); }
+  .q-aside { margin: -8px -6px 0 0; background: transparent; }
+  .q-files-hint { display: none; }
+  .questions-send { padding: 10px var(--gutter) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-1); box-shadow: none; }
+  .questions-send-info { font-size: var(--fs-14); }
+  .questions-send-btn { min-height: var(--tap); padding: 0 var(--space-5); border-radius: 12px; font-size: var(--fs-15); }
+  .questions-empty, .questions-empty b { font-size: var(--fs-14); }
+  /* The main chat's line for every project's questions: the tray's shape above the composer. */
+  .chat:not(.in-project) .questions-line { min-height: 52px; margin: var(--space-3) 0 var(--space-1); padding: 4px 4px 4px 14px; border: 0; border-radius: var(--radius-composer); background: var(--card); box-shadow: inset 0 0 0 1px var(--line), var(--drop-xs); font-size: var(--fs-15); }
+  .chat:not(.in-project) .questions-line-mark { width: 24px; height: 24px; background: none; }
+  .chat:not(.in-project) .questions-line-open { height: var(--tap); padding: 0 var(--space-4); border: 0; border-radius: calc(var(--radius-composer) - 4px); background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .chat:not(.in-project) .questions-line-open .ic { display: none; }
 }

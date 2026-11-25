@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import type { ProjectTask, TeamMember } from "./board";
 
@@ -71,15 +72,12 @@ function ContextContent({ task, staff }: { task: ProjectTask; staff: TeamMember[
       <b>{t("taskContext.preview")}</b>
       <p className="sub">{t("taskContext.previewHelp")}</p>
       <label className="field">{t("taskContext.role")}
-        <select className="field" value={role} onChange={(event) => setRole(event.target.value as Role)}>
-          {(["worker", "reviewer", "orchestrator"] as Role[]).map((value) => <option key={value} value={value}>{t(`taskContext.role.${value}`)}</option>)}
-        </select>
+        <Select label={t("taskContext.role")} size="md" className="wide" value={role} onChange={setRole}
+          options={(["worker", "reviewer", "orchestrator"] as Role[]).map((value) => ({ id: value, label: t(`taskContext.role.${value}`) }))} />
       </label>
       {role === "worker" && <label className="field">{t("taskContext.member")}
-        <select className="field" value={staffId} onChange={(event) => setStaffId(event.target.value)}>
-          <option value="">{t("taskContext.generic")}</option>
-          {staff.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}
-        </select>
+        <Select label={t("taskContext.member")} size="md" className="wide" value={staffId} onChange={setStaffId}
+          options={[{ id: "", label: t("taskContext.generic") }, ...staff.map((member) => ({ id: member.id, label: member.name }))]} />
       </label>}
       {preview.error && <div className="result-warning" role="status">{t("taskContext.unavailable")} <button type="button" className="linkbtn" onClick={() => void preview.refresh()}>{t("common.retry")}</button></div>}
       {!currentPreview && !preview.error && <p className="sub">{t("common.loading")}</p>}
@@ -94,10 +92,10 @@ function ContextContent({ task, staff }: { task: ProjectTask; staff: TeamMember[
       {!currentHistory && !history.error && <p className="sub">{t("common.loading")}</p>}
       {currentHistory?.entries.length === 0 && <p className="sub">{t("taskContext.noSupplied")}</p>}
       {!!currentHistory?.entries.length && <label className="field">{t("taskContext.session")}
-        <select className="field" value={entry?.staff_session_id ?? ""} onChange={(event) => setSessionId(event.target.value)}>
-          <option value="">{t("taskContext.chooseSession")}</option>
-          {currentHistory.entries.map((item) => <option key={item.staff_session_id} value={item.staff_session_id}>{staff.find((member) => member.id === item.staff_id)?.name ?? t("taskContext.unknownMember")} · {new Date(item.created_at).toLocaleString()}</option>)}
-        </select>
+        <Select label={t("taskContext.session")} size="md" className="wide" value={entry?.staff_session_id ?? ""} onChange={setSessionId}
+          options={[{ id: "", label: t("taskContext.chooseSession") }, ...currentHistory.entries.map((item) => ({
+            id: item.staff_session_id, label: `${staff.find((member) => member.id === item.staff_id)?.name ?? t("taskContext.unknownMember")} · ${new Date(item.created_at).toLocaleString()}`,
+          }))]} />
       </label>}
       {entry && <div className="project-extension">
         <p className={!offline && currentSupplied?.source_current ? "sub" : "result-warning"} role="status">{t(offline || !currentSupplied ? "taskContext.freshnessUnknown" : currentSupplied.source_current ? "taskContext.current" : "taskContext.stale")}</p>

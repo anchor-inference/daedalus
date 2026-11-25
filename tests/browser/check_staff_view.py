@@ -349,7 +349,7 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(sideways(page) <= 0, f"{lang} phone: the sheet scrolls sideways by {sideways(page)} px")
     page.keyboard.press("Escape")
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
-    buttons = page.locator(".staff-request .ph-ask .ph-btn")
+    buttons = page.locator(".staff-request .ph-ask .btn")
     expect(buttons).to_have_count(4, timeout=5000)
     # What the finger reaches: the button's box and the ::after that extends a 40 px button to 44.
     heights = [round(buttons.nth(i).evaluate("el => { const a = getComputedStyle(el, '::after'); const r = el.getBoundingClientRect().height; return a.content === 'none' ? r : r - (parseFloat(a.top) || 0) - (parseFloat(a.bottom) || 0); }")) for i in range(buttons.count())]

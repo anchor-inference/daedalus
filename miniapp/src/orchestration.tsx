@@ -7,15 +7,12 @@ import { copyText } from "./ui/components";
 // file draws them. The mode menu at the top of the sidebar (sidebar.tsx) switches between the modes.
 
 import type { ProjectFolder, SessionList, SessionSummary } from "./api";
-import { Dot } from "./ui/components";
 import { relTime } from "./format";
 import { plural, t } from "./i18n";
 import { Icon } from "./icons";
 import { MainEntry } from "./main/MainEntry";
-import { MAIN_PATH } from "./main/model";
-import { colourOf, initials } from "./drawer";
-import { EmptyState, NewChatPill, SectionHeader, TopBar } from "./ui/phone";
-import { Row } from "./ui/primitives";
+import { TopBar } from "./shell";
+import { Button, IconButton } from "./ui/primitives";
 import { useMain } from "./main/data";
 import { orchestratedProjects, waitingInOrchestration } from "./mode";
 import { navigate, projectHome } from "./router";
@@ -39,29 +36,30 @@ export function useOrchestrationWaiting(): number {
   return waitingInOrchestration(data?.projects ?? [], main);
 }
 
-/** A project in orchestration mode's list: what its orchestrator is doing, the size of the team and
- *  how many at work, and how many requests wait for the operator. */
+/** A project in orchestration mode's list: one 32 px line, as a project is in the Agents column — its
+ *  name, then what its orchestrator is doing in a word (working, setting up) or when it last moved, and
+ *  how many requests wait for the operator in the attention colour. The team's size and how many of it
+ *  are at work are the row's tooltip: beside the name they took a second line on every row. */
 function ProjectRow({ project, sessions }: { project: ProjectFolder; sessions: SessionSummary[] }) {
   const o = project.orchestrator!;
   const href = projectHome(project.id);
   const orchestrator = sessions.find((s) => s.id === o.session_id);
   // The listing is a page of the most recent sessions; an orchestrator quiet for long may not be on
   // it, and then the project's own last activity says when it last moved.
-  const state = project.setup_by === "dispatcher" ? t("orch.row.setup")
+  const setup = project.setup_by === "dispatcher";
+  const tone = setup ? "waiting" : orchestrator?.status === "running" ? "running" : orchestrator?.status === "waiting" ? "waiting" : "";
+  const state = setup ? t("orch.row.setup")
     : orchestrator?.status === "running" ? t("orch.row.working")
     : orchestrator?.status === "waiting" ? t("orch.row.waiting")
     : project.last_message_at ? relTime(project.last_message_at) : t("orch.row.idle");
   const row = useRef<HTMLAnchorElement>(null);
   useContextActions(row, [{ label:t("focus.entry.open", { name:project.name }), icon:"folder", onSelect:() => navigate(href) }, { label:t("context.copyLink"), icon:"link", onSelect:() => void copyText(new URL(href, location.href).href) }]);
-  const meta = [state, plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
+  const team = [plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
   return (
-    <a ref={row} className="orch-row" href={href} onClick={(e) => go(e, href)} title={t("focus.entry.open", { name: project.name })} data-project={project.id}>
-      <span className="orch-row-icon"><Icon name="conductor" size={15} /></span>
-      <span className="orch-row-text">
-        <span className="orch-row-name truncate">{project.name}</span>
-        <span className="orch-row-meta truncate">{meta}</span>
-      </span>
-      {orchestrator?.status === "running" && <span className="folder-live"><Dot status="running" /></span>}
+    <a ref={row} className="sb-row orch-row" href={href} onClick={(e) => go(e, href)} title={`${project.name} · ${team}`} data-project={project.id} data-nav="project">
+      <span className="sb-tile"><Icon name="conductor" size={16} /></span>
+      <span className="sb-t orch-row-name">{project.name}</span>
+      <span className={`orch-row-meta ${tone ? `sb-word ${tone}` : "sb-time num"}`}>{state}</span>
       {o.needs_you > 0 && <span className="needs-badge" title={plural("focus.entry.needs", o.needs_you)} aria-label={plural("focus.entry.needs", o.needs_you)}>{o.needs_you}</span>}
     </a>
   );
@@ -70,26 +68,33 @@ function ProjectRow({ project, sessions }: { project: ProjectFolder; sessions: S
 /** Main first, then every project with an orchestrator; the same in the column and on a phone's page.
  *  A project opened leaves this list for its own column (focus mode), so no row here is ever current. */
 function OrchestrationRows({ onMain, onProjects }: { onMain: boolean; onProjects?: () => void }) {
-  const { data, loading } = useListing();
+  const { data, loading, error, refresh } = useListing();
   const projects = orchestratedProjects(data?.projects ?? []);
   // The palette is a keyboard's way in; a phone or a tablet without a pointer has no ⌘K to press,
   // so there the empty line points at the Agents list, where every project is one tap away.
   const keyboard = useMedia("(hover: hover) and (pointer: fine)");
   return (
-    <>
+    <div className="sb-list">
       <div className="orch-main"><MainEntry current={onMain} /></div>
-      <div className="orch-section sub">{t("orch.projects")}</div>
+      <div className="sb-sec orch-section">
+        <span>{t("orch.projects")}</span>
+        <IconButton icon="plus" label={t("np.orch.title")} size={28} className="sb-sec-add" onClick={() => openNewProject("orchestration")} />
+      </div>
       {projects.map((p) => <ProjectRow key={p.id} project={p} sessions={data?.sessions ?? []} />)}
-      {!loading && data && projects.length === 0 && <div className="orch-empty sub">
+      {error && !data && <div className="orch-empty" role="alert">
+        <p>{t("orch.error")}</p>
+        <Button variant="primary" onClick={refresh}>{t("common.retry")}</Button>
+      </div>}
+      {!loading && data && projects.length === 0 && <div className="orch-empty">
         {onProjects ? <>
           <p>{t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}</p>
-          <button className="btn primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</button>
+          <Button variant="primary" onClick={onProjects}>{t(data.projects.length === 0 ? "shell.projects.add" : "shell.projects")}</Button>
         </> : <>
           <p>{t(keyboard ? "orch.empty" : "orch.empty.touch")}</p>
-          <button className="btn primary" onClick={() => openNewProject("orchestration")}><Icon name="plus" size={14} /> {t("np.orch.title")}</button>
+          <Button variant="primary" icon="plus" onClick={() => openNewProject("orchestration")}>{t("np.orch.title")}</Button>
         </>}
       </div>}
-    </>
+    </div>
   );
 }
 
@@ -113,73 +118,18 @@ export function OrchestrationSidebar(p: OrchestrationSidebarProps) {
   );
 }
 
-/** A phone's stand-in for the column: the main orchestrator and the projects, as a page drawn from the
- *  phone's rows. Main leads with how many questions wait in its chat; each project is its initials,
- *  how it goes and the count of requests waiting, and New project floats over the list. */
+/** A phone's stand-in for the column: the same rows as a page, under the page header's phone bar. A
+ *  phone has no left column to hold them, and the drawer is for moving between modes and pages. */
 export function OrchestrationList({ onProjects }: { onProjects: () => void }) {
-  const { data, loading, error, refresh } = useListing();
+  const { data } = useListing();
   const { data: main } = useMain();
-  const projects = orchestratedProjects(data?.projects ?? []);
-  const sessions = data?.sessions ?? [];
-  const mainRow = main?.session_id ? sessions.find((s) => s.id === main.session_id) : undefined;
-  const questions = main?.questions ?? 0;
-  const going = (main?.dispatches ?? []).filter((d) => d.status === "open" || d.status === "blocked").length;
   const waiting = waitingInOrchestration(data?.projects ?? [], main);
-  const mainSub = mainRow?.status === "running" ? t("main.entry.working") : going ? plural("main.entry.going", going) : t("main.entry.sub");
   return (
     <div className="ph-page ph-orch">
       <TopBar title={t("mode.orchestration")} pip={waiting > 0} />
-      <div className="ph-page-body list">
-        <Row
-          className="ph-orch-main"
-          data={{ "main-entry": "" }}
-          lead={<span className="ph-avatar accent" aria-hidden><Icon name="conductor" size={22} /></span>}
-          title={t("main.title")}
-          meta={mainSub}
-          trail={questions > 0 ? <span className="ph-pill warn" data-questions={questions}>{plural("main.questions", questions)}</span> : undefined}
-          onOpen={() => navigate(MAIN_PATH)}
-        />
-        <SectionHeader count={data ? projects.length : undefined}>{t("orch.projects")}</SectionHeader>
-        {loading && !data && [0, 1, 2].map((i) => (
-          <div key={i} className="ph-skrow"><span className="ph-sk" style={{ width: 44, height: 44, borderRadius: "50%" }} /><span className="grow"><span className="ph-sk" style={{ height: 14, width: `${50 + i * 10}%` }} /><span className="ph-sk" style={{ height: 11, width: "40%", marginTop: 8 }} /></span></div>
-        ))}
-        {error && !data && <EmptyState icon="alert" tone="bad" title={t("orch.error")} body={error} action={<button type="button" className="ph-btn primary" onClick={refresh}>{t("common.retry")}</button>} />}
-        {projects.map((p) => <PhoneProjectRow key={p.id} project={p} sessions={sessions} />)}
-        {!loading && data && projects.length === 0 && (
-          <EmptyState icon="conductor" title={t("orch.empty.title")} body={t(data.projects.length === 0 ? "orch.empty.noProjects" : "orch.empty.touch")}
-            action={<button type="button" className="ph-btn" onClick={data.projects.length === 0 ? () => openNewProject("orchestration") : onProjects}>{t(data.projects.length === 0 ? "np.orch.title" : "shell.projects")}</button>} />
-        )}
+      <div className="ph-page-body orch-body">
+        <OrchestrationRows onMain={false} onProjects={onProjects} />
       </div>
-      <NewChatPill icon="plus" label={t("ph.newproject")} onClick={() => openNewProject("orchestration")} />
     </div>
-  );
-}
-
-/** A project's row on the phone's list: its initials in its colour, what its orchestrator is doing
- *  ("setting up" in amber while the main orchestrator still builds it), the team, and what waits. */
-function PhoneProjectRow({ project, sessions }: { project: ProjectFolder; sessions: SessionSummary[] }) {
-  const o = project.orchestrator!;
-  const href = projectHome(project.id);
-  const orchestrator = sessions.find((s) => s.id === o.session_id);
-  const setup = project.setup_by === "dispatcher";
-  const state = setup ? <span className="waiting">{t("orch.row.setup")}</span>
-    : orchestrator?.status === "running" ? t("orch.row.working")
-    : orchestrator?.status === "waiting" ? t("orch.row.waiting")
-    : project.last_message_at ? relTime(project.last_message_at) : t("orch.row.idle");
-  const meta = [plural("team.count.staff", o.staff), o.working > 0 ? plural("team.count.working", o.working) : ""].filter(Boolean).join(" · ");
-  return (
-    <Row
-      data={{ project: project.id }}
-      lead={<span className="ph-avatar" style={{ ["--c" as string]: colourOf(project.id) }} aria-hidden>{initials(project.name)}</span>}
-      title={project.name}
-      meta={<>{state}{meta && <><span className="ph-sep" /><span className="ph-ell">{meta}</span></>}</>}
-      trail={o.needs_you > 0 ? <span className="ph-badge warn" title={plural("focus.entry.needs", o.needs_you)} aria-label={plural("focus.entry.needs", o.needs_you)}>{o.needs_you}</span> : undefined}
-      label={project.name}
-      actions={[
-        { label: t("focus.entry.open", { name: project.name }), icon: "folder", onSelect: () => navigate(href) },
-        { label: t("context.copyLink"), icon: "link", onSelect: () => void copyText(new URL(href, location.href).href) },
-      ]}
-      onOpen={() => navigate(href)}
-    />
   );
 }

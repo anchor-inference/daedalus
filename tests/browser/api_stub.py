@@ -951,6 +951,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
     # The key proxy card's client versions: look again, update Claude Code, put it back.
+    # Settings → Models' Check models: nothing configured in the shared host answers it with nothing to report.
+    ("POST", "/api/models/check"): (200, "application/json", json.dumps({"checked_at": "", "results": {}, "health": {}})),
     ("POST", "/api/keyproxy/clients/check"): (200, "application/json", json.dumps(KEYPROXY_CLIENTS)),
     ("POST", "/api/keyproxy/clients/claude/update"): (200, "application/json", json.dumps(KEYPROXY_CLIENT_UPDATED)),
     ("POST", "/api/keyproxy/clients/claude/revert"): (200, "application/json", json.dumps({"client": keyproxy_client("claude", "Claude Code", "2.1.296", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS), "reverted": {"from": "2.1.310", "to": "2.1.296", "automatic": False}})),
@@ -2258,9 +2260,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "vision":
-        # A session's own vision model, from its Details: the answer names the choice back, "" for the global one.
+        # A session's own vision model and how hard it thinks, from its Details: the answer names the choice
+        # back, "" for the global one. Either comes alone, as on the host.
         preset = str((body or {}).get("preset") or "") if isinstance(body, dict) else ""
-        return 200, "application/json", json.dumps({"ok": True, "vision_preset": preset, "vision_label": preset, **VISION_DEFAULT})
+        effort = str((body or {}).get("effort") or "") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"ok": True, "vision_preset": preset, "vision_label": preset, "vision_effort": effort, **VISION_DEFAULT, "vision_default_effort": ""})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "subagent-models":
         # Every session's Details shows which models its helpers may run on: the default here, every model;
         # a change answers the choice it was given. check_model_settings.py draws the others.
@@ -2537,6 +2541,16 @@ def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-unt
         page.locator(".ph-drawer-root.open [data-nav='menu']").click()
         page.locator(f".ph-more-sheet [data-screen='{screen}']").click()
     page.wait_for_timeout(400)
+
+
+def choose_option(page, trigger, value: str) -> None:  # type: ignore[no-untyped-def]
+    """Pick `value` in a `Select` primitive: press its button (`trigger`, a locator or a selector),
+    then the item whose data-value it is. The list is drawn over the page, not inside the form, and
+    only while it is open."""
+    button = page.locator(trigger) if isinstance(trigger, str) else trigger
+    button.click()
+    page.locator(f".dropdown-list .dropdown-item[data-value=\"{value}\"]").click()
+    page.wait_for_selector(".dropdown-list", state="detached", timeout=5000)
 
 
 def switch_mode(page, mode: str, scope: str = "") -> None:  # type: ignore[no-untyped-def]
@@ -2909,6 +2923,8 @@ class BoardStub:
         """A task's stored events as ``GET /api/board/{id}/events`` answers them; a task without any has its creation."""
         self.refusals: dict[str, str] = {}
         """A task's id to the host's reason for refusing a move of it, as the update command words a conflict."""
+        self.session_projects: dict[str, str] = {}
+        """A chat's id to the project it belongs to: a create that names a known chat on another board is refused with 403, as the host's is."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
@@ -2987,6 +3003,22 @@ class BoardStub:
         counts["needs_you"] = len(self.needs_you)
         team = [{**{k: m[k] for k in ("id", "name", "color", "harness")}, "isolation": m.get("isolation", "worktree")} for m in self.staff]
         return {"project": self.project, "tasks": rows, "needs_you": self.needs_you, "counts": counts, "staff": team}
+
+    def initial(self, payload: dict) -> tuple[str, str]:
+        """The column a new card is made in, or the host's refusal: ``status`` when asked, else its
+        dependencies decide. To do and doing need every dependency done, doing a card the operator keeps,
+        blocked is always allowed; review, done and dropped are never where a card starts."""
+        waits = any(t["status"] != "done" for t in self.tasks if t["id"] in (payload.get("depends_on") or []))
+        asked = payload.get("status")
+        if asked is None:
+            return ("blocked" if waits else "todo"), ""
+        if asked == "dropped":
+            return "", "a new task starts open; drop it once it exists"
+        if asked not in ("todo", "blocked") and not (asked == "doing" and payload.get("assignee_operator")):
+            return "", "work, review and completion require their dedicated result or launch command"
+        if asked in ("todo", "doing") and waits:
+            return "", "this task still has unfinished dependencies"
+        return asked, ""
 
     def _assign(self, row: dict, staff_id: str | None) -> None:
         member = next((m for m in self.staff if m["id"] == staff_id), None)
@@ -3194,12 +3226,21 @@ class BoardStub:
                              "receipt_id": "cancel-receipt", "entity_revision": entity_revision + 1}
         if path == base and method == "GET":
             return 200, self.listing("include_done=1" in query)
+        if path in (base, "/api/board") and method == "POST":
+            # The host puts a card on the board its source chat belongs to: the global board takes only a
+            # chat of no project, a project's board only that project's chats.
+            chat = (body or {}).get("session_id")
+            if chat in self.session_projects and self.session_projects[chat] != (self.project["id"] if path == base else ""):
+                return 403, {"detail": "the source session belongs to another board"}
         if path == base and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
             brief = {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}
             brief.update(payload.get("brief") or {})
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"), due_at=self.due(payload.get("due_at")))
             self._assign(row, payload.get("assignee_staff_id"))
             if payload.get("assignee_operator"):
@@ -3208,8 +3249,11 @@ class BoardStub:
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), project_id=None,
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
                             acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []],
                             due_at=self.due(payload.get("due_at")))
@@ -4436,7 +4480,9 @@ class FocusStub:
         readable = [{"id": f["id"], "path": f["path"], "label": f["label"], "env": f["env"], "readonly": f["readonly"], "writable": False}
                     for f in project["folders"]] if orchestrator_of else []
         return {
-            "id": sid, "title": title, "status": status, "run_id": None, "run_started_at": None, "branch": None, "compacting": None, "housekeeping": False, "error": "",
+            # Every chat's folder is a repository here: the shared changes stub answers each one with its listing.
+            "id": sid, "title": title, "status": status, "run_id": None, "run_started_at": None, "branch": None, "repository": True,
+            "compacting": None, "housekeeping": False, "error": "",
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",

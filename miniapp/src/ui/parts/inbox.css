@@ -79,3 +79,37 @@
 /* The header's views are 32 px tabs; the project filter and the mark-all button sit at the right edge. */
 .pagehead .inbox-tabs .tab { height: var(--ctl-h); }
 .pagehead .inbox-project .dropdown-btn { max-width: 200px; }
+
+/* On a phone: the Inbox. */
+@media (max-width: 1023px) {
+  /* the Inbox: a kind square, the time on the title line, answers on the row */
+  .ph-irow { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+  .ph-irow .list-row-lead { margin-top: 1px; }
+  .ph-irow .list-row-t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .ph-irow .list-row-trail { flex-direction: row; align-items: center; gap: 6px; padding-top: 2px; }
+  .ph-irow.dim { opacity: .55; }
+  .ph-irow-tm { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .ph-irow-n { color: var(--fg-3); font-weight: 400; }
+  .ph-irow-d { display: block; margin-top: 3px; font-family: var(--mono); font-size: var(--fs-13); color: var(--fg-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-irow-d.quiet { color: var(--fg-3); }
+  .ph-irow-d.text { font-family: inherit; color: var(--fg-2); }
+  .ph-irow-m { display: block; margin-top: 6px; font-size: var(--fs-13); color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-irow-m.wrap { white-space: normal; line-height: 1.4; }
+  .ph-kico { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--fg-2); }
+  .ph-kico.warning { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+  .ph-kico.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+  .ph-kico.error { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
+  .ph-kico.info { background: color-mix(in srgb, var(--info) 12%, transparent); color: var(--info); }
+  /* The answers wrap rather than scroll: a long Russian label clipped at the edge read as a broken button. */
+  .ph-answers { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 10px; }
+  .ph-answers.grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 0; overflow: visible; }
+  .ph-check { width: 24px; height: 24px; margin: 6px; flex: none; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); color: var(--primary-ink); }
+  .ph-check.on { background: var(--primary); box-shadow: none; }
+  .ph-selbar { flex: none; display: flex; gap: 4px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
+  .ph-selbar button { flex: 1; min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 4px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+  .ph-selbar button:active { background: var(--surface-2); }
+  .ph-selbar button:disabled { opacity: .4; }
+  .ph-selbar button.warn { color: var(--warn); }
+  .ph-inbox .push-nudge { margin: var(--space-2) var(--gutter) 0; }
+  .ph-proposal-t { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; }
+}

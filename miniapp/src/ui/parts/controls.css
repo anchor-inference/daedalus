@@ -228,10 +228,10 @@ a.iconbtn { text-decoration: none; }
 
 /* ── a list row (Row) ─────────────────────────────────────────────────────────────────────── */
 /* 32 for a line of its own, 44 for a title over a meta line, 56 for a large list. A phone's rows are
-   its own sizes (phone.css). The commands sit behind the ⋮ at its end. */
+   its own sizes (the phone block of lists.css). The commands sit behind the ⋮ at its end. */
 .list-row-wrap { position: relative; }
 .list-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 4px 0 12px; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; outline: 0; box-sizing: border-box; }
-/* The three heights are the desktop's; a phone's rows take the phone's own sizes (phone.css), and a
+/* The three heights are the desktop's; a phone's rows take the phone's own sizes (lists.css), and a
    height class here outweighed them there. */
 @media (min-width: 1024px) {
   .list-row.h44 { min-height: var(--row-h-2); }
@@ -248,3 +248,13 @@ a.iconbtn { text-decoration: none; }
 .list-row-trail { flex: none; font-size: var(--fs-12); color: var(--fg-3); }
 .list-row-more { flex: none; width: var(--ctl-h-sm); height: var(--ctl-h-sm); display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); cursor: pointer; }
 .list-row-more:hover { background: var(--hover); color: var(--fg); }
+
+/* On a phone: icon buttons, the phone's second button, tags, avatars and the segmented track. */
+@media (max-width: 1023px) {
+  /* A segmented choice is the shared one: a filled track with 10 px corners and the chosen segment a
+     card with a hairline ring lying in it. */
+  /* A button is a filled neutral control with 12 px corners (8 for the small one); the one that
+     commits is ink. Blue is never a button's fill: it is kept for what is live and for links. */
+  .btn.wide { display: flex; width: 100%; }
+  .provider-letter { font-size: var(--fs-14); font-weight: 600; line-height: 1; color: var(--fg); background: var(--surface-2); }
+}

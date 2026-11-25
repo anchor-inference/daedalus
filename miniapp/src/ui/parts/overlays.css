@@ -166,7 +166,7 @@ button.menu-row:hover { background:var(--hover); }
 /* ── toasts ───────────────────────────────────────────────────────────────────────────────── */
 /* At the top on a phone: at the foot it stood over the composer. Beside the chat it has the corner. */
 .toast-viewport { position: fixed; z-index: var(--z-toast); left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); width: max-content; max-width: min(92vw, 460px); outline: 0; }
-.toast { display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 14px; border-radius: var(--radius-md); font-size: var(--fs-13); box-shadow: var(--shadow-lg); animation: layer-in var(--t-base) var(--ease-out); }
+.toast { display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 14px; border-radius: var(--radius-lg); font-size: var(--fs-13); box-shadow: var(--shadow-md); animation: layer-in var(--t-base) var(--ease-out); }
 .toast .btn.small { min-height: 30px; padding: 4px 8px; }
 .toast > .ic { flex: none; color: var(--fg-2); }
 .toast.notice { align-items: flex-start; padding: 12px 10px 12px 14px; }
@@ -176,3 +176,131 @@ button.menu-row:hover { background:var(--hover); }
 .toast-title { font-size: var(--fs-14); font-weight: 500; }
 .toast-body { color: var(--fg-2); }
 @media (min-width: 1024px) { .toast-viewport { left: auto; right: 24px; top: auto; bottom: 24px; transform: none; } }
+
+/* ── notices: what happened while the operator was elsewhere ────────────────────────────────
+   The status line above says one thing at a time; these queue. A card like a popover (14 px corners,
+   the strong edge, the one floating shadow), three at most in a desktop's corner with the newest on
+   top, and on a phone one banner across the top, its answers 36 px tall with a 44 px reach. */
+.notice-toasts { position: fixed; z-index: var(--z-toast); display: flex; flex-direction: column; gap: 8px; pointer-events: none; outline: 0; }
+.notice-toasts > * { pointer-events: auto; }
+.notice-toasts.stack { right: 24px; bottom: 24px; width: 360px; }
+/* The status line has the same corner (the banner's the same top): while it is up the notices stand clear of it. */
+body:has(.toast-viewport .toast) .notice-toasts.stack { bottom: 96px; }
+body:has(.toast-viewport .toast) .notice-toasts.banner { margin-top: calc(72px + env(safe-area-inset-top)); }
+.notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 12px 14px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); cursor: pointer; animation: layer-in var(--t-base) var(--ease-out); }
+.notice-toasts.stack .notice-toast { touch-action: pan-y; }
+.notice-toast[data-swiping] { transition: none; user-select: none; }
+.notice-toast-head { display: flex; align-items: flex-start; gap: 10px; }
+.notice-toast .kind { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 0; background: none; }
+.notice-toast-head .notice-title { padding-top: 0; }
+.notice-toast-head .iconbtn { flex: none; margin: -4px -4px 0 0; }
+.notice-toast .iconbtn.quiet { background: transparent; color: var(--fg-2); }
+.notice-toast .iconbtn.quiet:hover { background: var(--hover); color: var(--fg); }
+.notice-toast > .notice-body, .notice-toast > .notice-actions { padding-left: 26px; }
+.notice-toast .notice-actions { margin-top: 8px; gap: 8px; }
+.notice-toast .notice-actions .btn { min-height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-13); }
+.notice-foot { display: flex; align-items: center; gap: 4px; padding: 2px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
+.notice-foot .grow { flex: 1; }
+.notice-foot .btn.small { color: var(--fg-2); }
+.notice-more { padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+.notice-more:hover { color: var(--fg); }
+/* On a phone the banner and its foot are one floating surface at the top, the pop-up itself flat inside
+   it: as two cards the gap between them let the page show through, and the half of a heading was cut
+   across the foot's edge. Its Allow is no whiter than Deny, as on an Inbox row. */
+.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 0; margin: calc(8px + env(safe-area-inset-top)) 12px 0; padding: 4px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
+.notice-toasts.banner .notice-toast { padding: 10px 10px 6px; border: 0; border-radius: var(--radius-md); background: none; box-shadow: none; touch-action: pan-x; }
+.notice-toasts.banner .notice-toast-head { align-items: center; }
+.notice-toasts.banner .notice-toast-head .iconbtn { position: relative; width: 32px; height: 32px; margin: 0; }
+.notice-toasts.banner .notice-toast-head .iconbtn::after, .notice-toasts.banner .notice-actions .btn::after { content: ""; position: absolute; inset: -6px; }
+.notice-toasts.banner .notice-actions .btn { position: relative; height: 36px; min-height: 36px; padding: 0 14px; font-size: var(--fs-14); font-weight: 500; }
+.notice-toasts.banner .notice-actions .btn::after { inset: -4px 0; }
+.notice-toasts.banner .notice-actions .btn:not(.primary) { background: var(--surface-3); border-color: transparent; box-shadow: none; }
+.notice-toasts.banner .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
+.notice-toasts.banner .notice-actions .btn.danger { color: var(--bad); }
+.notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; box-shadow: none; }
+.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
+
+/* On a phone: sheets, their rows and contents, and the confirmation dialog. */
+@media (max-width: 1023px) {
+  /* Every sheet of the app, not only the new ones: a handle, 20 px top corners, a 17/600 title and
+     the raised surface with a dialog's ring and drop, which keep its edge visible on the page colour. */
+  .sheet-backdrop { background: var(--scrim); }
+  /* The side padding stays the sheet's own, as the existing sheets lay their bleeding rows out
+     against it; only the primitives' sheets run their rows edge to edge. */
+  .sheet { border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-top: 0; box-shadow: var(--shadow-xl); }
+  .sheet .grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line-strong); margin: 8px auto 4px; flex: none; }
+  /* flex: none because the sheet is a column with a max height: a long body made the head shrink to its
+     min-height, and the model sheet's subtitle, wrapped onto a second line, slid under the search field. */
+  .sheet-head { flex: none; min-height: var(--tap); margin: 0 -8px 0 0; padding: 0 0 var(--space-1); gap: var(--space-2); }
+  .sheet-head h3, .sheet h3 { font-size: var(--fs-17); font-weight: 600; letter-spacing: -0.01em; }
+  .sheet-head .iconbtn { width: var(--tap); height: var(--tap); border-radius: 12px; background: none; color: var(--fg-2); }
+  .sheet.full { border-radius: 0; }
+  :is(.sheet.ph-sheet, .sheet.menu-sheet) { padding-left: 0; padding-right: 0; }
+  :is(.sheet.ph-sheet, .sheet.menu-sheet) .sheet-head { margin: 0; padding: 0 var(--space-2) var(--space-1) var(--gutter); }
+  :is(.sheet.ph-sheet, .sheet.menu-sheet) .sheet-body { padding: 0 0 var(--space-2); }
+  :is(.sheet.ph-sheet, .sheet.menu-sheet).untitled .sheet-head { min-height: 0; padding: 0; height: 0; overflow: visible; }
+  :is(.sheet.ph-sheet, .sheet.menu-sheet).untitled .sheet-head .iconbtn { display: none; }
+  .ph-sheet-foot, .sheet.ph-sheet .sheet-body > .sheet-foot { margin: var(--space-2) 0 0; padding: var(--space-3) var(--gutter) 0; }
+  .sheet-preview { margin: var(--space-1) var(--gutter) var(--space-2); padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+  .sheet-preview-t { font-size: var(--fs-15); font-weight: 500; overflow-wrap: anywhere; }
+  .sheet-preview-m { font-size: var(--fs-13); color: var(--fg-2); margin-top: 2px; overflow-wrap: anywhere; }
+  /* An action row is set 8 px in with 8 px corners, as a menu's item is in its menu; its words keep
+     to the sheet's 16 px gutter. */
+  .menu-row, .menu .menu-row { display: flex; align-items: center; gap: 12px; width: calc(100% - var(--space-4)); min-height: var(--list-row-h-1); margin: 0 var(--space-2); padding: 2px var(--space-2); border-radius: var(--radius-sm); border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; transition: background var(--t-fast); }
+  .menu-row > .ic { color: var(--fg-2); flex: none; }
+  .menu-row:active { background: var(--surface-2); }
+  .menu-row:disabled { opacity: .45; }
+  .menu-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .menu-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .menu-row-t { overflow-wrap: anywhere; }
+  .menu-row-sub { font-size: var(--fs-13); color: var(--fg-3); margin-top: 1px; }
+  .menu-row-aside { font-size: var(--fs-14); color: var(--fg-3); flex: none; max-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .menu-row-check { color: var(--fg); display: inline-flex; }
+  .menu-row-chev { color: var(--fg-3); display: inline-flex; }
+  .menu-row.danger, .menu-row.danger > .ic { color: var(--bad); }
+  .ph-msep { height: 1px; background: var(--line); margin: 4px var(--gutter); }
+  .ph-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); padding: var(--space-1) var(--gutter) var(--space-2); }
+  .ph-tile { height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 0 4px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; text-align: center; cursor: pointer; transition: background var(--t-fast); }
+  .ph-tile > .ic { color: var(--fg-2); }
+  .ph-tile span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-tile:active { background: var(--surface-3); }
+  /* sheet contents shared by the slice pages: a padded body, facts, code, fields, footers */
+  .ph-sheet-pad { padding: var(--space-1) var(--gutter) var(--space-2); display: flex; flex-direction: column; gap: var(--space-3); }
+  .ph-sheet-kt { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+  .ph-sheet-kt-w { display: flex; flex-direction: column; min-width: 0; }
+  .ph-sheet-kt-t { font-size: var(--fs-16); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .ph-sheet-kt-m { font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ph-code { margin: 0; padding: 12px; border-radius: 12px; background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg); font-family: var(--mono); font-size: var(--fs-13); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
+  .ph-prose { font-size: var(--fs-15); line-height: 1.45; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ph-prose.quiet { color: var(--fg-2); }
+  .ph-kv { display: flex; align-items: baseline; gap: var(--space-4); min-height: 28px; font-size: var(--fs-14); }
+  .ph-kv > :first-child { flex: none; color: var(--fg-3); }
+  .ph-kv > :last-child { flex: 1; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+  .ph-label { font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); margin-bottom: -6px; }
+  .ph-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  :is(.ph-sheet-foot, .sheet.ph-sheet .sheet-body > .sheet-foot) > :is(.ph-foot-row, .ph-foot-stack) { flex: 1; min-width: 0; }
+  .ph-foot-row { display: flex; align-items: center; gap: var(--space-2); }
+  .ph-foot-stack { display: flex; flex-direction: column; gap: var(--space-2); }
+  .ph-foot-row.wrap { flex-wrap: wrap; }
+  .ph-sheet-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+  .ph-sheet-title.two { flex-direction: column; align-items: flex-start; gap: 0; padding: var(--space-2) 0; }
+  .ph-sheet-sub { display: block; max-width: 100%; font-size: var(--fs-13); font-weight: 400; color: var(--fg-3); }
+  /* The sheets' "more below" arrow reaches 44 px to the finger like every other control. */
+  .sheet-more::after { content: ""; position: absolute; inset: -6px; }
+  .ph-sheet-foot, .sheet.ph-sheet .sheet-body > .sheet-foot { display: flex; justify-content: space-between; gap: var(--space-2); }
+  .ph-tiles.four { grid-template-columns: repeat(4, 1fr); }
+  .ph-tile:disabled { opacity: .4; }
+  .ph-tile.attn, .ph-tile.attn .ic { color: var(--warn); }
+  .ph-session-menu .ph-tiles { padding-top: var(--space-2); }
+  .ph-sheet-pad { padding: 0 var(--gutter) var(--space-2); }
+  .ph-sheet-pad.sub { font-size: var(--fs-13); color: var(--fg-3); }
+  .ph-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  /* A confirmation: the standard centred dialog with two 44 px buttons, the way back plain and the
+     consequential one tinted rather than a solid red block beside it. */
+  .dialog { border-radius: var(--radius-lg); padding: 20px 20px 16px; }
+  .dialog h3 { font-size: var(--fs-17); font-weight: 600; }
+  .dialog-body { font-size: var(--fs-14); }
+  .dialog-actions .btn { min-height: var(--tap); padding: 0 var(--space-5); border: 0; border-radius: 12px; box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .dialog-actions .btn:not(.primary):not(.danger) { background: none; color: var(--fg-2); }
+  .dialog-actions .btn.danger.solid { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+}

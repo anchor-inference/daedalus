@@ -92,7 +92,8 @@ async def test_the_picture_reaches_a_subscription_route_with_the_configured_outp
     assert (answer, used) == ("BLUE HERON 4721", model)
     body = sent[0]
     assert body["model"] == model and body["max_tokens"] == 16384
-    assert "reasoning_effort" not in body, "a perception task asked the route to think"
+    # Not asked to think: on a Claude route that is said outright ("none"), since leaving it out still thinks.
+    assert body.get("reasoning_effort", "none") == "none", "a perception task asked the route to think"
     parts = [part for message in body["messages"] if isinstance(message.get("content"), list) for part in message["content"]]
     images = [part["image_url"]["url"] for part in parts if part.get("type") == "image_url"]
     assert images == ["data:image/png;base64," + base64.b64encode(PICTURE).decode()]

@@ -40,9 +40,9 @@ BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 WORDS = {
-    "en": {"export": "Export", "import": "Import", "quick": "My dog's name is Beans", "change": "The digest moved to Monday", "reset": "reset",
+    "en": {"edit": "Edit", "lock": "Lock", "history": "History", "export": "Export", "import": "Import", "quick": "My dog's name is Beans", "change": "The digest moved to Monday", "reset": "reset",
            "model": "Runs on cheap.model", "never": "No pass has run yet.", "counts": "Added 3", "locked": "A change to a note", "held": "A new note, held back", "names": "8102"},
-    "ru": {"export": "Экспорт", "import": "Импорт", "quick": "Мою собаку зовут Бинс", "change": "Дайджест перенесли на понедельник", "reset": "сбросить",
+    "ru": {"edit": "Изменить", "lock": "Закрепить", "history": "История", "export": "Экспорт", "import": "Импорт", "quick": "Мою собаку зовут Бинс", "change": "Дайджест перенесли на понедельник", "reset": "сбросить",
            "model": "Работает на cheap.model", "never": "Проходов ещё не было.", "counts": "Добавлено 3", "locked": "Изменение заметки", "held": "Новая заметка, отложенная", "names": "8102"},
 }
 LEARNED = [
@@ -141,7 +141,7 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
         problems.append(f"{where}: the bullet's source does not link to the chat it was learned in")
     bullet = page.locator('.memory-bullet[data-bullet="m1"]')
     bullet.hover()
-    bullet.locator('[data-action="edit"]').click()
+    bullet.get_by_role("button", name=words["edit"], exact=True).click()
     bullet.locator("textarea").fill("The operator wants answers under 150 words.")
     bullet.locator('[data-action="save-bullet"]').click()
     page.wait_for_timeout(400)
@@ -150,7 +150,7 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
         problems.append(f"{where}: the edit went back as {edits}")
     bullet = page.locator('.memory-bullet[data-bullet="m6"]')
     bullet.hover()
-    bullet.locator('[data-action="lock"]').click()
+    bullet.get_by_role("button", name=words["lock"], exact=True).click()
     page.wait_for_timeout(400)
     if wrote(memory, "POST", "/api/memory/m6/mark") != [{"locked": True}]:
         problems.append(f"{where}: Lock sent {wrote(memory, 'POST', '/api/memory/m6/mark')}")
@@ -162,8 +162,8 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
     summaries = wrote(memory, "PATCH", "/api/memory/entries/ent-you-preferences")
     if not summaries or summaries[-1] != {"version": version, "summary": "How answers read"}:
         problems.append(f"{where}: the summary went back as {summaries} (version {version})")
-    # The change in words: preview, then Apply.
-    field = page.locator(".memory-composer textarea")
+    # The change in words: preview, then Apply. With the pane open there are two fields; the entry's is the last.
+    field = page.locator(".memory-composer textarea").last
     field.fill(words["change"])
     field.press("Enter")
     page.wait_for_selector(".memory-diff-sheet .memory-diff-row", timeout=5000)
@@ -181,13 +181,18 @@ def check(browser, width: int, lang: str, problems: list[str]) -> None:  # type:
     if "Monday" not in page.locator('.memory-bullet[data-bullet="m6"]').inner_text():
         problems.append(f"{where}: the applied change is not shown")
     # History from the entry.
-    page.locator('[data-action="history"]').click()
+    page.get_by_role("button", name=words["history"], exact=True).click()
     page.wait_for_selector(".memory-history-entry", timeout=5000)
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
-    # Back to the list; export and import.
-    page.locator(".pagehead a.iconbtn").first.click()
+    # Back to the list (the pane's close beside it, the header's back on a phone); export and import.
+    if width < 1280:
+        page.locator(".pagehead a.iconbtn").first.click()
+    else:
+        page.locator(".memory-pane-head .iconbtn").last.click()
     page.wait_for_selector(".memory-entry-row", timeout=5000)
+    if width >= 1280 and page.locator(".memory-pane").count():
+        problems.append(f"{where}: the pane stays open after its close")
     with page.expect_download(timeout=10000) as download:
         menu(page, ".memory-more", words["export"])
     if not download.value.suggested_filename.endswith(".zip"):
@@ -283,6 +288,77 @@ def check_learned(browser, width: int, lang: str, problems: list[str]) -> None: 
     page.context.close()
 
 
+def check_layout(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """The screen's frame: a 52 px header whose switch, search and commands all fit (nothing scrolls
+    sideways in it), the list in the page's 880 px column, a 480 px pane beside it from 1280 px on, and
+    below that an entry that takes the page instead."""
+    probe = """() => {
+      const box = (selector) => { const el = document.querySelector(selector); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x), w: Math.round(r.width), h: Math.round(r.height) }; };
+      const filters = document.querySelector('.pagehead-filters');
+      return { head: box('.pagehead'), column: box('.memory-scroll > .screen'), pane: box('.memory-pane'), list: box('.memory-list'), entryRow: box('.memory-entry-row'), card: box('.memory-card'),
+               filtersScroll: filters ? filters.scrollWidth - filters.clientWidth : 0, bodyScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    }"""
+    for width, height in ((1920, 1080), (1366, 768), (1280, 800), (1100, 800)):
+        where = f"layout {width}px"
+        memory = memory_stub()
+        context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark")
+        page = context.new_page()
+        page.route("**/api/**", stub)
+
+        def serving(memory: MemoryStub):  # type: ignore[no-untyped-def]
+            def memory_route(route) -> None:  # type: ignore[no-untyped-def]
+                request = route.request
+                rel, _, query = request.url.partition("?")
+                rel = rel[rel.index("/api/"):]
+                answered = memory.answer(request.method, rel, json.loads(request.post_data or "{}") if request.post_data else None, query)
+                if answered is None:
+                    return stub(route)
+                return route.fulfill(status=answered[0], content_type="application/json", body=json.dumps(answered[1]))
+            return memory_route
+
+        page.route("**/api/memory**", serving(memory))
+        page.goto(f"{BASE}/memory?token=t&lang=en")
+        page.wait_for_selector(".memory-entry-row", timeout=20000)
+        closed = page.evaluate(probe)
+        if closed["head"]["h"] != 52:
+            problems.append(f"{where}: the header is {closed['head']['h']} px, not 52")
+        if closed["pane"] is not None:
+            problems.append(f"{where}: a pane stands with nothing open")
+        if closed["column"]["w"] != min(880 + 48, closed["list"]["w"]):
+            problems.append(f"{where}: the list's column is {closed['column']['w']} px, not the page's 880 + 48")
+        if closed["entryRow"]["h"] < 56:
+            problems.append(f"{where}: an entry's row is {closed['entryRow']['h']} px, under 56")
+        if closed["filtersScroll"] > 0 or closed["bodyScroll"] > 0:
+            problems.append(f"{where}: the header scrolls sideways by {closed['filtersScroll']} px (the page by {closed['bodyScroll']})")
+        page.locator('.memory-entry-row[data-entry="ent-you-preferences"]').click()
+        page.wait_for_selector(".memory-bullet", timeout=5000)
+        opened = page.evaluate(probe)
+        if width >= 1280:
+            if not opened["pane"] or opened["pane"]["w"] != 480:
+                problems.append(f"{where}: the pane is {opened['pane']}, not 480 wide")
+            if opened["list"]["w"] + 480 > closed["list"]["w"] + 1:
+                problems.append(f"{where}: the list ({opened['list']['w']}) and the pane do not share the room")
+        else:
+            if opened["pane"] is not None or page.locator(".memory-entry-row").count():
+                problems.append(f"{where}: the entry shares the page with the list below 1280 px")
+        if opened["filtersScroll"] > 0 or opened["bodyScroll"] > 0:
+            problems.append(f"{where}: with the entry open the page scrolls sideways by {opened['bodyScroll']} px")
+        page.goto(f"{BASE}/memory?view=facts&token=t&lang=en")
+        page.wait_for_selector(".memory-card", timeout=20000)
+        facts = page.evaluate(probe)
+        if facts["card"]["h"] < 48:
+            problems.append(f"{where}: a fact's row is {facts['card']['h']} px, under 48")
+        if facts["filtersScroll"] > 0 or facts["bodyScroll"] > 0:
+            problems.append(f"{where}: in All facts the header scrolls sideways by {facts['filtersScroll']} px")
+        page.locator(".memory-card").first.click()
+        page.wait_for_selector("[data-view=fact]", timeout=5000)
+        shown = page.evaluate("() => !!document.querySelector('.memory-pane [data-view=fact]')")
+        if shown != (width >= 1280):
+            problems.append(f"{where}: a fact opens {'in the pane' if shown else 'in a sheet'}")
+        print(f"memory layout {width}", json.dumps({"closed": closed, "opened": opened}))
+        context.close()
+
+
 def main() -> int:
     expect_app(BASE)
     problems: list[str] = []
@@ -294,6 +370,7 @@ def main() -> int:
                 check_settings(browser, width, lang, problems)
                 check_learned(browser, width, lang, problems)
             print(f"memory entries {lang}: {'ok' if not any(x.startswith(lang) for x in problems) else 'FAILED'}")
+        check_layout(browser, problems)
         browser.close()
     for problem in problems:
         print("FAIL", problem)

@@ -284,6 +284,9 @@ class StaffReportService:
                                     checks=checks, limitations=[], head=head)
                 await self._anchor(conn, mutation.object_id, live.session_id)
                 if row["comparison_group_id"] is None:
+                    # No task.moved: the report's own event is what wakes the coordinator, and a move
+                    # beside it would be a second line for one hand-in and a review notification and
+                    # handoff on top. The card's history records the move (``task_history``).
                     await conn.execute("UPDATE board_tasks SET status = 'review',"
                                        " merge_state = CASE WHEN branch IS NOT NULL AND branch != '' THEN 'proposed'"
                                        " ELSE merge_state END WHERE id = ?", (task_id,))

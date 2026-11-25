@@ -137,7 +137,7 @@ def reviewing(side: Installation, verdicts: list[str]) -> list[str]:
     side.manager.config.action_rules = ActionRulesConfig(levels={"message": "auto"})
     shown: list[str] = []
 
-    async def model(prompt: str, preset: str, timeout: float) -> tuple[str, str]:
+    async def model(prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
         shown.append(prompt)
         return verdicts.pop(0) if verdicts else "ALLOW", "small"
 

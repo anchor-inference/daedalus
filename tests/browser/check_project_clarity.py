@@ -33,7 +33,7 @@ def main() -> int:
                 serve(page, focus)
                 page.goto(f"{BASE}/orchestration/project/{PROJECT}?token=t&lang={lang}")
                 bar = page.locator("nav.project-tabs")
-                expect(bar.locator(":scope > a, :scope > button")).to_have_count(5)
+                expect(bar.locator(".tabs-list > .tab")).to_have_count(5)
                 # Waiting questions take the goal line's place: on a phone as the Needs-you card above the
                 # chat; with none, the goal line is there.
                 expect(page.locator(".goal-headline, .needs-card").first).to_be_visible()

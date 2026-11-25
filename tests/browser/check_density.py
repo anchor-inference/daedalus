@@ -390,6 +390,7 @@ READ_PHONE = """
     card: rect('.composer[data-shape] .composer-box'),
     composerRow: rect('.composer[data-shape] .composer-row'),
     circle: rect('.composer[data-shape] .roundbtn'),
+    sbrows: [...document.querySelectorAll('.ph-page .sb-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     rows: [...document.querySelectorAll('.list-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     chips: [...document.querySelectorAll('.ph-chip')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     nav: [...document.querySelectorAll('.ph-drawer-root.open .sb-pinned-nav .sb-nav')].map((r) => Math.round(r.getBoundingClientRect().height)),
@@ -611,12 +612,12 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
                 problems.append(f"{name} {lang}: the page scrolls sideways {m['scroll']}")
             return m
 
-        go("orchestration/projects", ".ph-orch .list-row")
+        go("orchestration/projects", ".ph-orch .sb-row")
         m = read("orchestration", ".ph-orch")
         if not m["top"] or m["top"]["h"] != 52:
             problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 52 tall")
-        if any(h != 54 for h in m["rows"]):
-            problems.append(f"orchestration {lang}: rows {sorted(set(m['rows']))}, not 54")
+        if any(h != 44 for h in m["sbrows"]):
+            problems.append(f"orchestration {lang}: rows {sorted(set(m['sbrows']))}, not 44")
 
         go(f"project/{pid}", ".needs-card")
         read("needs card", ".needs-card")
@@ -639,10 +640,10 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
         page.wait_for_timeout(300)
         read("task sheet", ".ph-task-menu")
         page.keyboard.press("Escape")
-        page.locator("nav.project-tabs button[data-tab='more']").tap()
-        page.wait_for_selector(".ph-more-sheet", timeout=5000)
+        page.locator("nav.project-tabs [data-tab='more']").tap()
+        page.wait_for_selector(".more-sheet", timeout=5000)
         page.wait_for_timeout(300)
-        read("more sheet", ".ph-more-sheet")
+        read("more sheet", ".more-sheet")
         page.keyboard.press("Escape")
 
         go(f"project/{pid}/attention", ".ph-attention .list-row")

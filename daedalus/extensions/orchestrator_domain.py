@@ -1207,7 +1207,10 @@ async def dependency_readiness(conn: aiosqlite.Connection, task_id: str) -> dict
 
 
 async def reconcile_dependents(conn: aiosqlite.Connection, predecessor_task_id: str) -> list[dict[str, str]]:
-    """Keep queued card status aligned with accepted-result gates in the same transaction."""
+    """Keep queued card status aligned with accepted-result gates in the same transaction.
+
+    A dependent moved here announces nothing (the move's subscribers launch and notify, and were never
+    asked to on this path); its history line names the card that moved it (``task_history``)."""
     successors = await _many(conn, "SELECT DISTINCT e.successor_task_id,t.status FROM task_dependency_edges e"
                              " JOIN board_tasks t ON t.id = e.successor_task_id"
                              " WHERE e.predecessor_task_id = ? AND e.resolution_state != 'cancelled'"

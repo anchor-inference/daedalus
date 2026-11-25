@@ -39,6 +39,9 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 GO_HINT = "OpenCode Go — subscription, not charged per token"
 ZEN_HINT = "OpenCode Zen — pay per token through OpenCode's gateway"
+# The endpoint rows carry the plan's line without the name the row already shows.
+GO_ROW = "Subscription, not charged per token"
+ZEN_ROW = "Pay per token through OpenCode's gateway"
 PICKED = "Claude Opus 5"  # $5.00/$25.00 in, a 1M window, sees pictures
 TYPED = "z-ai/glm-5.3-flash"  # $0.15/$0.50, 200k, text only
 
@@ -169,10 +172,10 @@ def run() -> int:
         third.goto(f"{BASE}/agents?token=t")
         third.wait_for_selector(".addmodel", timeout=15000)
         go = third.locator(".pickgrid .pick", has_text="OpenCode Go")
-        if go.count() != 1 or GO_HINT not in go.first.inner_text():
+        if go.count() != 1 or GO_ROW not in go.first.inner_text():
             failures.append(f"the OpenCode Go card does not say it is a subscription: {go.all_inner_texts()}")
         zen = third.locator(".pickgrid .pick.dashed", has_text="OpenCode Zen")
-        if zen.count() != 1 or ZEN_HINT not in zen.first.inner_text():
+        if zen.count() != 1 or ZEN_ROW not in zen.first.inner_text():
             failures.append(f"OpenCode Zen is not offered to add with its line about paying per token: {zen.all_inner_texts()}")
         else:
             zen.first.click()

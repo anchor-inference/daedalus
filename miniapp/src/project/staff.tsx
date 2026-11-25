@@ -11,7 +11,7 @@ import { t } from "../i18n";
 import { applyMessageEvent, stripRows } from "../staff/model";
 import { invalidate, peek, prime, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
-import { Icon } from "../icons";
+import { Button } from "../ui/primitives";
 import { HARNESS_NAMES, type Staff } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import { useFocus } from "./data";
@@ -65,8 +65,8 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
           <span className="staff-head-state truncate" data-status={member.status} title={wait?.detail || live?.waiting_for || undefined}>{state}{facts && !wait && ` · ${facts}`}</span>
           {live && (
             <span className="staff-head-actions">
-              <button type="button" className="ph-btn sm" onClick={() => void act("pause")} disabled={live.pause_requested}><Icon name="pause" size={16} />{t("ph.member.pause")}</button>
-              <button type="button" className="ph-btn sm" onClick={() => void act("interrupt")}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
+              <Button size="sm" icon="pause" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("ph.member.pause")}</Button>
+              <Button size="sm" icon="stop" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</Button>
             </span>
           )}
         </div>
@@ -74,37 +74,41 @@ export function StaffHeader({ projectId, staffId, toast, facts, details, childre
       </div>
     );
   }
+  // The member's head in its own session, as the command-line member's view draws it: one row (who,
+  // how it goes, the turn's three controls) and a line of facts under it (what runs it, where, on what).
   return (
     <div className="staff-head">
       <div className="staff-head-row">
         <StaffAvatar name={member.name} color={member.color} />
-        <div className="staff-head-who">
-          <div className="staff-head-name truncate">{member.name}{member.role && <span className="staff-head-role"> · {member.role}</span>}</div>
-          {details ?? (
-            <div className="staff-head-meta truncate">
-              <HarnessBadge harness={member.harness} />
-              <span>{runs}</span>
-              {live?.branch && <span className="mono">{t("focus.staff.branch", { branch: live.branch })}</span>}
-              {task && <span>{t("focus.staff.task", { title: task.title })}</span>}
-            </div>
-          )}
-        </div>
+        <span className="staff-head-who">
+          <span className="staff-head-name truncate">{member.name}{member.role && <span className="staff-head-role"> · {member.role}</span>}</span>
+        </span>
         <span className={`focus-pill tone-${tone}`} title={wait?.detail || live?.waiting_for || undefined} data-status={member.status}>
           <span className={`focus-dot tone-${tone}`} aria-hidden />
-          {state}
+          <span className="staff-head-state truncate">{state}</span>
           {facts && !wait && <span className="staff-head-facts"> · {facts}</span>}
         </span>
+        <span className="grow" />
         {live && (
           <div className="staff-head-actions">
-            <button className="btn small" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</button>
-            <button className="btn small" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("focus.staff.pause")}</button>
-            {/* Outlined in the warning colour: as a ghost it was quiet enough to read as a caption, not as
-                the third of three actions, and releasing the member is the weightiest of them. */}
-            <button className="btn small warn" onClick={() => void act("release")}>{t("focus.staff.release")}</button>
+            <Button size="sm" icon="stop" onClick={() => void act("interrupt")}>{t("focus.staff.interrupt")}</Button>
+            <Button size="sm" icon="pause" onClick={() => void act("pause")} disabled={live.pause_requested}>{t("focus.staff.pause")}</Button>
+            {/* The danger colour: releasing the member is the weightiest of the three. */}
+            <Button size="sm" variant="danger" onClick={() => void act("release")}>{t("focus.staff.release")}</Button>
           </div>
         )}
       </div>
-      {children}
+      <div className="staff-facts">
+        {details ?? (
+          <span className="staff-head-meta truncate">
+            <HarnessBadge harness={member.harness} />
+            <span>{runs}</span>
+            {live?.branch && <span className="mono">{t("focus.staff.branch", { branch: live.branch })}</span>}
+            {task && <span>{t("focus.staff.task", { title: task.title })}</span>}
+          </span>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, expect_app, switch_mode  # noqa: E402
+from api_stub import DEFAULT_APP, FOCUS_WORDS, FocusStub, choose_option, expect_app, switch_mode  # noqa: E402
 from screenshots import UNHANDLED, open_tool  # noqa: E402
 from screenshots import stub as installation
 
@@ -98,7 +98,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     switch_mode(page, "orchestration")
     entry = page.locator("nav.orch-sidebar .orch-row", has_text="Bakery 2.0")
     expect(entry).to_be_visible()
-    expect(entry.locator(".orch-row-meta")).to_contain_text(words["staff"])
+    expect(entry).to_have_attribute("title", re.compile(words["staff"]))
     expect(entry.locator(".needs-badge")).to_have_text("1")
     entry.click()
     page.wait_for_url(f"**/app/orchestration/project/{PID}")
@@ -223,7 +223,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(watches.nth(2)).not_to_contain_text(words["watch_approval"])
     assert focus.watched[0][0] == "update" and focus.watched[0][1]["enabled"] is True and focus.watched[0][1]["expected_condition_revision"] == 2
     page.locator(".panel .wakeup-section").last.get_by_role("button", name=words["watch_add"], exact=True).click()
-    page.locator("#watch-deadline").select_option("24")
+    choose_option(page, "#watch-deadline", "24")
     page.get_by_role("button", name=words["watch_set"], exact=True).click()
     expect(page.locator(".watch-sheet").get_by_text("Try again" if lang == "en" else "Повторить")).to_be_visible()
     page.locator(".watch-sheet").get_by_text("Try again" if lang == "en" else "Повторить").click()
@@ -263,7 +263,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     # What the project spends, over the journal: the totals and the orchestrator's own share today.
     expect(page.locator(".journal-usage")).to_contain_text(words["totals"])
     expect(page.locator(".journal-usage")).to_contain_text(words["orchspend"])
-    expect(page.locator(".journal-entry").first.locator(".chip.author")).to_be_visible()
+    expect(page.locator(".journal-entry").first.locator(".journal-author")).to_be_visible()
     page.get_by_role("button", name=words["older"]).click()
     expect(page.locator(".journal-entry")).to_have_count(35)
     page.locator(".journal-note textarea").fill("Friday: new prices")
@@ -289,7 +289,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(sheet.locator(".focus-cost")).to_contain_text(words["cost"])
     sheet.get_by_role("button", name=words["on"], exact=True).click()
     expect(page.locator(".chat.in-project.orchestrator .composer-field")).to_have_attribute("placeholder", words["placeholder"])
-    assert focus.enabled == [(GARDEN, {"model": "", "autonomy": "normal", "concurrency_cap": 10})], focus.enabled
+    assert focus.enabled == [(GARDEN, {"model": "", "effort": "", "autonomy": "normal", "concurrency_cap": 10})], focus.enabled
 
 
 def phone(page: Page, lang: str) -> None:

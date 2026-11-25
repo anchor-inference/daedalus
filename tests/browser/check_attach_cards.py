@@ -9,7 +9,7 @@ relies on:
 
 - the pictures are a row of square thumbnails above the bubble, right-aligned with it, each drawn
   from the session's attachment route;
-- the PDF and the Word document are cards with their own type colour, the name and the kind;
+- the PDF and the Word document are cards with a grey square, the name and the kind;
 - the bubble holds the operator's words and the secret's chip, and never the list or a path;
 - a message that was only a file draws no empty bubble;
 - a thumbnail opens the centred viewer, and the PDF card opens the preview;
@@ -168,15 +168,17 @@ def check(page: Page, lang: str, scheme: str, where: str, shot: str = "", answer
     for index in range(2):
         box = thumbs.nth(index).bounding_box()
         assert box and abs(box["width"] - box["height"]) <= 1, f"{where}: a thumbnail is not square: {box}"
-    # The other files: a card each, with the type's colour, the name and the kind.
+    # The other files: a card each, with a grey square, the name and the kind.
     pdf = first.locator(".msg-file[data-kind='pdf']")
     docx = first.locator(".msg-file[data-kind='document']")
     expect(pdf.locator(".msg-file-name")).to_have_text(INBOX_PDF)
     expect(pdf.locator(".msg-file-kind")).to_have_text(words["pdf"])
     expect(docx.locator(".msg-file-name")).to_have_text(INBOX_DOCX)
     expect(docx.locator(".msg-file-kind")).to_have_text(words["docx"])
-    colours = {kind: first.locator(f".msg-file[data-kind='{kind}'] .msg-file-icon").evaluate("node => getComputedStyle(node).backgroundColor") for kind in ("pdf", "document")}
-    assert colours["pdf"] != colours["document"], f"{where}: a PDF and a document share a colour: {colours}"
+    # One grey for every kind: a colour per kind made a list of files read as a legend.
+    colours = {kind: first.locator(f".msg-file[data-kind='{kind}'] .file-tile").evaluate("node => getComputedStyle(node).backgroundColor") for kind in ("pdf", "document")}
+    assert colours["pdf"] == colours["document"], f"{where}: a PDF and a document are drawn in different colours: {colours}"
+    assert first.locator(".msg-file[data-kind='pdf'] .file-tile svg").count() == 1, f"{where}: the PDF's square has no glyph"
     # The bubble: the operator's words, never the list written for the model.
     bubble = first.locator(".msg.user")
     text = bubble.inner_text()

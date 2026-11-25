@@ -34,7 +34,7 @@ export type PopoverProps = {
 
 /** What takes the keyboard when the box opens: the search field of a list that has one, else the
     current choice, else the first control. */
-const FIRST = ".model-search, [aria-checked='true'], input:checked, button[aria-current='true'], button:not(:disabled), input, [role='slider']";
+const FIRST = ".model-search, [aria-checked='true'], input:checked, button[aria-current='true'], button:not(:disabled), input, textarea, [role='slider']";
 
 export function Popover({ anchor, open = true, onClose, label, side, align = "start", width, height, offset, role = "menu", sheetBelow = SHEET_BELOW, className = "", children }: PopoverProps) {
   const sheet = useSheetForm(anchor, sheetBelow, width);

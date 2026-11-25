@@ -678,11 +678,12 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     print("allow all:", grant.inner_text())
     if "Allow all from mobile-mcp" not in grant.inner_text():
         problems.append(f"the server button does not name the server ({grant.inner_text()!r})")
-    if grant.locator("select").input_value() != "6":
+    if grant.locator(".dropdown-btn").get_attribute("data-value") != "6":
         problems.append("six hours is not the span chosen at first")
-    grant.locator("select").select_option("2")
+    grant.locator(".dropdown-btn").click()
+    page.locator("[role='option'][data-value='2']").click()
     before = len(posts("/policy/grant-server"))
-    grant.locator("button").click()
+    grant.locator("button").first.click()
     reached(page, "/policy/grant-server", before, "Allow all from the server", problems)
     asked = posts("/policy/grant-server")
     if not asked or asked[-1][2] != {"key": "3c3c3c3c3c3c", "hours": 2}:

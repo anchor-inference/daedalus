@@ -377,6 +377,7 @@ describe("making a direct link", () => {
 
   it("names the link's own record for what it is, since the chat keeps a direct conversation itself", async () => {
     await direct();
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-more-toggle]")!.click());
     expect(document.querySelector("label[for='guest-retention_days']")?.textContent).toBe(t("guest.field.retention.direct"));
     await act(async () => pick("stand_in"));
     expect(document.querySelector("label[for='guest-retention_days']")?.textContent).toBe(t("guest.field.retention"));
@@ -394,6 +395,7 @@ describe("a trusted agent", () => {
     await trusted();
     expect(document.querySelector("[data-guest-warning='trusted']")?.textContent).toBe(t("guest.trusted.warning"));
     expect(document.querySelector(".guest-form .segmented")).toBeNull();
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-guest-more-toggle]")!.click());
     for (const name of ["usd_limit", "turns_per_day", "invite_hours", "turns_total", "conversation_hours", "idle_hours"]) {
       expect(document.querySelector(`[data-guest-nolimit='${name}']`)?.getAttribute("aria-pressed")).toBe("true");
       expect(document.querySelector(`#guest-${name}`)).toBeNull();

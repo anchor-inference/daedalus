@@ -9,7 +9,7 @@ import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, mig
 import { Counts, ICONS, PaletteItem, besideSession, chatStatus, go, goKey, screenTitle, useMedia, useShortcuts } from "./shell";
 import { Palette } from "./palette";
 import { AppDrawer } from "./drawer";
-import { closeDrawer } from "./ui/phone";
+import { closeDrawer } from "./ui/primitives";
 import { KEYS, Sidebar, SidebarFrame, UnfoldButton, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { useRecordVisit } from "./navfrequent";
@@ -764,7 +764,7 @@ export function App() {
       <ImportHost />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
-          <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>
+          <Suspense fallback={<nav className="project-tabs" aria-hidden />}>
             <ProjectTabs projectId={focusProject} current={projectBar.tab} />
           </Suspense>
         </ErrorBoundary>

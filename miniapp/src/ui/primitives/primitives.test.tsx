@@ -18,6 +18,7 @@ import { Sheet } from "./sheet";
 import { Switch } from "./switch";
 import { Tabs } from "./tabs";
 import { ToastHost, dismissToast, toast } from "./toast";
+import { clearNotices, raiseNotice } from "./notices";
 
 // Words of an invented bakery, held in constants: hardcoded.test.ts reads `label="…"` and the
 // text between tags in any source as words a reader would see.
@@ -458,6 +459,29 @@ describe("toast", () => {
     await act(async () => dismissToast(id));
     await settle();
     expect(document.querySelector(".toast")).toBeNull();
+  });
+});
+
+describe("notices", () => {
+  const view = (title: string, group?: string) => ({ title, body: "text", urgent: false, group, onOpen: vi.fn(), actions: <div className="notice-actions"><button type="button" className="btn">Answer</button></div> });
+  const titles = () => [...document.querySelectorAll(".notice-toast .notice-title")].map((el) => el.textContent);
+
+  it("stack three with the newest on top, count the rest, and replace a repeat", async () => {
+    // A desktop: the stack of three in the corner (a phone shows one banner).
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("min-width"), media: query, addEventListener() {}, removeEventListener() {} }));
+    await act(async () => root.render(<ToastHost />));
+    await act(async () => { for (let i = 1; i <= 4; i++) raiseNotice({ key: i, seq: i, ms: 20000, view: view(`Notice ${i}`) }); });
+    await settle();
+    expect(titles()).toEqual(["Notice 3", "Notice 2", "Notice 1"]);
+    expect(document.querySelector(".notice-more")?.textContent).toBe("+1 more");
+    await act(async () => raiseNotice({ key: 3, seq: 9, ms: 20000, view: view("Notice 3 again") }));
+    await settle();
+    expect(titles()).toEqual(["Notice 3 again", "Notice 2", "Notice 1"]);
+    expect(document.querySelectorAll(".notice-toast .notice-actions .btn")).toHaveLength(3);
+    await act(async () => { clearNotices(); });
+    await settle();
+    expect(document.querySelector(".notice-toasts")).toBeNull();
+    vi.unstubAllGlobals();
   });
 });
 

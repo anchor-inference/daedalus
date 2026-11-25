@@ -95,17 +95,19 @@ def run() -> int:
         # The next runtime offered is the first one the route does not name.
         section.get_by_role("button", name="Add runtime").click()
         expect(rows).to_have_count(2)
-        expect(rows.nth(1).get_by_role("combobox")).to_have_value("codex")
+        expect(rows.nth(1).locator(".dropdown-btn")).to_have_attribute("data-value", "codex")
         rows.nth(0).get_by_role("textbox").fill("opus")
         rows.nth(1).get_by_role("button", name="Move up").click()
-        expect(rows.nth(0).get_by_role("combobox")).to_have_value("codex")
+        expect(rows.nth(0).locator(".dropdown-btn")).to_have_attribute("data-value", "codex")
         expect(rows.nth(1).get_by_role("textbox")).to_have_value("opus")
 
         # A runtime twice cannot be saved.
-        rows.nth(0).get_by_role("combobox").select_option("claude")
+        rows.nth(0).locator(".dropdown-btn").click()
+        page.locator(".dropdown-list [role=option][data-value='claude']").click()
         expect(section.get_by_role("status")).to_contain_text("Each runtime may appear once")
         expect(save).to_be_disabled()
-        rows.nth(0).get_by_role("combobox").select_option("codex")
+        rows.nth(0).locator(".dropdown-btn").click()
+        page.locator(".dropdown-list [role=option][data-value='codex']").click()
         expect(save).to_be_enabled()
 
         for width in (320, 390):

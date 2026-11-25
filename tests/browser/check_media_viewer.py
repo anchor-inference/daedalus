@@ -164,7 +164,7 @@ def check(page: Page, name: str, clip: bytes | None, fetched: list[str]) -> list
     box = viewer.bounding_box() or {"width": 0, "height": 0}
     size = page.viewport_size or {"width": 0, "height": 0}
     count = page.locator(".lightbox-count").inner_text()
-    title = page.locator(".lightbox-title").inner_text()
+    title = page.locator(".fullscreen-title").inner_text()
     print(f"{name}: viewer={box} count={count!r} title={title!r} panel={panel_open(page)}")
     if box["width"] < size["width"] * 0.95 or box["height"] < size["height"] * 0.95:
         problems.append(f"{name}: the viewer does not cover the window ({box})")
@@ -186,15 +186,15 @@ def check(page: Page, name: str, clip: bytes | None, fetched: list[str]) -> list
         page.wait_for_timeout(200)
         swipe(page, 1)
         page.wait_for_timeout(200)
-        if page.locator(".lightbox-title").inner_text() != "first.png":
+        if page.locator(".fullscreen-title").inner_text() != "first.png":
             problems.append(f"{name}: a swipe to the right did not return to the first picture")
         swipe(page, -1)
     page.wait_for_timeout(200)
-    if page.locator(".lightbox-title").inner_text() != "second.png":
+    if page.locator(".fullscreen-title").inner_text() != "second.png":
         problems.append(f"{name}: paging did not move to the second picture")
     page.locator(".media-viewer").get_by_role("button", name="Next", exact=True).click()
     video = page.locator(".media-viewer-stage video")
-    if video.count() != 1 or page.locator(".lightbox-title").inner_text() != "clip.webm":
+    if video.count() != 1 or page.locator(".fullscreen-title").inner_text() != "clip.webm":
         problems.append(f"{name}: the sent clip is not the third item of the viewer")
     elif clip is None:
         print(f"{name}: no clip to play (no ffmpeg, no MEDIA_TEST_VIDEO): play step skipped")
@@ -214,7 +214,7 @@ def check(page: Page, name: str, clip: bytes | None, fetched: list[str]) -> list
         page.locator(".tool-attachment .tool-image").nth(1).click()
         page.locator(".media-viewer.lightbox").wait_for(timeout=4000)
     page.wait_for_timeout(200)
-    if page.locator(".lightbox-title").inner_text() != "second.png":
+    if page.locator(".fullscreen-title").inner_text() != "second.png":
         problems.append(f"{name}: did not come back to the second picture")
 
     # The old route stays one press away.
@@ -272,7 +272,7 @@ def files_tab(page: Page, name: str) -> list[str]:
     except Exception:
         return [f"{name}: a picture in the files tab did not open the viewer beside a narrow panel"]
     save = page.locator(".media-viewer .lightbox-save")
-    print(f"{name}: files tab viewer title={page.locator('.lightbox-title').inner_text()!r} save={save.get_attribute('href')!r}")
+    print(f"{name}: files tab viewer title={page.locator('.fullscreen-title').inner_text()!r} save={save.get_attribute('href')!r}")
     if save.get_attribute("download") != "cover.png":
         problems.append(f"{name}: the viewer from the files tab has no download control")
     if page.locator(".panel-crumbs").count():

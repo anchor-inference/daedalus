@@ -23,6 +23,7 @@ from api_stub import (  # noqa: E402
     BoardStub,
     TeamStub,
     Unhandled,
+    choose_option,
     expect_app,
     folders,
     fulfil_shared,
@@ -179,16 +180,16 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet = page.locator(".sheet.pboard-sheet")
     expect(sheet).to_be_visible()
     sheet.locator("#ptask-title").fill("Delivery zones")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     expect(sheet.locator(".sub.attn")).to_contain_text(words["missing"])
     sheet.locator("#ptask-objective").fill("Customers see whether we deliver to them")
     sheet.locator("#ptask-deliverable").fill("A zones page and a check at checkout")
     sheet.locator("#ptask-boundaries").fill("Only the site folder")
     sheet.locator("#ptask-done_when").fill("An address outside the zones is refused politely")
-    sheet.locator("#ptask-folder").select_option(project()["folders"][0]["id"])
+    choose_option(page, sheet.locator("#ptask-folder"), project()["folders"][0]["id"])
     expect(sheet.locator(".sub.attn")).to_have_count(0)
     sheet.locator(".pboard-deps").get_by_role("option", name="Checkout").click()
-    sheet.get_by_role("radio", name="P2", exact=True).click()
+    choose_option(page, sheet.locator("#ptask-priority"), "2")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     made = stub.created[-1]
@@ -232,7 +233,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     cols.locator(".pcard", has_text="Menu photo captions").click()
     expect(sheet).to_be_visible()
     assert "task=t-photos" in page.url, page.url
-    sheet.locator("#ptask-assignee").select_option("st-max")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-max")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["save"]).click()
     # The dialog stays on the task after a save; the footer goes, with nothing left to save.
     expect(sheet.locator(".sheet-foot")).to_have_count(0)
@@ -248,7 +249,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub.launch_failures = 1
     page.get_by_role("button", name=words["new"]).first.click()
     sheet.locator("#ptask-title").fill("Retry launch")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     assert sum(task["title"] == "Retry launch" for task in stub.tasks) == 1
@@ -262,7 +263,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub.launch_unknowns = 1
     page.get_by_role("button", name=words["new"]).first.click()
     sheet.locator("#ptask-title").fill("Unknown launch")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     unknown_id, unknown_body = stub.unknown_launches[-1]

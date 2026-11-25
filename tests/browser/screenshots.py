@@ -34,6 +34,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import (  # noqa: E402
     ATTACHED_PRESENTATION,
+    CALENDAR,
     DEFAULT_APP,
     FILE_TEXT,
     FOCUS_WORDS,
@@ -386,7 +387,8 @@ def detail(id_: str) -> dict:
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
         # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
-        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None,
+        # Every chat's folder is a repository: the changes stub answers each with the same listing.
+        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None, "repository": True,
         "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [ASK_KEY] if asked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
@@ -509,6 +511,8 @@ BOARD += [
     {"id": "d17b90", "title": "Copy the build to the shop's server", "status": "doing", "priority": 3, "acceptance": "The form opens on the site and a test order reaches the sheet.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=6)},
     {"id": "5e2c77", "title": "Taste the new rye loaf before it goes on the menu", "status": "todo", "priority": 3, "acceptance": "", "checklist": [], "depends_on": ["7f2a1c"], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(hours=6), "updated_at": ago(hours=6)},
     {"id": "b48e13", "title": "Square crops for the gallery thumbnails", "status": "todo", "priority": 4, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S2, "notes": "", "created_at": ago(days=1), "updated_at": ago(hours=20)},
+    {"id": "2f6b81", "title": "Show an error when an order does not go through", "status": "review", "priority": 3, "acceptance": "A failed order shows a line the buyer can read, and the order is not lost.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=35)},
+    {"id": "8a1e55", "title": "Read the order form and the owner's sheet", "status": "done", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=58)},
     {"id": "0c93fa", "title": "Old holiday banner", "status": "dropped", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(days=2), "updated_at": ago(days=1)},
 ]
 
@@ -677,7 +681,11 @@ def usage_data() -> dict:
 SETTINGS = {
     # Settings → Chat → Translation: the operator writes Russian, the agent works in English by default,
     # and the translator is left to the host, which names the cheap model it picks.
-    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
+    # The rescue left to the host as well, which names the model on another route it would ask.
+    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "effort": "", "fallback_preset": "", "blocking_timeout_seconds": 30, "timeout_seconds": 120,
+                    "suggested": "deepseek-flash", "fallback_suggested": "gpt-5.6-luna"},
+    # Settings → Models: nothing known about any model's health yet, so no mark (check_model_health.py draws them).
+    "model_health": {},
     # Settings → Navigation: the layout the app ships with.
     "navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
@@ -726,7 +734,7 @@ SETTINGS = {
     },
     "provider_kinds": ["claude", "deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"],
     "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
-    "orchestrator": {"preset": "", "strongest": "claude-opus-5"},
+    "orchestrator": {"preset": "", "effort": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},
     "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": ["duckduckgo"], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000, "background_after_seconds": 120}},
     # The backends the host offers: the pictures of WebSearch show a primary, a fallback and one waiting for its key.
@@ -1123,6 +1131,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return None
     if rel.startswith("/api/projects/") and "/approval-rules" in rel and fulfil_shared(route):
         return None
+    if rel.startswith(("/api/calendar", "/api/planner")):
+        # A recipe's ``calendar_empty`` flag draws the planner with nothing on it.
+        CALENDAR.empty = bool(getattr(stub, "calendar_empty", False))
+        if fulfil_shared(route):
+            return None
     if rel.startswith("/api/proposals"):
         # A recipe's ``proposals_empty`` flag answers the list with nothing, and so does the empty inbox's scene:
         # a waiting proposal is an inbox entry too.
@@ -1245,7 +1258,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         # ``session=`` is one chat's own board: the tasks that chat created; ``project=`` one project's.
         chat = params.get("session", [""])[0]
         project = params.get("project", [""])[0]
-        listed = [t for t in BOARD if (not chat or t["origin_session_id"] == chat) and (not project or t["project_id"] == project)]
+        # A helper works on its leader's board: the host answers a helper's id with the leader's family.
+        leader = next((s["metadata"].get("subagent_of") for s in SESSIONS if s["id"] == chat), None) or chat
+        family = {leader, *(s["id"] for s in SESSIONS if s["metadata"].get("subagent_of") == leader)}
+        listed = [t for t in BOARD if (not chat or t["origin_session_id"] in family) and (not project or t["project_id"] == project)]
         if params.get("include_done", ["0"])[0] != "1":
             listed = [t for t in listed if t["status"] not in ("done", "dropped")]
         return respond(route, listed)
@@ -1264,6 +1280,10 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, PROJECTS)
     if rel == "/api/settings":
         return respond(route, SETTINGS)
+    if rel == "/api/models/check" and request.method == "POST":
+        # Check models: every model answers at once, so the pictures do not move under a press.
+        results = {pid: {"state": "ok", "detail": "", "ms": 900, "at": "2026-11-25T12:00:00+00:00"} for pid in SETTINGS["presets"]}
+        return respond(route, {"checked_at": "2026-11-25T12:00:00+00:00", "results": results, "health": {pid: {"state": "ok", "detail": "", "check": r} for pid, r in results.items()}})
     if rel == "/api/limits/spend":
         # Settings → Limits reads it for the spend beside each cap; without it the whole section fails to draw.
         return respond(route, {"since": "", "total": {"spent_usd": 3.42, "unmetered": 2, "cap_usd": 0, "reserved_usd": 1.12, "uncertain_usd": 0.35, "reserved_count": 3, "uncertain_count": 1}, "per_provider": {}})
@@ -1310,7 +1330,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == "/api/asr":
         return respond(route, {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False})
     if rel == "/api/heartbeat":
-        return respond(route, {"enabled": True, "armed": True, "interval_minutes": 60, "active_hours": "08:00-23:00", "preset": "", "max_runs_per_day": 24, "last_run": ago(minutes=35), "runs_today": 9, "session_id": None, "running": False, "file": "/srv/state/HEARTBEAT.md", "text": "Check the services and the board; write to the inbox only when something needs me."})
+        return respond(route, {"enabled": True, "armed": True, "interval_minutes": 60, "active_hours": "08:00-23:00", "preset": "", "effort": "", "max_runs_per_day": 24, "last_run": ago(minutes=35), "runs_today": 9, "session_id": None, "running": False, "file": "/srv/state/HEARTBEAT.md", "text": "Check the services and the board; write to the inbox only when something needs me."})
     if rel == "/api/capabilities":
         return respond(route, CAPABILITIES)
     if rel == "/api/status":
@@ -1671,7 +1691,7 @@ def open_projects(page: Page) -> None:
 
 def open_hire(page: Page) -> None:
     # The team's header also links to the board; hiring is its primary action.
-    page.locator(".pagehead-actions .iconbtn.primary").click()
+    page.locator(".pagehead-actions .btn.primary").click()
     page.wait_for_selector(".staff-sheet .executor")
     page.locator("#staff-name").fill("Mira")
     page.locator("#staff-role").fill(word("role"))
@@ -1870,7 +1890,7 @@ def workspace_shots(page: Page) -> None:
         ("session-preview-code", "src/main.py", ".source-view"),
         ("session-preview-html", "site/index.html", ".html-frame"),
         ("session-preview-json", "data/sample.json", ".json-tree"),
-        ("session-preview-diff", "change.diff", ".diff-view"),
+        ("session-preview-diff", "change.diff", ".patch-view"),
     ]:
         shot(page, name, f"agents/{S1}?panel=preview&path={quote(path)}", wait=selector, settle=500)
 
@@ -2463,7 +2483,7 @@ def phone_project_shots(context) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", focus_stub(focus))
     pid = focus.projects[0]["id"]
-    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .ph-btn", settle=700)
+    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .btn", settle=700)
     shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .list-row", settle=700)
     shot(page, "phone-orchestrator", f"project/{pid}", wait=".chat.in-project .event-card", settle=900)
     page.close()
@@ -2561,7 +2581,7 @@ def run_staff() -> int:
             desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page, pid = staff_stand(phone)
-        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ph-ask .ph-btn", settle=900)
+        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ph-ask .btn", settle=900)
         phone.close()
         browser.close()
     return UNHANDLED.report()
@@ -2759,7 +2779,7 @@ def run_notes() -> int:
         page.evaluate("document.querySelectorAll('.ne-read .note-img').forEach((el) => el.classList.add('loaded'))")
 
     def chat_tab(page: Page) -> None:
-        page.locator(".notes-subtab[data-scope='chat']").click()
+        page.locator(".notes-subtabs .tab[data-tab='chat']").click()
 
     def shelf(page: Page) -> None:
         page.locator(".notes-shelf-toggle").click()
@@ -2773,7 +2793,7 @@ def run_notes() -> int:
         page.locator(".ne-field").press("Control+End")
         page.keyboard.press("Enter")
         page.keyboard.type("Menu photos on the home page" if LANG != "ru" else "Фото меню на главной")
-        page.wait_for_selector(".ne-conflict", timeout=5000)
+        page.wait_for_selector(".dialog.wide .ne-diff", timeout=5000)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
@@ -2860,7 +2880,7 @@ def run_canvas() -> int:
             page = desk.new_page()
             page.route("**/api/**", answer)
             open_board(page)
-            page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+            page.get_by_role("radio", name="Комментарий" if ru else "Comment").click()
             frame = page.locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             inner = page.frame_locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
@@ -2868,7 +2888,7 @@ def run_canvas() -> int:
             assert box is not None
             scale = box["width"] / frame.evaluate("(node) => node.offsetWidth")
             page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
-            note = page.locator(".cv-pick-note")
+            note = page.locator(".cv-pick")
             note.wait_for(timeout=5000)
             note.locator("textarea").fill("Крупнее и теплее" if ru else "Larger, and a warmer brown")
             note.get_by_role("button", name="Добавить" if ru else "Add").click()
@@ -3144,7 +3164,6 @@ def run_browser() -> int:
         page.goto(f"{BASE}/agents/{S1}?panel=browser&token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".panel .bp .bv[data-state='live']", timeout=15000)
         wait_frames(page, ".panel .bp", 1)
-        page.locator(".panel .bp-log-head").click()
         page.wait_for_timeout(500)
         bs.act("g1", "type", "search", name="Search", element="the shop's search field", text_len=15, text="whole rye flour")
         page.wait_for_timeout(280)

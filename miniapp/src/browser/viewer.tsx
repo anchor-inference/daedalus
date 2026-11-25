@@ -33,6 +33,7 @@ import { clipboardChord, ESCAPE_TWICE_MS, isKeyPress, keyInput, modsOf, mouseBut
 import type { Box } from "./protocol";
 import type { LiveSnapshot, LiveView } from "./live";
 import { CursorOverlay } from "./overlay";
+import "./panel.css";
 
 /** A finger that moves less than this is still a tap. */
 const TAP_SLOP_PX = 8;

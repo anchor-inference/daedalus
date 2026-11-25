@@ -30,7 +30,7 @@ describe("a note drawn", () => {
     expect(html).toContain('data-note-image="abcdefghij12"');
     expect(html).toContain('aspect-ratio:640 / 480');
     expect(html).toContain('data-note-file="zyxwvu987654"');
-    expect(html).toContain('data-kind="pdf"');
+    expect(html).toContain('data-family="pdf"');
     expect(html).toContain("note-missing");
     expect(html).not.toContain('src="https://example.com');
     expect(html).toContain('class="note-remote"');
