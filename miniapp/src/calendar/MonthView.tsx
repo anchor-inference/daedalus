@@ -23,7 +23,8 @@ type Props = {
   dragTask: Task | null;
   onPickDay: (day: Day) => void;
   onMore: (day: Day) => void;
-  onCreate: (day: Day) => void;
+  onCreate: (day: Day, rect: DOMRect | null) => void;
+  openKey?: string | null;
   onOpen: (item: Item) => void;
   onToggleTask: (task: Task) => void;
   onDropTask: (task: Task, day: Day) => void;
@@ -116,7 +117,7 @@ function WeekRow({ week, items, capacity, ...props }: Props & { week: Day[]; cap
         <div key={day} role="gridcell" className={`cal-month-cell ${day.slice(0, 7) !== props.month ? "outside" : ""} ${day === props.today ? "today" : ""}`} style={{ gridColumn: index + 1 }}
           onDragOver={(e) => { if (props.dragTask) e.preventDefault(); }}
           onDrop={(e) => { if (props.dragTask) { e.preventDefault(); props.onDropTask(props.dragTask, day); } }}>
-          <button type="button" className="cal-month-new" tabIndex={-1} aria-label={t("cal.new.on", { day: dayLabel(day, locale(), { day: "numeric", month: "long" }) })} onClick={() => props.onCreate(day)} />
+          <button type="button" className="cal-month-new" tabIndex={-1} aria-label={t("cal.new.on", { day: dayLabel(day, locale(), { day: "numeric", month: "long" }) })} onClick={(e) => props.onCreate(day, e.currentTarget.getBoundingClientRect())} />
           <button type="button" className="cal-month-num" onClick={() => props.onPickDay(day)} aria-label={dayLabel(day, locale(), { weekday: "long", day: "numeric", month: "long" })} aria-current={day === props.today ? "date" : undefined}>
             {day.endsWith("-01") ? dayLabel(day, locale(), { day: "numeric", month: "short" }) : Number(day.slice(8, 10))}
           </button>
@@ -125,7 +126,7 @@ function WeekRow({ week, items, capacity, ...props }: Props & { week: Day[]; cap
       <div className="cal-month-lanes">
         {visible.map(({ item, span, lane }) => (
           <ItemChip key={item.key} item={item} zone={props.zone} showTime className={`${item.allDay ? "cal-bar" : ""} ${item.firstDay < week[span.first] ? "cut-start" : ""} ${item.lastDay > week[span.last] ? "cut-end" : ""}`}
-            style={{ gridColumn: `${span.first + 1} / ${span.last + 2}`, gridRow: lane + 1 }} onOpen={props.onOpen} onToggleTask={props.onToggleTask} />
+            style={{ gridColumn: `${span.first + 1} / ${span.last + 2}`, gridRow: lane + 1 }} open={props.openKey === item.key} onOpen={props.onOpen} onToggleTask={props.onToggleTask} />
         ))}
         {week.map((day, index) => {
           if (!overflowing[index]) return null;

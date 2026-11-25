@@ -103,7 +103,8 @@ def one_scroll(sheet: Locator, where: str) -> None:
     """Nothing in the sheet scrolls up and down on its own but its body: a list inside a list was the
     wall of text this replaces."""
     nested = sheet.evaluate("""el => [...el.querySelectorAll('*')].filter((n) => {
-        if (n.classList.contains('sheet-body')) return false;
+        // The sheet's body, or the pane's: the one place the event scrolls.
+        if (n.classList.contains('sheet-body') || n.classList.contains('cal-pane-scroll')) return false;
         const s = getComputedStyle(n);
         return (s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight + 1;
     }).map((n) => n.className)""")
@@ -113,14 +114,14 @@ def one_scroll(sheet: Locator, where: str) -> None:
 
 def open_row(page: Page, text: str) -> Locator:
     page.locator(".cal-row-open", has_text=text).first.click()
-    sheet = page.locator(".sheet.cal-view").last
+    sheet = page.locator(".cal-view").last
     expect(sheet).to_be_visible()
     return sheet
 
 
 def close(page: Page) -> None:
     page.keyboard.press("Escape")
-    expect(page.locator(".sheet.cal-view")).to_have_count(0)
+    expect(page.locator(".cal-view")).to_have_count(0)
 
 
 def scenario(browser, lang: str, phone: bool, scheme: str, errors: list[str]) -> None:  # type: ignore[no-untyped-def]
@@ -161,7 +162,7 @@ def scenario(browser, lang: str, phone: bool, scheme: str, errors: list[str]) ->
     one_scroll(sheet, where)
     targets_at_least(boxes, f"{where} checklist rows")
     targets_at_least(sheet.locator(".cal-blk-head"), f"{where} block heads")
-    head = sheet.locator(".sheet-head .cal-progress-text")
+    head = sheet.locator(".cal-view-head .cal-progress-text")
     expect(head).to_have_text("7/50")
     first_open = sheet.locator(".cal-checklist [role=checkbox][aria-checked=false]").first
     name = first_open.inner_text()
@@ -185,19 +186,15 @@ def scenario(browser, lang: str, phone: bool, scheme: str, errors: list[str]) ->
     expect(sheet.locator(".cal-totals")).to_be_visible()
     totals = sheet.locator(".cal-totals").inner_text()
     assert "₸" in totals and "15/44" in totals, f"{where}: the basket's totals read {totals!r}"
+    # The pane is 420 px wide and a phone's sheet narrower: both draw the basket as cards, never as a
+    # table whose columns would be cut off.
+    expect(sheet.locator(".cal-cards .cal-card")).to_have_count(44)
+    assert sheet.locator("table").count() == 0, f"{where}: a table in a narrow column"
+    cut = sheet.evaluate("""el => [...el.querySelectorAll('.cal-card')].filter((c) => c.getBoundingClientRect().right > window.innerWidth + 0.5 || c.scrollWidth > c.clientWidth + 1).length""")
+    assert cut == 0, f"{where}: {cut} cards are cut off"
     if phone:
-        expect(sheet.locator(".cal-cards .cal-card")).to_have_count(44)
-        assert sheet.locator("table").count() == 0, f"{where}: a table on a phone"
-        cut = sheet.evaluate("""el => [...el.querySelectorAll('.cal-card')].filter((c) => c.getBoundingClientRect().right > window.innerWidth + 0.5 || c.scrollWidth > c.clientWidth + 1).length""")
-        assert cut == 0, f"{where}: {cut} cards are cut off"
         targets_at_least(sheet.locator(".cal-card-hit"), f"{where} basket cards")
-        sheet.locator(".cal-card:not(.on) .cal-card-hit").first.click()
-    else:
-        expect(sheet.locator("table.cal-table tbody tr")).to_have_count(44)
-        sticky = sheet.locator("table.cal-table tbody th").first.evaluate("el => getComputedStyle(el).position")
-        assert sticky == "sticky", f"{where}: the basket's first column is not held: {sticky}"
-        targets_at_least(sheet.locator("table.cal-table [role=checkbox]"), f"{where} basket checkboxes")
-        sheet.locator("table.cal-table tr:not(.on) [role=checkbox]").first.click()
+    sheet.locator(".cal-card:not(.on) .cal-card-hit").first.click()
     expect(sheet.locator(".cal-totals")).to_contain_text("16/44")
     wait_for("the cell's tick sent", lambda: any(op.get("column") for body in writes(stub, "PATCH", "/shop-1/blocks") for op in body["ops"]))
     unknown = sheet.locator(".cal-blk.kind-unknown")
@@ -259,8 +256,7 @@ def scenario(browser, lang: str, phone: bool, scheme: str, errors: list[str]) ->
         assert sent_status[-1] == {"status": "done"}, sent_status
 
         # The phone's month: a dot per kind of thing, and the picked day's list with its totals.
-        page.locator(".cal-view-pick").click()
-        page.get_by_role("menuitem", name="Месяц" if lang == "ru" else "Month", exact=True).click()
+        page.get_by_role("radio", name="Месяц" if lang == "ru" else "Month", exact=True).click()
         expect(page.locator(".cal-month.compact")).to_be_visible()
         # Every day of the week's plan carries its type's dot. This used to count seven dots in the
         # month on screen, which held only while the whole plan, laid from today, fell inside the

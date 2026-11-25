@@ -4,15 +4,16 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { locale, t } from "../i18n";
 import { Icon } from "../icons";
+import { Combobox, Menu, Popover, Select } from "../ui/primitives";
 import { clock, clockLabel, parseClock } from "./dates";
 import { PALETTE } from "./data";
 import type { CalendarRow } from "./types";
 import { calendarName, duration, REMINDER_PRESETS, reminderLabel } from "./words";
 import { allZones, offsetLabel } from "./zone";
 
-/** A time of day in 15-minute steps, as a native select: a phone shows it as its own wheel, which is
- *  what a thumb wants. A time off the grid (09:10 from a synced calendar) is kept as an extra choice.
- *  With `after`, each choice says how long the event would last, the way an end time is picked. */
+/** A time of day in 15-minute steps. A time off the grid (09:10 from a synced calendar) is kept as an
+ *  extra choice, so opening an event never rewrites its time. With `after`, each choice says how long
+ *  the event would last, the way an end time is picked. */
 export function TimeSelect({ value, onChange, label, after, id }: { value: number; onChange: (minutes: number) => void; label: string; after?: number; id?: string }) {
   const choices = useMemo(() => {
     const list = Array.from({ length: 96 }, (_, i) => i * 15);
@@ -21,11 +22,8 @@ export function TimeSelect({ value, onChange, label, after, id }: { value: numbe
     return list.sort((a, b) => a - b).filter((m) => after === undefined || m > after);
   }, [value, after]);
   return (
-    <select id={id} className="field cal-time" value={String(value)} aria-label={label} onChange={(e) => onChange(Number(e.target.value))}>
-      {choices.map((m) => (
-        <option key={m} value={m}>{m === 1440 ? clockLabel(0, locale()) : clockLabel(m, locale())}{after !== undefined ? ` (${duration(m - after)})` : ""}</option>
-      ))}
-    </select>
+    <Select id={id} size="md" className="cal-time" value={String(value)} label={label} onChange={(m) => onChange(Number(m))}
+      options={choices.map((m) => ({ id: String(m), label: `${m === 1440 ? clockLabel(0, locale()) : clockLabel(m, locale())}${after !== undefined ? ` (${duration(m - after)})` : ""}` }))} />
   );
 }
 
@@ -71,6 +69,7 @@ export function ColorPicker({ value, onChange, none, label }: { value: string | 
 /** A time zone, searched by any part of its name ("york", "Moscow", "+03"). Several hundred zones do
  *  not belong in a closed list, and nobody remembers whether theirs is under Europe or Asia. */
 export function ZonePicker({ value, onChange }: { value: string; onChange: (zone: string) => void }) {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const zones = useMemo(() => allZones(), []);
@@ -80,26 +79,21 @@ export function ZonePicker({ value, onChange }: { value: string; onChange: (zone
     const list = words ? zones.filter((z) => z.toLowerCase().includes(words) || offsetLabel(z, now).replace("−", "-").includes(words.replace("−", "-"))) : zones;
     return list.slice(0, 60);
   }, [query, zones, now]);
+  const close = () => { setOpen(false); setQuery(""); };
   return (
     <div className="cal-zone">
-      <button type="button" className="field cal-zone-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={`${t("cal.field.zone")}: ${value}`}>
-        <Icon name="globe" size={14} />
+      <button ref={setAnchor} type="button" className="btn cal-zone-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="dialog" aria-label={`${t("cal.field.zone")}: ${value}`}>
+        <Icon name="globe" size={16} />
         <span>{value.replace(/_/g, " ")}</span>
         <small>{offsetLabel(value, now)}</small>
       </button>
       {open && (
-        <div className="cal-zone-pop">
-          <input className="field" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("cal.zone.search")} aria-label={t("cal.zone.search")}
-            onKeyDown={(e) => { if (e.key === "Enter" && found[0]) { e.preventDefault(); onChange(found[0]); setOpen(false); } }} />
-          <div className="cal-zone-list" role="listbox" aria-label={t("cal.field.zone")}>
-            {found.map((z) => (
-              <button key={z} type="button" role="option" aria-selected={z === value} className={z === value ? "on" : ""} onClick={() => { onChange(z); setOpen(false); setQuery(""); }}>
-                <span>{z.replace(/_/g, " ")}</span><small>{offsetLabel(z, now)}</small>
-              </button>
-            ))}
-            {!found.length && <div className="cal-zone-none">{t("cal.zone.none")}</div>}
-          </div>
-        </div>
+        <Popover anchor={anchor} onClose={close} label={t("cal.field.zone")} width={340} side="bottom" role="dialog" className="cal-zone-pop">
+          <Combobox inline autoFocus items={found} query={query} onQuery={setQuery} label={t("cal.zone.search")} placeholder={t("cal.zone.search")} toLabel={(z) => z}
+            empty={t("cal.zone.none")} itemClassName="cal-zone-item"
+            render={(z) => <><span className="cal-zone-name">{z.replace(/_/g, " ")}</span><small>{offsetLabel(z, now)}</small></>}
+            onChoose={(z) => { onChange(z); close(); }} />
+        </Popover>
       )}
     </div>
   );
@@ -120,10 +114,8 @@ export function Reminders({ value, onChange }: { value: number[]; onChange: (nex
         </span>
       ))}
       {left.length > 0 && (
-        <select className="field cal-reminder-add" value="" aria-label={t("cal.reminder.add")} onChange={(e) => { if (e.target.value !== "") onChange([...value, Number(e.target.value)]); }}>
-          <option value="">{t("cal.reminder.add")}</option>
-          {left.map((m) => <option key={m} value={m}>{reminderLabel(m)}</option>)}
-        </select>
+        <Menu label={t("cal.reminder.add")} trigger={<button type="button" className="btn small cal-reminder-add"><Icon name="plus" size={14} />{t("cal.reminder.add")}</button>}
+          items={left.map((m) => ({ label: reminderLabel(m), onSelect: () => onChange([...value, m]) }))} />
       )}
     </div>
   );

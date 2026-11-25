@@ -8,6 +8,7 @@ import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { OverflowMenu } from "../ui/dialogs";
+import { Select } from "../ui/primitives";
 import { blockTitle } from "./BlockView";
 import {
   ADDABLE_KINDS, emptyBlock, fieldLabel, isKnown, linesToItems, newId, typedFields,
@@ -82,10 +83,8 @@ function BlockForm({ block, onChange }: { block: Block; onChange: (next: Block) 
         <div className="cal-bedit-stack">
           <div className="cal-bedit-pair">
             <input className="field" value={b.label ?? ""} placeholder={t("cal.block.label")} aria-label={t("cal.block.label")} onChange={(e) => onChange({ ...b, label: e.target.value })} />
-            <select className="field" value={b.action} aria-label={t("cal.block.action.kind")} onChange={(e) => onChange({ ...b, action: e.target.value as "url" | "agent" })}>
-              <option value="url">{t("cal.block.action.url")}</option>
-              <option value="agent">{t("cal.block.action.agent")}</option>
-            </select>
+            <Select size="md" value={b.action} label={t("cal.block.action.kind")} onChange={(action) => onChange({ ...b, action })}
+              options={[{ id: "url", label: t("cal.block.action.url") }, { id: "agent", label: t("cal.block.action.agent") }]} />
           </div>
           {b.action === "url"
             ? <input className="field" type="url" value={b.url ?? ""} placeholder="https://" aria-label={t("cal.block.url")} onChange={(e) => onChange({ ...b, url: e.target.value })} />
@@ -197,15 +196,11 @@ function TableForm({ block, onChange }: { block: TableBlock; onChange: (next: Bl
         {columns.map((c, i) => (
           <div key={c.key} className="cal-bedit-col">
             <input className="field" value={c.label} aria-label={t("cal.block.column.label", { n: i + 1 })} onChange={(e) => setColumns(columns.map((x) => (x.key === c.key ? { ...x, label: e.target.value } : x)))} />
-            <select className="field" value={c.type} aria-label={t("cal.block.column.type", { n: i + 1 })} onChange={(e) => setColumns(columns.map((x) => (x.key === c.key ? { ...x, type: e.target.value as ColumnType, aggregate: e.target.value === "checkbox" ? "count" : x.aggregate } : x)))}>
-              {COLUMN_TYPES.map((type) => <option key={type} value={type}>{t(`cal.block.column.${type}`)}</option>)}
-            </select>
+            <Select size="md" value={c.type} label={t("cal.block.column.type", { n: i + 1 })} onChange={(type) => setColumns(columns.map((x) => (x.key === c.key ? { ...x, type, aggregate: type === "checkbox" ? "count" : x.aggregate } : x)))}
+              options={COLUMN_TYPES.map((type) => ({ id: type, label: t(`cal.block.column.${type}`) }))} />
             {(c.type === "number" || c.type === "money") && (
-              <select className="field" value={c.aggregate ?? ""} aria-label={t("cal.block.column.total", { n: i + 1 })} onChange={(e) => setColumns(columns.map((x) => (x.key === c.key ? { ...x, aggregate: (e.target.value || undefined) as Column["aggregate"] } : x)))}>
-                <option value="">{t("cal.block.total.none")}</option>
-                <option value="sum">{t("cal.block.total.sum")}</option>
-                <option value="avg">{t("cal.block.total.avg")}</option>
-              </select>
+              <Select size="md" value={c.aggregate ?? ""} label={t("cal.block.column.total", { n: i + 1 })} onChange={(total) => setColumns(columns.map((x) => (x.key === c.key ? { ...x, aggregate: (total || undefined) as Column["aggregate"] } : x)))}
+                options={[{ id: "", label: t("cal.block.total.none") }, { id: "sum", label: t("cal.block.total.sum") }, { id: "avg", label: t("cal.block.total.avg") }]} />
             )}
             <button type="button" className="iconbtn small" disabled={columns.length <= 1} onClick={() => setColumns(columns.filter((x) => x.key !== c.key))} aria-label={t("cal.block.column.remove", { name: c.label })} title={t("common.delete")}><Icon name="close" size={14} /></button>
           </div>
@@ -268,10 +263,8 @@ export function TypeFieldsForm({ type, fields, onChange }: { type: TypeDef; fiel
         let control;
         if (s.type === "enum") {
           control = (
-            <select className="field" value={value === undefined || value === null ? "" : String(value)} aria-label={label} onChange={(e) => set(key, e.target.value || null)}>
-              <option value="">—</option>
-              {(s.values ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
+            <Select size="md" value={value === undefined || value === null ? "" : String(value)} label={label} onChange={(choice) => set(key, choice || null)}
+              options={[{ id: "", label: "—" }, ...(s.values ?? []).map((v) => ({ id: v, label: v }))]} />
           );
         } else if (s.type === "boolean") {
           control = <input type="checkbox" checked={value === true} aria-label={label} onChange={(e) => set(key, e.target.checked)} />;
