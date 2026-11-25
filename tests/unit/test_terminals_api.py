@@ -351,7 +351,7 @@ async def test_a_terminals_changed_files_and_one_diff_are_read_in_its_folder(cli
 
     files = (await client.get(f"/api/terminals/{view['id']}/files", headers=H)).json()
     assert files["source"] == "shell" and files["branch"] == "main" and files["root"] == str(folder)
-    assert files["files"] == [{"path": "app.py", "status": "M", "added": 1, "removed": 0}]
+    assert files["files"] == [{"path": "app.py", "status": "M", "added": 1, "removed": 0, "binary": False}]
     assert all(env == "container" for env, _ in calls), "the folder is read in the terminal's own environment"
     diff = (await client.get(f"/api/terminals/{view['id']}/files/diff", params={"path": "app.py"}, headers=H)).json()
     assert "+two" in diff["diff"] and diff["untracked"] is False

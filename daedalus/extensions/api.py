@@ -124,6 +124,7 @@ from daedalus.extensions import (
     api_runtime_handoff,
     api_secrets,
     api_services_door,
+    api_session_changes,
     api_session_import,
     api_session_share,
     api_settings_changes,
@@ -1864,6 +1865,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.
     api_staff.register(api, app, auth)
+    # A chat's own working-tree changes: its Changes tab's list, diff, revert and commit.
+    api_session_changes.register(api, app, auth)
     # The worker worktrees in a project's folders: the list to clean up from, and the safe removal.
     api_worktrees.register(api, app, auth)
     # What the agents of a project said to each other, and their tools' direct route from a launch.
