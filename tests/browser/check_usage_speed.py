@@ -43,7 +43,7 @@ def run() -> int:
                 page.route("**/api/**", noting(asked))
                 page.goto(f"{BASE}/usage?token=t&lang={language}")
                 table = page.locator("[data-speed]")
-                expect(page.locator(".section-title", has_text=words["title"])).to_be_visible()
+                expect(page.locator(".pg-label", has_text=words["title"])).to_be_visible()
                 expect(table.locator("[data-speed-model]")).to_have_count(3)
                 quick = table.locator("[data-speed-model='deepseek/deepseek-flash']")
                 expect(quick.locator("[data-speed-ttft]")).to_have_text(words["ttft"])
@@ -54,8 +54,8 @@ def run() -> int:
                 expect(page.locator("[data-call-ttft]").first).to_have_text(words["call"])
                 expect(page.locator("[data-call-tps]").first).to_have_text(words["rate"])
                 assert asked and asked[0] == "hours=24", asked
-                page.locator("[data-speed-windows]").get_by_role("button", name=words["week"]).click()
-                expect(page.locator("[data-speed-windows] [aria-pressed='true']")).to_have_text(words["week"])
+                page.locator("[data-speed-windows]").get_by_role("radio", name=words["week"]).click()
+                expect(page.locator("[data-speed-windows] [aria-checked='true']")).to_have_text(words["week"])
                 page.wait_for_function("() => document.querySelector(\"[data-speed-model='deepseek/deepseek-flash'] .callsc\")?.textContent?.replace(/\\D/g, '') === '980'")
                 assert asked[-1] == "hours=168", asked
                 overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")

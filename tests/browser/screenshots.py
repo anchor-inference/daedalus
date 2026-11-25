@@ -2578,9 +2578,9 @@ def staff_stand(context, *, browse: bool = False, aside: int | None = None):  # 
 
 
 def open_harness_rows(page: Page) -> None:
-    """Claude Code's row unfolded to its agents, as M7 draws it."""
+    """Claude Code's row opened beside the list: its agents with where each is defined."""
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
-    page.wait_for_selector(".harness-row-details .harness-agent", timeout=5000)
+    page.wait_for_selector(".harness-details .harness-agent", timeout=5000)
 
 
 def run_harnesses() -> int:
@@ -2591,12 +2591,12 @@ def run_harnesses() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "harnesses", "harnesses", wait=".harness-table .harness-row", before=open_harness_rows, settle=500)
+        shot(page, "harnesses", "harnesses", wait=".harness-row", before=open_harness_rows, settle=500)
         desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page = phone.new_page()
         page.route("**/api/**", stub)
-        shot(page, "phone-harnesses", "harnesses", wait=".harness-cards .harness-card", settle=500)
+        shot(page, "phone-harnesses", "harnesses", wait=".harness-row", settle=500)
         phone.close()
         browser.close()
     return UNHANDLED.report()

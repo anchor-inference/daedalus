@@ -152,7 +152,7 @@ function covered(selector: string, allowed: string[]): boolean {
 
 /** Where text is allowed to be larger than the UI: running prose, headings, numbers meant to be read from across a room (a
  *  Details card opens on its one headline number, the reason that card exists), and glyphs. */
-const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box .composer-field", "h1", "h2", "h3", ".kpi .value", ".dt-big", ".empty b", ".stat b", ".step-head b", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
+const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-box .composer-field", "h1", "h2", "h3", ".dt-big", ".empty b", ".stat b", ".step-head b", ".attachment-glyph", ".btn.big", ".chev", ".voice-", ".orb", ".onboard-head", ".login",
   // The task dialog's title is edited where it stands, so its field is drawn at the heading's size;
   // at 14 px the title shrank under the cursor the moment Edit was pressed.
   ".ptask-title-input",
@@ -173,6 +173,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
   ".ov-title",
+  // A report page's hero is three figures at the size a page's headline may use (28/500), and the
+  // open Services or Harnesses entry is a pane whose title is a pane's heading (18/500).
+  ".usage-fig-value", ".pg-pane-title",
   // The calendar: an open event's title is a pane's heading (a sheet's, 16 on a phone), the number of a
   // day over its column and in the agenda is that day's heading, and a new event's title is typed at the
   // size it will be read at.
@@ -201,6 +204,9 @@ const BOX_ALLOWED = [
   // The open Inbox entry is a page of its own beside the list: the room above its first line and
   // below its last is the room a page has.
   ".inbox-pane",
+  // The open Services or Harnesses entry is a page of its own beside its list, and a list that has
+  // the page to itself (narrower than the split, or a phone) keeps the room under its last row.
+  ".pg-pane", ".pg-list",
   // The board's bar of filters is a bar under the page header, as tall as the bar it holds chips in
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
@@ -266,6 +272,9 @@ const CONTENT_BOXES = [
   // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
   // large row the approved designs draw for a list of providers or entries. The 56 is that one.
   { selector: ".list-row.h56", property: "min-height", max: 56 },
+  // Usage's chart is 140 px of bars between three rules; its scale of three labels is as tall.
+  { selector: ".usage-scale", property: "height", max: 140 },
+  { selector: ".usage-bars", property: "height", max: 140 },
   // An importable session is the same large row: its name over a line of where it ran, how long it is and how
   // big, with the program's mark; the folder rows of the same list stay at the row token.
   { selector: ".imp-srow", property: "min-height", max: 56 },

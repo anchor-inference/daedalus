@@ -1,0 +1,135 @@
+/* ── Usage: figures, one chart, the quota windows, then tables ────────────────────────────────
+   A page of 880. It opens on the day's three figures at the size a page's hero may use (28/500),
+   then the window's tokens per day as bars (one series, so no legend; the scale is three lines from
+   `--line`), then what is left of each subscription, then the tables with tabular figures. The meter
+   is the same `.bar` the chat panel's Context and Usage tools draw, so a figure and its bar read the
+   same in both places. */
+.usage { padding-top: 16px; }
+
+.usage-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--line); }
+.usage-fig { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 16px 20px 18px; background: var(--card); }
+.usage-fig-label { font-size: var(--fs-13); color: var(--fg-2); }
+.usage-fig-value { font-size: var(--fs-28); font-weight: 500; line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.usage-fig-value small { margin-left: 3px; font-size: var(--fs-14); font-weight: 400; letter-spacing: 0; color: var(--fg-2); }
+.usage-fig-sub { font-size: var(--fs-12); color: var(--fg-3); overflow-wrap: anywhere; }
+.usage-fig .bar { margin-top: 8px; }
+
+/* The chart: three rules, a bar per day, three dates. A bar is a button, so the keyboard walks the days. */
+.usage-chartcard { padding: 0; }
+.usage-chart { display: flex; gap: 12px; padding: 16px 16px 12px 16px; }
+.usage-scale { display: flex; flex-direction: column; justify-content: space-between; width: 40px; flex: none; height: 140px; font-size: var(--fs-12); line-height: 1; color: var(--fg-3); text-align: right; }
+.usage-plot { flex: 1; min-width: 0; }
+.usage-grid { position: relative; height: 0; }
+.usage-grid i { position: absolute; left: 0; right: 0; height: 1px; background: var(--line); }
+.usage-grid i:nth-child(1) { top: 0; }
+.usage-grid i:nth-child(2) { top: 70px; }
+.usage-grid i:nth-child(3) { top: 139px; }
+.usage-bars { position: relative; display: flex; align-items: stretch; gap: 4px; height: 140px; }
+.usage-bar { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: none; cursor: pointer; }
+.usage-bar i { display: block; width: 100%; max-width: 28px; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 72%, var(--card)); }
+.usage-bar:hover i { background: var(--accent); }
+.usage-bar.on i { background: var(--accent); }
+.usage-bar:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* A day nothing happened on keeps a hairline, so the axis still reads as days. */
+.usage-bar::after { content: ""; position: absolute; bottom: 0; width: 100%; max-width: 28px; height: 1px; background: var(--line-strong); }
+.usage-axis { display: flex; justify-content: space-between; padding-top: 8px; font-size: var(--fs-12); color: var(--fg-3); }
+
+.usage-day { border-top: 1px solid var(--line); }
+.usage-day-head { justify-content: space-between; border-top: 0; background: var(--inset); }
+.usage-day-head b { display: inline-block; font-weight: 500; }
+.usage-day-head b::first-letter { text-transform: uppercase; }
+.usage-day-row { font-size: var(--fs-13); }
+.usage-day-row .sub { font-size: var(--fs-12); }
+.usage-day .pg-row + .pg-row { border-top: 1px solid var(--line); }
+.usage-cost { flex: none; min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); }
+
+/* A subscription's windows: name, bar, what is left, when it resets; the forecast sits under the bar. */
+.usage-cards { display: flex; flex-direction: column; gap: 12px; }
+.usage-error { color: var(--attention); font-size: var(--fs-13); }
+.quota-line { display: grid; grid-template-columns: 64px minmax(0, 1fr) 92px 96px; column-gap: 12px; row-gap: 2px; padding-block: 10px; font-size: var(--fs-13); color: var(--fg-2); }
+.quota-line .quota-name { color: var(--fg); }
+.quota-line b { color: var(--fg); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.quota-line .sub { text-align: right; }
+.quota-line .quota-fc { grid-column: 2 / -1; font-size: var(--fs-12); color: var(--fg-3); }
+.quota-line .quota-fc.warn { color: var(--attention); }
+
+/* The tables: the model's name left, every number right in tabular figures. */
+.usage-table table { width: 100%; border-collapse: collapse; }
+.usage-table th { padding: 10px 16px; text-align: left; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); border-bottom: 1px solid var(--line); }
+.usage-table td { padding: 10px 16px; font-size: var(--fs-13); font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+.usage-table tbody tr:last-child td { border-bottom: 0; }
+.usage-table tbody tr:hover td { background: var(--hover); }
+.usage-table .num { text-align: right; }
+.usage-table .modelc { font-size: var(--fs-14); }
+.usage-table .modelc .sub { font-size: var(--fs-13); }
+.usage-table .usdc .sub { font-size: var(--fs-12); }
+.usage-table td.usage-none { padding: 12px 16px; text-align: center; border-bottom: 0; }
+.usage-table .speed-hint { padding: 10px 16px; border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--fg-3); }
+
+/* By session: a row that opens the chat. */
+.usage-session { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--card-row-h-lg); padding: 8px 16px; box-sizing: border-box; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.usage-session + .usage-session { border-top: 1px solid var(--line); }
+.usage-session:hover:not(:disabled) { background: var(--hover); }
+.usage-session:disabled { cursor: default; }
+.usage-session:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.usage-session-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.usage-session-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-14); font-weight: 500; }
+.usage-session-meta { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: var(--fs-12); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+
+/* Recent calls: when, what, what it cost; a press unfolds the host's own record of the call. */
+.usage-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+.usage-row:first-child { border-top: 0; }
+.usage-row:hover { background: var(--hover); }
+.usage-row.open { background: var(--hover); }
+.usage-row .when { color: var(--fg-3); font-variant-numeric: tabular-nums; font-size: var(--fs-12); }
+.usage-row .what { min-width: 0; }
+.usage-row .what .l1 { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: var(--fs-14); }
+.usage-row .what .l1 .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-row .what .l2 { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--fg-3); font-size: var(--fs-12); }
+.usage-row .cost { text-align: right; font-variant-numeric: tabular-nums; font-size: var(--fs-13); }
+.usage-row .cost .ms { color: var(--fg-3); font-size: var(--fs-12); }
+.usage-raw { margin: 0; padding: 10px 16px; background: var(--inset); border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--fs-12); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+
+.usage-empty { padding-top: 12vh; }
+
+@media (max-width: 1023px) {
+  .usage { padding-top: 8px; }
+  .usage-hero { grid-template-columns: 1fr 1fr; }
+  .usage-fig { padding: 12px 14px 14px; }
+  .usage-fig:has(.bar) { grid-column: 1 / -1; order: -1; }
+  .usage-fig-value { font-size: var(--fs-28); }
+  .usage-chart { padding: 12px 12px 8px; gap: 8px; }
+  .usage-scale { width: 34px; }
+  .usage-bars { gap: 2px; }
+  .usage-day-row { flex-wrap: wrap; row-gap: 2px; }
+  .usage-day-row .pg-row-title { flex: 1 1 100%; }
+  .usage-day-row .usage-cost { margin-left: auto; }
+  .quota-line { grid-template-columns: minmax(0, 1fr) auto; }
+  .quota-line .quota-name { grid-column: 1; }
+  .quota-line b { grid-column: 2; grid-row: 1; }
+  .quota-line .bar { grid-column: 1 / -1; grid-row: 2; }
+  .quota-line .sub { grid-column: 1 / -1; text-align: left; }
+  .quota-line .quota-fc { grid-column: 1 / -1; }
+  .usage-session { min-height: var(--set-row-h); }
+  .usage-row { grid-template-columns: 52px minmax(0, 1fr) auto; padding-inline: 14px; }
+  /* A model is a card: its name over its numbers, each labelled, the header gone. */
+  .usage-table thead { display: none; }
+  .usage-table table, .usage-table tbody { display: block; }
+  .usage-table tr { display: grid; grid-template-columns: repeat(4, auto) minmax(0, 1fr); gap: 2px 12px; grid-template-areas: "model model model model usd" "calls in out cached cached"; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .usage-table tr:first-child { border-top: 0; }
+  .usage-table td { display: block; padding: 0; border: 0; text-align: left; }
+  .usage-table tbody tr:hover td { background: none; }
+  .usage-table td.modelc { grid-area: model; min-width: 0; overflow-wrap: anywhere; }
+  .usage-table td.usdc { grid-area: usd; text-align: right; white-space: nowrap; }
+  .usage-table td.callsc { grid-area: calls; }
+  .usage-table td.inc { grid-area: in; }
+  .usage-table td.outc { grid-area: out; }
+  .usage-table td.cachedc { grid-area: cached; }
+  .usage-table td[data-label] { color: var(--fg-2); font-size: var(--fs-12); }
+  .usage-table td[data-label]::before { content: attr(data-label) " "; color: var(--fg-3); }
+  .usage-table[data-speed] tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "model model" "ttft ttft90" "tps calls"; }
+  .usage-table[data-speed] td[data-label] { white-space: nowrap; }
+  .usage-table td.ttftc { grid-area: ttft; }
+  .usage-table td.ttft90c { grid-area: ttft90; }
+  .usage-table td.tpsc { grid-area: tps; }
+}

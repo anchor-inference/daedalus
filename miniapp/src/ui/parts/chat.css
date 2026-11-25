@@ -483,28 +483,10 @@ select.field { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
 .radio { width:16px; height:16px; border-radius:50%; border:0; box-shadow:inset 0 0 0 1.5px var(--line-strong); background:none; flex:none; cursor:pointer; padding:0; }
 .radio.on { box-shadow:inset 0 0 0 5px var(--fg); }
 
-.usage-row { display:grid; grid-template-columns: 52px 1fr auto; gap:6px 10px; align-items:center; padding:8px 0; border-top:1px solid var(--line); cursor:pointer; }
-/* On a phone the counts take their own line and the two buttons share the one under it: squeezed
-   beside them the counts broke in two, "· 1 failures" alone on a line next to the buttons. */
-.health-summary { flex-wrap: wrap; }
-@media (max-width: 560px) { .health-summary > .grow { flex: 1 1 100%; } .health-summary > .btn { flex: 1 1 0; } }
-.usage-row:first-child { border-top:0; }
-.tablecard td.usage-none { text-align:center; padding:16px 4px; border-bottom:0; }
-.usage-row .when { color:var(--muted); font-variant-numeric:tabular-nums; font-size:var(--fs-12); }
-.usage-row .what { min-width:0; }
-.usage-row .what .l1 { display:flex; gap:8px; align-items:center; min-width:0; }
-.usage-row .what .l1 .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.usage-row .what .l2 { color:var(--muted); font-size:var(--fs-12); display:flex; gap:10px; flex-wrap:wrap; }
-.usage-row .cost { text-align:right; font-variant-numeric:tabular-nums; }
-.usage-row .cost .ms { color:var(--muted); font-size:var(--fs-12); }
 .badge { font-size:var(--fs-11); font-weight:500; padding:1px 6px; border-radius:var(--radius-xs); border:0; background:color-mix(in srgb, currentColor 12%, transparent); color:var(--muted); flex:none; }
 .badge.stream { color:var(--info); }
 .badge.structured { color:var(--warn); }
 .badge.text { color:var(--ok); }
-/* The unfolded call and its payload read as one pair: the row is lit, and the payload is a code
-   panel with its own edge. On the card's own colour it was a bare "{}" in body text. */
-.usage-row.open { background:var(--surface-2); border-radius:var(--radius-sm); }
-.usage-raw { margin:0 0 8px; padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-sm); font-family:var(--mono); font-size:var(--fs-11); white-space:pre-wrap; word-break:break-word; max-height:260px; overflow:auto; }
 .grid4 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .filters { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px; }
 

@@ -1,15 +1,15 @@
 """The Harnesses screen (M7) on a desktop and on a phone, and refuse what does not behave.
 
 On a desktop at 1440 px: the header counts the CLIs, the updates waiting and when they were checked;
-the five rows come in the table's order with the one button each needs (Claude Code current, three
-updates, pi to install); a row unfolds to its agents with where each is defined and its last
-self-check step by step, Grok's naming the step it failed at; Check, Update and Update all post what
+the five rows come in the list's order with the one button each needs (Claude Code current, three
+updates, pi to install); a row opens beside the list to its agents with where each is defined and its
+last self-check step by step, Grok's naming the step it failed at; Check, Update and Update all post what
 the host expects; an update of a CLI staff are working on is refused on its row, naming them; a
 `harness.updated` event brings the row up to date; the Host environment shows its own rows; a CLI
 past its tested range without a self-check is marked, and the hiring form warns before it is hired.
 
-On a phone at 390 px: one card per CLI with its button, nothing scrolling sideways, and the More sheet
-leading here. The Russian page is checked on the same points with its own words.
+On a phone at 390 px: one row per CLI with its button, nothing scrolling sideways, a row opening as a
+sheet, and the More sheet leading here. The Russian page is checked on the same points with its own words.
 
     cd miniapp && npm run build
     APP_URL=http://127.0.0.1:<port>/app CHROMIUM=... python3 tests/browser/check_harnesses.py
@@ -37,9 +37,9 @@ PHONE = {"width": 390, "height": 844}
 
 WORDS = {
     "en": {"title": "Harnesses", "subtitle": "5 CLIs · 3 updates · checked 2 minutes ago", "failed": "failed at ready", "passed": "passed", "refused": "Max (Bakery 2.0)",
-           "unverified": "untested version", "guard": "outside the versions the adapter was tested with", "project": "the folder's own", "signin": "subscription · max"},
+           "host": "Host", "unverified": "untested version", "guard": "outside the versions the adapter was tested with", "project": "the folder's own", "signin": "subscription · max"},
     "ru": {"title": "Исполнители", "subtitle": "5 CLI · 3 обновления · проверено 2 минуты назад", "failed": "не пройдена на шаге ready", "passed": "пройдена", "refused": "Max (Bakery 2.0)",
-           "unverified": "непроверенная версия", "guard": "вне проверенных для адаптера", "project": "папки проекта", "signin": "subscription · max"},
+           "host": "Хост", "unverified": "непроверенная версия", "guard": "вне проверенных для адаптера", "project": "папки проекта", "signin": "subscription · max"},
 }
 
 
@@ -86,7 +86,7 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     feed = EventFeed()
     context = browser.new_context(viewport=DESK, color_scheme="dark")
     page = open_page(context, harnesses, feed, f"{BASE}/harnesses?token=t&lang={lang}")
-    page.wait_for_selector(".harness-table .harness-row", timeout=15000)
+    page.wait_for_selector(".harness-row", timeout=15000)
     expect(page.locator(".pagehead h1")).to_have_text(words["title"])
     expect(page.locator(".pagehead")).to_contain_text(words["subtitle"])
     got = states(page, ".harness-row")
@@ -94,15 +94,15 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     check.that(words["signin"] in page.locator(".harness-row[data-harness='claude'] .harness-signin").inner_text(), f"{lang}: Claude Code's sign-in says {page.locator('.harness-row[data-harness=claude] .harness-signin').inner_text()!r}")
     check.that(page.locator(".harness-node").count() == 1, f"{lang}: the pinned Node is not shown for the container")
 
-    # A row unfolds: agents with their source, the self-check step by step.
+    # A row opens beside the list: agents with their source, the self-check step by step.
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
-    details = page.locator(".harness-row-details")
+    details = page.locator(".harness-details")
     expect(details.locator(".harness-agent")).to_have_count(4)
     check.that(words["project"] in details.inner_text(), f"{lang}: the agents do not say which are the folder's own")
     check.that(words["passed"] in details.locator(".harness-check-line").inner_text() and details.locator(".harness-step").count() == 9, f"{lang}: Claude Code's self-check reads {details.locator('.harness-check-line').inner_text()!r}")
     page.locator(".harness-row[data-harness='grok'] .harness-name").click()
-    expect(page.locator(".harness-row-details .harness-check-line.failed")).to_contain_text(words["failed"])
-    check.that(page.locator(".harness-row-details .harness-step.failed").count() == 1, f"{lang}: Grok's failed step is not marked")
+    expect(page.locator(".harness-details .harness-check-line.failed")).to_contain_text(words["failed"])
+    check.that(page.locator(".harness-details .harness-step.failed").count() == 1, f"{lang}: Grok's failed step is not marked")
 
     # Update: posted with its environment; refused while staff work on it, naming them.
     page.locator(".harness-row[data-harness='opencode'] .harness-action .btn").click()
@@ -124,10 +124,10 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expect(page.locator(".harness-row[data-harness='opencode']")).to_have_attribute("data-state", "current", timeout=5000)
 
     # The host environment has rows of its own, and no Node to install from here.
-    page.locator(".harness-env button[data-env='host']").click()
+    page.locator(".harness-env").get_by_role("radio", name=words["host"]).click()
     expect(page.locator(".harness-row[data-harness='claude'] .harness-version")).to_contain_text("2.1.270", timeout=5000)
     check.that(page.locator(".harness-node").count() == 0, f"{lang}: the host offers the pinned Node")
-    check.that(sideways(page) <= 0, f"{lang}: the table scrolls the page sideways")
+    check.that(sideways(page) <= 0, f"{lang}: the list scrolls the page sideways")
     context.close()
 
     # A CLI that moved past its tested range: marked on the screen, and warned about when hired.
@@ -139,7 +139,7 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     expect(mark).to_have_attribute("data-mark", "unverified", timeout=10000)
     expect(mark).to_have_text(words["unverified"])
     page.locator(".harness-row[data-harness='codex'] .harness-name").click()
-    expect(page.locator(".harness-row-details .harness-guard")).to_contain_text(words["guard"])
+    expect(page.locator(".harness-details .harness-guard")).to_contain_text(words["guard"])
     context.close()
 
     catalog = {**CATALOG, "claude": {**CATALOG["claude"], "version": "2.4.0", "version_guard": "unverified", "tested_versions": ["2.1.281", "2.2.0"]}}
@@ -163,15 +163,15 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     page = open_page(context, harnesses, None, f"{BASE}/agents?token=t&lang={lang}")
     # Harnesses is one of the drawer's More destinations on a phone.
     drawer_go(page, "harnesses")
-    page.wait_for_selector(".harness-cards .harness-card", timeout=10000)
-    got = states(page, ".harness-card")
-    check.that([h for h, _ in got] == ["claude", "codex", "opencode", "pi", "grok"], f"{lang} phone: the cards are {got}")
-    install = page.locator(".harness-card[data-harness='pi'] .harness-card-head .btn")
+    page.wait_for_selector(".harness-row", timeout=10000)
+    got = states(page, ".harness-row")
+    check.that([h for h, _ in got] == ["claude", "codex", "opencode", "pi", "grok"], f"{lang} phone: the rows are {got}")
+    install = page.locator(".harness-row[data-harness='pi'] .harness-action .btn")
     box = install.bounding_box()
     check.that(bool(box and box["height"] >= 40), f"{lang} phone: pi's Install button is {box} high")
-    check.that(page.locator(".harness-table").count() == 0, f"{lang} phone: a table is drawn on a phone")
-    page.locator(".harness-card[data-harness='grok'] .harness-card-more").tap()
-    expect(page.locator(".harness-card[data-harness='grok'] .harness-check-line.failed")).to_contain_text(words["failed"])
+    check.that(page.locator(".pg-detail").count() == 0, f"{lang} phone: a pane is drawn beside the list on a phone")
+    page.locator(".harness-row[data-harness='grok'] .harness-name").tap()
+    expect(page.locator(".sheet .harness-check-line.failed")).to_contain_text(words["failed"])
     check.that(sideways(page) <= 0, f"{lang} phone: the screen scrolls sideways by {sideways(page)} px")
     context.close()
 

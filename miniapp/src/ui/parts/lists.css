@@ -244,17 +244,10 @@
 .check-row input { margin-top: 3px; }
 .check-row .done { color: var(--fg-3); text-decoration: line-through; }
 
-/* ── services: a card per service, its name over a line of state, the command in the code face ── */
-.service-row.erow { display: block; padding: 12px; cursor: default; }
-.service-row.erow:hover { background: var(--card); }
-.service-row.erow .service-line { gap: 10px; }
-.service-row.erow .service-name { font-size: var(--fs-14); font-weight: 500; }
 .service-name .chip.port { padding: 1px 7px; font-size: var(--fs-11); min-height: 0; }
 .service-name .chip { padding: 1px 8px; font-size: var(--fs-11); }
 .service-meta { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-3); }
 .service-line .btn.open { flex: none; min-height: var(--ctl-h-sm); }
-.service-group .section-title .linkbtn { color: var(--fg-2); text-transform: none; letter-spacing: 0; font-size: var(--fs-13); font-weight: 500; }
-.service-group .section-title .linkbtn:hover { color: var(--fg); }
 /* A choice of one is a list's rows, the chosen one filled and its ring violet: the radio is drawn here
    because the browser's own is a blue disc that belongs to no theme. The input stays a real radio, so
    the arrow keys, the name and the checks that ask for one keep working. */

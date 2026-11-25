@@ -1,9 +1,9 @@
-"""Settings → Health: the integration card above the doctor's list, at 1280 and 390 px, in both languages.
+"""The Health page: the integrations above the doctor's list, at 1280 and 390 px, in both languages.
 
-GitHub, each MCP server and each model provider is one row. A failing row says what to do in one
-line, in the page's language; its technical text from the host is folded away under Details and
-opens on a press. The card is drawn from the quick answer first and then from the probed one, so a GitHub
-token the probe rejects turns its row red without a reload. Nothing scrolls sideways.
+GitHub, each MCP server and each model provider is one row. A failing row stands open at the top of
+the page and says what to do in one line, in the page's language; its technical text from the host is
+under that line. The rows are drawn from the quick answer first and then from the probed one, so a GitHub
+token the probe rejects moves its row up without a reload. Nothing scrolls sideways.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_health.py
 
@@ -37,9 +37,9 @@ PROBED = [{**ROWS[0], "state": "token_rejected", "severity": "fail", "detail": "
 
 WORDS = {
     "en": {"title": "Integrations", "rejected": "Token rejected", "signin": "Sign-in required", "signin_fix": "sign in to this server again",
-           "nokey_fix": "Add the key in Settings → Models and providers.", "idle": "Connects when a session turns it on", "details": "Details"},
+           "nokey_fix": "Add the key in Settings → Models and providers.", "idle": "Connects when a session turns it on"},
     "ru": {"title": "Интеграции", "rejected": "Токен отклонён", "signin": "Нужен вход", "signin_fix": "заново войти на этот сервер",
-           "nokey_fix": "Добавьте ключ в Настройки → Модели и провайдеры.", "idle": "Подключится, когда сессия его включит", "details": "Подробности"},
+           "nokey_fix": "Добавьте ключ в Настройки → Модели и провайдеры.", "idle": "Подключится, когда сессия его включит"},
 }
 
 
@@ -66,46 +66,49 @@ def check(page: Page, lang: str, width: int) -> None:
     host = Host()
     page.route("**/api/**", host.route)
     page.goto(f"{BASE}/health?token=t&lang={lang}")
-    card = page.locator(".card.integrations")
-    expect(card).to_be_visible(timeout=15000)
-    expect(card.locator(".section-title")).to_have_text(words["title"])
-    rows = card.locator(".integration")
-    expect(rows).to_have_count(len(ROWS))
+    rows = page.locator(".health-row.integration")
+    expect(rows).to_have_count(len(ROWS), timeout=15000)
+    expect(page.locator(".pg-label", has_text=words["title"])).to_be_visible()
     # The probed answer replaces the quick one: GitHub's token is rejected.
-    github = rows.nth(0)
+    github = rows.filter(has_text="GitHub")
     expect(github).to_have_attribute("data-state", "token_rejected")
     expect(github).to_contain_text(words["rejected"])
     expect(github.locator(".integration-fix")).to_contain_text("GITHUB_TOKEN")
-    assert host.asked[:2] == ["quick", "probe"], f"{where}: the card asked {host.asked}"
-    assert [r.get_attribute("data-kind") for r in rows.all()] == ["github", "mcp", "mcp", "mcp", "provider", "provider"], f"{where}: rows out of order"
+    assert host.asked[:2] == ["quick", "probe"], f"{where}: the page asked {host.asked}"
+    # What needs the operator comes first, in the host's order; what works follows it.
+    assert [r.get_attribute("data-kind") for r in rows.all()] == ["github", "mcp", "provider", "provider", "mcp", "mcp"], f"{where}: rows out of order"
+    expect(page.locator(".pg-label.attention")).to_have_count(1)
 
     notes = rows.filter(has_text="notes")
     expect(notes).to_contain_text(words["signin"])
     expect(notes.locator(".integration-fix")).to_contain_text(words["signin_fix"])
-    expect(notes.locator(".health-mark.bad")).to_have_count(1)
-    # The host's text waits under the fold until asked for.
-    detail = notes.locator(".integration-detail")
-    expect(detail.locator("code")).to_be_hidden()
-    detail.locator("summary", has_text=words["details"]).click()
-    expect(detail.locator("code")).to_have_text(ROWS[2]["detail"])
+    expect(notes.locator(".pg-state.attention")).to_have_count(1)
+    # A row that needs the operator stands open with the host's own text under its remedy, and
+    # closes on a press.
+    expect(notes.locator(".health-code")).to_have_text(ROWS[2]["detail"])
+    notes.locator("button.health-head").click()
+    expect(notes.locator(".health-code")).to_have_count(0)
+    notes.locator("button.health-head").click()
+    expect(notes.locator(".health-code")).to_have_text(ROWS[2]["detail"])
 
-    # Healthy and idle rows carry no remedy, and a healthy one no fold either.
+    # Healthy and idle rows carry no remedy, and a healthy one has nothing to open.
     for name in ("calendar", "files"):
         expect(rows.filter(has_text=name).locator(".integration-fix")).to_have_count(0)
-    expect(rows.filter(has_text="calendar").locator(".integration-detail")).to_have_count(0)
+    expect(rows.filter(has_text="calendar").locator("button.health-head")).to_have_count(0)
     expect(rows.filter(has_text="files")).to_contain_text(words["idle"])
     expect(rows.filter(has_text="deepseek").locator(".integration-fix")).to_have_text(f"→ {words['nokey_fix']}")
-    expect(rows.filter(has_text="router").locator(".health-mark.warn")).to_have_count(1)
+    expect(rows.filter(has_text="router").locator(".pg-state.attention")).to_have_count(1)
 
-    # The doctor's list is still there, under the card.
-    doctor = page.locator(".card").filter(has_text="default model")
+    # The doctor's list is still there, under the integrations.
+    doctor = page.locator(".health-row").filter(has_text="default model").first
     expect(doctor).to_be_visible()
-    assert card.bounding_box()["y"] < doctor.bounding_box()["y"], f"{where}: the card is not above the doctor's list"  # type: ignore[index]
+    last = rows.last.bounding_box()
+    assert last and last["y"] < doctor.bounding_box()["y"], f"{where}: the integrations are not above the doctor's list"  # type: ignore[index]
 
     sideways = page.evaluate("[document.documentElement.scrollWidth, document.documentElement.clientWidth]")
     assert sideways[0] <= sideways[1], f"{where}: the page scrolls sideways: {sideways}"
-    wide = card.evaluate("el => [...el.querySelectorAll('*')].filter(n => n.getBoundingClientRect().right > window.innerWidth + 1).length")
-    assert wide == 0, f"{where}: {wide} element(s) of the card reach past the window"
+    wide = page.locator(".health").evaluate("el => [...el.querySelectorAll('*')].filter(n => n.getBoundingClientRect().right > window.innerWidth + 1).length")
+    assert wide == 0, f"{where}: {wide} element(s) of the page reach past the window"
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/health-{lang}-{width}.png", full_page=True)
 
