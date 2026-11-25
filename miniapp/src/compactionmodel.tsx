@@ -8,13 +8,14 @@
 import { t } from "./i18n";
 import { ModelPicker, type ModelCatalogue } from "./modelitems";
 import { Row } from "./settingsrow";
+import { WithEffort } from "./taskeffort";
 
 /** Whether the chosen summary model is one that no longer exists. */
 export function compactionMissing(presets: ModelCatalogue["presets"] | undefined, current: string): boolean {
   return !!current && !(current in (presets ?? {}));
 }
 
-export function CompactionModelSelect({ catalogue, value, onSave }: { catalogue: ModelCatalogue; value: string; onSave: (preset: string) => void }) {
+export function CompactionModelSelect({ catalogue, value, onSave, effort, onEffort }: { catalogue: ModelCatalogue; value: string; onSave: (preset: string) => void; effort?: string; onEffort: (effort: string) => void }) {
   const missing = compactionMissing(catalogue.presets, value);
   return (
     <Row
@@ -23,7 +24,9 @@ export function CompactionModelSelect({ catalogue, value, onSave }: { catalogue:
       stack
       data-setting="compaction.preset"
     >
-      <ModelPicker id="compaction-preset" label={t("settings.compaction.model")} catalogue={catalogue} value={value} onChange={onSave} defaultOption={{ label: t("settings.compaction.model.own") }} />
+      <WithEffort id="compaction-effort" value={effort} onChange={onEffort} fallback="off">
+        <ModelPicker id="compaction-preset" label={t("settings.compaction.model")} catalogue={catalogue} value={value} onChange={onSave} defaultOption={{ label: t("settings.compaction.model.own") }} />
+      </WithEffort>
     </Row>
   );
 }

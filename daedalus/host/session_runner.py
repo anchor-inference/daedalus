@@ -107,6 +107,7 @@ from daedalus.host import (
     subagent_models,
     summaries,
     summary_calls,
+    task_effort,
     tool_groups,
     translation,
     user_style,
@@ -128,6 +129,7 @@ from daedalus.host.hooks import DaedalusHookManager
 from daedalus.host.host_exec import BRIDGE_DOWN, HostExecBackend
 from daedalus.host.inference_admission import HostInferenceAdmission
 from daedalus.host.job_log import task_state
+from daedalus.host.model_health import HealthUsageSink, ModelHealth
 from daedalus.host.policy import (
     ASK,
     SERVER_GRANT_HOURS,
@@ -952,14 +954,18 @@ class SessionManager:
         self.subscription_accounts = SubscriptionAccounts(db)
         """The operator's accounts per subscription, read once at start and written through after."""
         self.vision_choices: dict[str, str] = {}
+        self.vision_efforts: dict[str, str] = {}
         """Each session's own vision preset, by session id, read once at start and written through after
         (``live_control.vision_preset``). Held here because an image tool asks for its route synchronously."""
+        self.model_health = ModelHealth(db)
+        """Which models are broken or slow, from the calls made (:mod:`daedalus.host.model_health`)."""
         self.providers = ProviderRegistry(
-            settings, config, usage_sink=self.usage, image_loader=self._load_image,
+            settings, config, usage_sink=HealthUsageSink(self.usage, self.model_health), image_loader=self._load_image,
             admission=HostInferenceAdmission(self), fitted_images=FittedImages(settings.state_dir / "fitted-images"),
             accounts=self.subscription_accounts,
         )
         self.providers.on_unreachable = self._provider_unreachable
+        self.providers.on_model_refusal = self.model_health.refused
         if self.providers.accounts is not None:
             self.providers.accounts.on_switch = self._account_switched
         # In Docker a stdio server starts inside this container, which is not the machine a session
@@ -1038,6 +1044,11 @@ class SessionManager:
         self.preset_hooks: list[Callable[[SessionState], str | None]] = []
         """``state -> preset id`` that a session runs whatever its live override says: an orchestrator
         runs the model its project names, which the operator changes on the project, not per chat."""
+        self.effort_hooks: list[Callable[[SessionState], str | None]] = []
+        """``state -> task effort`` (:mod:`daedalus.host.task_effort`) a session thinks with whatever its live
+        override says, as :attr:`preset_hooks` does for the model: the main orchestrator, a project's
+        orchestrator, a heartbeat and the companion think as their Settings say. Empty or ``None`` says
+        nothing, and the session's own choice or its preset's stands."""
         self.run_started_hooks: list[Callable[[str, str], Awaitable[None]]] = []
         """``(session_id, run_id)`` after a run was actually created — the point where a prompt hook's side effects may be committed."""
         self.stop_hooks: list[Callable[[str, str], Awaitable[None]]] = []
@@ -1084,7 +1095,9 @@ class SessionManager:
         """Open the stores; ``recovering`` (default: whether a previous process left runs behind) gates new runs until resume_unfinished()."""
         await self.memory.load()
         await self.subscription_accounts.load()
+        await self.model_health.load()
         self.vision_choices = await self.live.vision_choices()
+        self.vision_efforts = await self.live.vision_efforts()
         await self.memory_entries.file_unfiled()
         await self.secrets.load()
         operator_secrets.install(self.secrets)
@@ -1397,15 +1410,16 @@ class SessionManager:
         preset = self.config.memory.classify_preset
         if not preset or preset not in self.config.presets:
             return None
+        effort = self.config.memory.classify_effort
 
         async def ask(prompt: str) -> str:
             provider, model = self.providers.rungs_for(self.config, preset)[0]
             request = LLMRequest(
                 model=model,
                 messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
-                max_tokens=200,
+                max_tokens=task_effort.helper_tokens(200, effort),
                 temperature=0.0,
-                extra={"enable_thinking": False},
+                extra=task_effort.helper_extra(effort),
                 observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose="memory_classify", call_category="memory"),
             )
             response = await asyncio.wait_for(provider.complete_text(request), timeout=MEMORY_CLASSIFY_TIMEOUT_SECONDS)
@@ -1444,7 +1458,7 @@ class SessionManager:
                 state.services.max_tool_output_chars = config.tools.exec.max_output_chars
         self._apply_tool_visibility_all()
 
-    def vision_model(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str] | None:
+    def vision_model(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str, str] | None:
         """The vision model as a tool that looks at an image needs it, or ``None`` without one: for a
         caller outside the engine's tools (a kept file read, a command-line member's browser, which
         has no session and so gets the global one)."""
@@ -1469,6 +1483,21 @@ class SessionManager:
             session_id = str(state.metadata.get("subagent_of") or "") if state is not None else ""
         return self.config.vision_preset()
 
+    def vision_effort_for(self, session_id: str | None) -> str:
+        """How hard a session's vision model thinks: its own choice, else its leader's, else ``[vision] effort``.
+
+        Apart from the preset, so a session may ask the global model to think harder on its pictures
+        without choosing a model of its own."""
+        seen: set[str] = set()
+        while session_id and session_id not in seen:
+            seen.add(session_id)
+            own = self.vision_efforts.get(session_id, "")
+            if own:
+                return own
+            state = self._states.get(session_id)
+            session_id = str(state.metadata.get("subagent_of") or "") if state is not None else ""
+        return self.config.vision.effort
+
     def vision_view(self, session_id: str) -> dict[str, str]:
         """What the session's Details draws for its vision model: its own choice ("" while it follows
         the global one, and also when the one it chose is gone, since that is what it looks with), and
@@ -1482,6 +1511,8 @@ class SessionManager:
             "vision_label": preset.display(own) if own and preset is not None else "",
             "vision_default": found[0] if found else "",
             "vision_default_label": found[1].display(found[0]) if found else "",
+            "vision_effort": self.vision_efforts.get(session_id, ""),
+            "vision_default_effort": self.config.vision.effort,
         }
 
     async def set_vision(self, session_id: str, preset: str) -> None:
@@ -1499,7 +1530,16 @@ class SessionManager:
         else:
             self.vision_choices.pop(session_id, None)
 
-    def _vision(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str] | None:
+    async def set_vision_effort(self, session_id: str, effort: str) -> None:
+        """Choose how hard the session's vision model thinks; "" follows ``[vision] effort`` again."""
+        task_effort.check(effort)
+        await self.live.set_vision_effort(session_id, effort)
+        if effort:
+            self.vision_efforts[session_id] = effort
+        else:
+            self.vision_efforts.pop(session_id, None)
+
+    def _vision(self, session_id: str | None = None) -> tuple[Any, str, FileBlobStore, str, str] | None:
         found = self.vision_preset_for(session_id)
         if found is None:
             return None
@@ -1510,7 +1550,7 @@ class SessionManager:
             # The tool then reports no vision model at all; the log keeps the chosen one and why it is out.
             logger.warning("vision preset %s names provider %s, which has no live endpoint", preset_id, preset.provider)
             return None
-        return provider, preset.model, self.blobs, TENANT
+        return provider, preset.model, self.blobs, TENANT, self.vision_effort_for(session_id)
 
     def resolve_model(self, overrides: dict[str, Any]) -> tuple[list[tuple[Any, str]], Any]:
         """Rungs and the effective preset for a session, from its live overrides.
@@ -2387,6 +2427,7 @@ class SessionManager:
             await self.providers.close_retired()
         self._states.pop(session_id, None)
         self.vision_choices.pop(session_id, None)
+        self.vision_efforts.pop(session_id, None)
         locator.unregister(session_id)
         for job in self.jobs.pop(session_id, {}).values():
             if isinstance(job, RemoteJob):
@@ -3061,9 +3102,9 @@ class SessionManager:
             request = LLMRequest(
                 model=model,
                 messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt + reminder + "\n\n" + body)])],
-                max_tokens=max_tokens,
+                max_tokens=task_effort.helper_tokens(max_tokens, self.config.compaction.effort),
                 temperature=0.2,
-                extra={"enable_thinking": False},
+                extra=task_effort.helper_extra(self.config.compaction.effort),
                 observability=observability,
             )
             candidate = (await self._summary_request(provider, request)).strip()
@@ -5038,7 +5079,7 @@ class SessionManager:
                    "to_label": router.label(endpoint, to_account) if router is not None else ""}
         await self._notify_sinks(state.session.id, HostEvent(HostEventType.ACCOUNT_SWITCH, state.run_id or "", payload))
 
-    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "") -> str:
+    async def small_model(self, prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200, temperature: float = 0.0, instructions: str = "", effort: str = "", exact: bool = False) -> str:
         """One short request to a preset for a helper around the operator's messages.
 
         ``purpose`` is the label the call's cost is booked under in Usage (``call_category="assist"``
@@ -5048,7 +5089,14 @@ class SessionManager:
         ``instructions``, when given, go first as a system message of their own and ``prompt`` follows
         as the user's: the helper's fixed wording then stays one cacheable prefix, and whatever moves
         (the conversation's tail, the operator's style profile) rides in the message after it.
+
+        ``effort`` is the task's own (:mod:`daedalus.host.task_effort`): empty does not think.
+
+        A preset marked broken (:mod:`daedalus.host.model_health`) is replaced by a stand-in and the log
+        says so; ``exact`` asks that one preset and no other, which only the model check wants.
         """
+        if not exact:
+            preset = self.model_health.usable(self.config, preset, task=purpose)
         provider, model = self.providers.rungs_for(self.config, preset or None)[0]
         if self.budget_exceeded() and not self.provider_costs_nothing(provider.endpoint.id, model):
             raise RuntimeError("daily inference budget exceeded")
@@ -5056,11 +5104,11 @@ class SessionManager:
         request = LLMRequest(
             model=model,
             messages=[*lead, Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
-            max_tokens=max_tokens,
+            max_tokens=task_effort.helper_tokens(max_tokens, effort),
             temperature=temperature,
-            # ``thinking_off`` as well: on the Claude routes "not enabled" still thinks, and a helper's small
-            # output budget went on thinking until the answer came back empty.
-            extra={"enable_thinking": False, "thinking_off": True},
+            # Off by default, and said as ``thinking_off``: on the Claude routes "not enabled" still thinks,
+            # and a helper's small output budget went on thinking until the answer came back empty.
+            extra=task_effort.helper_extra(effort),
             observability=LLMObservabilityContext(tenant_id=TENANT, session_id=session_id, call_purpose=purpose, call_category="assist"),
         )
         response = await provider.complete_text(request)
@@ -5324,15 +5372,26 @@ class SessionManager:
 
     # -- runs -----------------------------------------------------------------------
 
-    async def _build_engine(
-        self, state: SessionState, run_id: str, *, message: Message | None = None,
-    ) -> QueryEngine:
-        overrides = await self.live.load(state.session.id)
+    def task_overrides(self, state: SessionState, overrides: dict[str, Any]) -> dict[str, Any]:
+        """The session's live overrides with what its task's Settings choose on top: the first preset hook
+        that names a preset, the first effort hook that names an effort. The run is built from this, and the
+        chip that shows the session's effort reads it too, so the two cannot disagree."""
         for hook in self.preset_hooks:
             chosen = hook(state)
             if chosen:
                 overrides = {**overrides, "preset": chosen}
                 break
+        for effort_hook in self.effort_hooks:
+            effort = effort_hook(state)
+            if effort:
+                overrides = {**overrides, **task_effort.run_overrides(effort)}
+                break
+        return overrides
+
+    async def _build_engine(
+        self, state: SessionState, run_id: str, *, message: Message | None = None,
+    ) -> QueryEngine:
+        overrides = self.task_overrides(state, await self.live.load(state.session.id))
         target = None
         async with self.db.transaction() as conn:
             if message is not None and message.metadata.get("daedalus.provider_resume"):

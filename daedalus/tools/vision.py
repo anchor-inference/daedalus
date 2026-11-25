@@ -20,6 +20,7 @@ from protocore.contracts.types import (
 )
 from protocore.tools.decorator import tool
 
+from daedalus.host import task_effort
 from daedalus.host.setting_refs import VISION_MODEL, VISION_OUTPUT, SettingRef
 from daedalus.providers.image_fit import sniffed_mime
 from daedalus.tools import search_hint
@@ -234,8 +235,11 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     anyway, a reply cut off with no text is retried once at twice the budget.
     """
     if not vision:
-        raise VisionUnavailable("no vision model is configured: mark a model as taking images in Settings → Models and providers and pick it under Settings → Models for tasks → Image understanding")
-    provider, model, blobs, tenant = vision
+        raise VisionUnavailable("no vision model is configured: open a model in Settings → Models and providers and switch on its Images, then pick it under Settings → Models for tasks → Image understanding")
+    # A route of the vision model carries its effort as a fifth part; the session's own model standing in
+    # for it carries none and does not think, as the helper it is standing in for.
+    provider, model, blobs, tenant, *rest = vision
+    effort = str(rest[0]) if rest else ""
     max_out = int(getattr(getattr(getattr(manager, "config", None), "vision", None), "max_output_tokens", 2000))
     accepts = getattr(provider, "accepts_images", None)
     if accepts is None or not accepts(model):
@@ -263,12 +267,12 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
         ),
     ]
     budget = max_out
-    response = await _complete(provider, model, messages, budget)
+    response = await _complete(provider, model, messages, budget, effort)
     answer = _answer(response)
     retried = 0
     if not answer and response.stop_reason == StopReason.max_tokens and budget < RETRY_CEILING:
         retried = min(RETRY_CEILING, budget * 2)
-        response = await _complete(provider, model, messages, retried)
+        response = await _complete(provider, model, messages, retried, effort)
         answer = _answer(response)
     if not answer:
         # An empty answer handed back as a description let the agent go on as if it had looked.
@@ -280,8 +284,8 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     return answer, str(model)
 
 
-async def _complete(provider: Any, model: str, messages: list[Message], budget: int) -> LLMResponse:
-    request = LLMRequest(model=model, messages=messages, max_tokens=budget, temperature=0.1, extra={"enable_thinking": False})
+async def _complete(provider: Any, model: str, messages: list[Message], budget: int, effort: str = "") -> LLMResponse:
+    request = LLMRequest(model=model, messages=messages, max_tokens=task_effort.helper_tokens(budget, effort), temperature=0.1, extra=task_effort.helper_extra(effort))
     try:
         return await provider.complete_text(request)
     except Exception as exc:  # noqa: BLE001

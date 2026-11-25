@@ -8,9 +8,10 @@ import { useEffect, useState } from "react";
 import { api, type SessionDetail } from "./api";
 import { t } from "./i18n";
 import { ModelPicker, type ModelCatalogue } from "./modelitems";
+import { WithEffort, inheritedDefault } from "./taskeffort";
 import { errorText } from "./ui";
 
-type VisionView = Pick<SessionDetail, "vision_preset" | "vision_label" | "vision_default" | "vision_default_label">;
+type VisionView = Pick<SessionDetail, "vision_preset" | "vision_label" | "vision_default" | "vision_default_label" | "vision_effort" | "vision_default_effort">;
 
 /** What "default" means today, as the first row and the line's state say it. */
 export function visionDefaultWord(view: VisionView): string {
@@ -28,17 +29,17 @@ export function SessionVisionModel({ sessionId, detail, toast, onSaved }: { sess
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const [busy, setBusy] = useState(false);
   // The detail is polled; a newer answer replaces what this page drew, and a save's answer comes first.
-  useEffect(() => setView(detail), [detail.vision_preset, detail.vision_label, detail.vision_default, detail.vision_default_label]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setView(detail), [detail.vision_preset, detail.vision_label, detail.vision_default, detail.vision_default_label, detail.vision_effort, detail.vision_default_effort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let current = true;
     // The models, their providers and prices come from the settings, as every model picker's rows do.
     api.get<ModelCatalogue>("/api/settings").then((s) => { if (current && s?.presets) setCatalogue(s); }).catch(() => undefined);
     return () => { current = false; };
   }, []);
-  async function choose(preset: string) {
+  async function choose(change: { preset: string } | { effort: string }) {
     setBusy(true);
     try {
-      setView(await api.post<VisionView>(`/api/sessions/${encodeURIComponent(sessionId)}/vision`, { preset }));
+      setView(await api.post<VisionView>(`/api/sessions/${encodeURIComponent(sessionId)}/vision`, change));
       onSaved?.();
     } catch (e) {
       toast(errorText(e));
@@ -52,16 +53,19 @@ export function SessionVisionModel({ sessionId, detail, toast, onSaved }: { sess
     <div className="dt-vision" data-setting="session.vision">
       <p className="dt-hint">{t("details.vision.sub")}</p>
       {catalogue ? (
-        <ModelPicker
-          id={`vision-${sessionId}`}
-          label={t("details.vision")}
-          catalogue={catalogue}
-          value={value}
-          onChange={(next) => void choose(next)}
-          defaultOption={{ label: visionDefaultWord(view) }}
-          keep={(id, preset) => !!preset.images || id === value}
-          disabled={busy}
-        />
+        // The effort follows Settings → Models while the session has none of its own, and says so.
+        <WithEffort id={`vision-effort-${sessionId}`} value={view.vision_effort} onChange={(effort) => void choose({ effort })} fallback={inheritedDefault(view.vision_default_effort)} disabled={busy}>
+          <ModelPicker
+            id={`vision-${sessionId}`}
+            label={t("details.vision")}
+            catalogue={catalogue}
+            value={value}
+            onChange={(preset) => void choose({ preset })}
+            defaultOption={{ label: visionDefaultWord(view) }}
+            keep={(id, preset) => !!preset.images || id === value}
+            disabled={busy}
+          />
+        </WithEffort>
       ) : <div className="empty">…</div>}
     </div>
   );

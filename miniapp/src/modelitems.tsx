@@ -3,7 +3,7 @@
 // so the helpers' list in Details, the fallback chain and every single-model setting describe a model
 // the same way, and a model gains a fact (an account, say) for all of them at once.
 
-import type { Preset, PriceView, ProviderConf } from "./api";
+import type { ModelHealth, Preset, PriceView, ProviderConf } from "./api";
 import { tokens } from "./format";
 import { t } from "./i18n";
 import { ProviderMark, providerName } from "./ui/provider-mark";
@@ -13,7 +13,19 @@ export type ModelCatalogue = {
   presets: Record<string, Preset>;
   providers?: Record<string, ProviderConf>;
   prices?: Record<string, PriceView>;
+  model_health?: Record<string, ModelHealth>;
 };
+
+/** A preset's broken or slow mark as a tag, with the upstream's words or the measured wait as its reason;
+ *  nothing for a model that is fine or not known yet. */
+export function healthAlert(health: ModelHealth | undefined): { word: string; tone: "bad" | "warn"; why?: string } | undefined {
+  if (health?.state === "broken") return { word: t("modelhealth.broken"), tone: "bad", why: health.detail || undefined };
+  if (health?.state === "slow") {
+    const ms = health.median_ms ?? health.check?.ms;
+    return { word: t("modelhealth.slow"), tone: "warn", why: ms ? t("modelhealth.slow.why", { s: (ms / 1000).toFixed(1) }) : undefined };
+  }
+  return undefined;
+}
 
 /** "$1.25 / $10" per million tokens in and out; whole dollars lose their cents. */
 function rate(value: number): string {
@@ -47,6 +59,7 @@ export function modelItem(id: string, preset: Preset, catalogue: Omit<ModelCatal
     label: preset.label || (providerId && model ? `${providerId}/${model}` : id),
     detail: [provider, model].filter(Boolean).join(" · ") || undefined,
     facts,
+    alert: healthAlert(catalogue.model_health?.[id]),
     group: providerId || undefined,
     keywords: `${providerId} ${provider} ${model}`,
   };

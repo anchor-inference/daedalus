@@ -54,7 +54,7 @@ describe("the page", () => {
       if (url.endsWith("/vision") && init?.method === "POST") {
         const body = JSON.parse(String(init.body));
         posted.push({ url, body });
-        return answer({ ok: true, ...DEFAULT, vision_preset: body.preset, vision_label: PRESETS[body.preset]?.label ?? "" });
+        return answer({ ok: true, ...DEFAULT, vision_preset: body.preset ?? "", vision_label: PRESETS[body.preset]?.label ?? "", vision_effort: body.effort ?? "" });
       }
       return answer({ items: [], groups: [], enabled: [], servers: [], standing: [] });
     });
@@ -76,6 +76,18 @@ describe("the page", () => {
     expect(posted).toEqual([{ url: "/api/sessions/s1/vision", body: { preset: "sharp" } }]);
     expect(saved).toHaveBeenCalled();
     expect(host.querySelector(".sel-current .sel-name")!.textContent).toBe("Sharp eyes");
+  });
+
+  it("chooses how hard the model thinks on its own, saying what the default follows", async () => {
+    await act(async () => root.render(<SessionVisionModel sessionId="s1" detail={{ ...DEFAULT, vision_default_effort: "low" }} toast={() => {}} />));
+    const effort = host.querySelector<HTMLButtonElement>(".task-effort .dropdown-btn")!;
+    expect(effort.textContent).toBe("Default — as in Settings (Low)");
+    await act(async () => effort.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    const options = [...document.querySelectorAll<HTMLElement>(".dropdown-list [role=option]")];
+    expect(options.map((o) => o.dataset.value)).toEqual(["", "none", "low", "medium", "high", "xhigh"]);
+    await act(async () => options[4].click());
+    expect(posted).toEqual([{ url: "/api/sessions/s1/vision", body: { effort: "high" } }]);
   });
 
   it("is a line of the session's Details that opens the picker", async () => {

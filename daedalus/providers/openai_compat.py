@@ -557,6 +557,7 @@ class OpenAICompatibleProvider(ILLMProvider):
         route_refusal: Callable[[str, str], None] | None = None,
         on_unreachable: UnreachableNotice | None = None,
         accounts: AccountRouter | None = None,
+        model_refusal: Callable[[str, str, int, str], None] | None = None,
     ) -> None:
         """``images_for(model)`` says whether that model takes image parts (a preset setting).
 
@@ -575,8 +576,12 @@ class OpenAICompatibleProvider(ILLMProvider):
         run's screen can say what it is waiting for rather than look stuck.
 
         ``accounts`` chooses the subscription account each call goes out on and moves a call that one
-        account refused for its limit to the next (:mod:`daedalus.providers.accounts`)."""
+        account refused for its limit to the next (:mod:`daedalus.providers.accounts`).
+
+        ``model_refusal(endpoint id, model, status, body)`` hears every other refusal too, so the model's
+        health can be marked when the words say the model itself is gone (:mod:`daedalus.host.model_health`)."""
         self.endpoint = endpoint
+        self._model_refusal = model_refusal
         self._accounts = accounts
         self._context_refusal = context_refusal
         self._routing_for = routing_for or (lambda _model: ())
@@ -977,7 +982,11 @@ class OpenAICompatibleProvider(ILLMProvider):
             elif isinstance(extra.get("tool_choice"), dict):
                 body["tool_choice"] = extra["tool_choice"]
         effort = str(extra.get("reasoning_effort") or "medium")
-        self._apply_thinking(body, thinking=thinking, effort=effort, off=bool(extra.get("thinking_off")))
+        # A run whose thinking is off says so with an explicit False (the core always sends the pair); that
+        # is "off" as much as a helper's ``thinking_off``. Treating only the helper's word as off left a run
+        # set to no thinking thinking anyway on the key proxy's Claude routes. An absent key states nothing.
+        off = bool(extra.get("thinking_off")) or extra.get("enable_thinking") is False
+        self._apply_thinking(body, thinking=thinking, effort=effort, off=off)
         if extra.get("json_object") and self.endpoint.kind in DEEPSEEK_SHAPED:
             # A caller that parses the answer as JSON itself asks for it here. DeepSeek-shaped endpoints
             # otherwise scatter stray characters inside the object ('{"ops":#…') even on a trivial
@@ -1055,8 +1064,9 @@ class OpenAICompatibleProvider(ILLMProvider):
         return _remembering(load), inline
 
     def _apply_thinking(self, body: dict[str, Any], *, thinking: bool, effort: str, off: bool = False) -> None:
-        """``off`` is a caller that must not think at all (a helper's short call), which for the key proxy's
-        Claude routes is a word of its own: sending no effort leaves a current Claude model thinking."""
+        """``off`` is a caller that must not think at all (a helper's short call, or a run set to no thinking),
+        which for the key proxy's Claude routes is a word of its own: sending no effort leaves a current Claude
+        model thinking."""
         kind = self.endpoint.kind
         if kind == "llamacpp":
             # The loaded chat template reads these as jinja variables. Sending nothing leaves the
@@ -1261,11 +1271,18 @@ class OpenAICompatibleProvider(ILLMProvider):
                     self._context_refusal(self.endpoint.id, request.model, window)
                 except Exception:  # noqa: BLE001 — learning the window is a side effect; the refusal is the error
                     logger.exception("could not record the context window %s stated for %s", window, request.model)
-        if self._route_refusal is not None and self.endpoint.kind == "openrouter" and status == 404 and refused_route(text):
+        routing = self.endpoint.kind == "openrouter" and status == 404 and refused_route(text) is not None
+        if self._route_refusal is not None and routing:
             try:
                 self._route_refusal(self.endpoint.id, request.model)
             except Exception:  # noqa: BLE001 — marking the model is a side effect; the refusal is the error
                 logger.exception("could not record the refused route of %s", request.model)
+        if self._model_refusal is not None and not routing:
+            # A route refused by OpenRouter's provider choice is the choice's fault, not the model's.
+            try:
+                self._model_refusal(self.endpoint.id, request.model, status, text)
+            except Exception:  # noqa: BLE001 — marking the model is a side effect; the refusal is the error
+                logger.exception("could not record the refusal of %s", request.model)
         if self._admission is not None and hasattr(self._admission, "failure"):
             try:
                 await self._admission.failure(self.endpoint, request, reservation, evidence)

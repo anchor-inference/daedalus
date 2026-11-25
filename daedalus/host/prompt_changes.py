@@ -11,6 +11,7 @@ from typing import Any
 from protocore.contracts.llm import LLMObservabilityContext, LLMRequest, ProviderDelta
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolDefinition, ToolParameterSchema
 
+from daedalus.host import task_effort
 from daedalus.host.prompts import DEFAULT_RULES
 from daedalus.host.proposals import new_proposal, same_generation, with_activity
 
@@ -81,7 +82,8 @@ class PromptChangePlanner:
             await asyncio.gather(self.task, return_exceptions=True)
             await self.proposal()
 
-    async def start(self, instruction: str, preset_id: str) -> dict[str, Any]:
+    async def start(self, instruction: str, preset_id: str, *, effort: str = "") -> dict[str, Any]:
+        """``effort`` is how hard the model thinks (:mod:`daedalus.host.task_effort`); empty does not think."""
         async with self.lock:
             if self.task and not self.task.done():
                 raise ValueError("a working-rules proposal is already being prepared")
@@ -95,6 +97,7 @@ class PromptChangePlanner:
                 "working_rules",
                 instruction=instruction,
                 preset=preset_id,
+                effort=effort,
                 stage="model",
                 base_digest=digest(before),
             )
@@ -158,9 +161,9 @@ class PromptChangePlanner:
             model=model,
             messages=messages,
             tools=[PROPOSE],
-            max_tokens=min(12_000, preset.max_output_tokens),
+            max_tokens=task_effort.helper_tokens(min(12_000, preset.max_output_tokens), str(value.get("effort") or ""), preset.max_output_tokens),
             temperature=0.1,
-            extra={"enable_thinking": False},
+            extra=task_effort.helper_extra(str(value.get("effort") or "")),
             observability=LLMObservabilityContext(run_id=value["id"], call_category="prompt_editing", call_purpose="working_rules_proposal"),
         )
         calls: list[dict[str, Any]] = []
