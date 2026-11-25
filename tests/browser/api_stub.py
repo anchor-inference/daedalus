@@ -42,6 +42,7 @@ from memory_stub import MemoryStub
 from move_stub import DEFAULT as MOVES
 from notes_stub import NotesStub
 from pages_stub import PagesStub
+from proposals_stub import DEFAULT as PROPOSALS
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -718,7 +719,6 @@ GATES: dict[str, object] = {
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
-    "/api/proposals": [],
     "/api/schedules": [],
     # The schedules the agent asks for that wait for the operator: none. The shell counts them on the
     # Inbox entry, so every screen reads this. Approval is off, the host's default, so an Accept lasts
@@ -2113,6 +2113,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # A chat's Changes tab: every chat has the same two changed files until it reverts or commits
         # them; a check reads its writes back from CHANGES.writes.
         answered = CHANGES.answer(method, path, query, body)
+        if answered is not None:
+            return answered
+    if path.startswith("/api/proposals"):
+        # The agent's own change proposals: a decision moves the row, and a check reads it back from PROPOSALS.decided.
+        answered = PROPOSALS.answer(method, path, body)
         if answered is not None:
             return answered
     if path == "/api/memory/export.zip":

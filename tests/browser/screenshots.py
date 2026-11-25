@@ -40,6 +40,7 @@ from api_stub import (  # noqa: E402
     GATES,
     INBOX_PDF,
     INBOX_SHOT,
+    PROPOSALS,
     VISION_DEFAULT,
     BoardStub,
     FocusStub,
@@ -564,7 +565,6 @@ def notify_frames(*entries: dict) -> str:
         frames.append(f"id: {n}\nevent: notify\ndata: {json.dumps(event)}\n\n")
     return "".join(frames)
 
-PROPOSALS = [{"id": "p57", "repo": "daedalus", "branch": "bot/websearch-retry", "pr_number": 57, "pr_url": "https://github.com/example/daedalus/pull/57", "title": "WebSearch: retry a backend that timed out once before falling back", "summary": "A backend that answers 504 once is tried again after a second; only a second failure falls through to the next backend. Unit test added.", "status": "pending", "reason": None, "created_at": ago(minutes=20)}]
 
 # The Schedules screen's host: the realistic set of schedule_stub.py (long instructions, five cron
 # shapes, a failed run, a paused schedule, a finished one-off) in the picture's language. Its proposal
@@ -1025,6 +1025,11 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # Its quick agent's models, and the quick agents a running call looks for its helper among.
     if rel.startswith("/api/sessions/") and rel.endswith(("/quick-models", "/quick-agents")) and fulfil_shared(route):
         return None
+    if rel.startswith("/api/proposals"):
+        # A recipe's ``proposals_empty`` flag answers the list with nothing.
+        PROPOSALS.empty = bool(getattr(stub, "proposals_empty", False))
+        if fulfil_shared(route):
+            return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -1135,10 +1140,6 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, INBOX_SUMMARY)
     if rel == "/api/notifications":
         return respond(route, {"entries": notifications_view(params.get("view", ["all"])[0]), "next_before": None, "summary": INBOX_SUMMARY})
-    if rel == "/api/proposals":
-        return respond(route, PROPOSALS)
-    if rel == "/api/proposals/p57/diff":
-        return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
     if rel == "/api/schedules" or rel.startswith("/api/recurring/"):
         answered = SCHEDULE_HOST.answer(route.request.method, rel, json.loads(route.request.post_data or "{}") if route.request.method in ("POST", "PATCH") else None)
         if answered is not None:
@@ -2844,10 +2845,11 @@ def run_features() -> int:
 
 
 def run_selfdev() -> int:
-    """Capture the current Changes screen over the same invented proposal as the Inbox."""
-    def open_diff(page: Page) -> None:
-        page.locator(".proposal-sheet [role=tab]").nth(1).click()
-        page.wait_for_selector(".proposal-sheet pre.diff")
+    """Capture the Changes screen over the invented proposals: the list, a change set open for review
+    in both views, a two-thousand-line diff, a decided one and an empty list."""
+    def split(page: Page) -> None:
+        page.get_by_role("radio", name="Split" if LANG == "en" else "Рядом").click()
+        page.wait_for_selector(".dp-body.split")
 
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -2855,9 +2857,17 @@ def run_selfdev() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "changes", "changes", wait=".proposal.erow")
-        shot(page, "changes-summary", "changes/p57", wait=".proposal-sheet")
-        shot(page, "changes-diff", "changes/p57", wait=".proposal-sheet", before=open_diff)
+        shot(page, "changes-list", "changes", wait=".proposal.erow")
+        shot(page, "changes", "changes/p57", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-large", "changes/p58", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-decided", "changes/p55", wait=".review .dp-line, .review .dp-pair")
+        # The layout is remembered in the browser, so the split view goes last of the ones that read lines.
+        shot(page, "changes-split", "changes/p57", wait=".review .dp-line, .review .dp-pair", before=split)
+        stub.proposals_empty = True  # type: ignore[attr-defined]
+        try:
+            shot(page, "changes-empty", "changes", wait=".empty")
+        finally:
+            stub.proposals_empty = False  # type: ignore[attr-defined]
         desk.close()
         browser.close()
     return UNHANDLED.report()
