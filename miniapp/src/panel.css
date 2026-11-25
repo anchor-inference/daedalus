@@ -97,7 +97,9 @@
 .dt-kv.press:hover { background: var(--hover); }
 .dt-kv:focus-visible, .dt-prop:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .dt-kv-k { flex: none; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); }
-.dt-kv-v { flex: 1; min-width: 0; display: inline-flex; align-items: baseline; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+/* A block, not a flex box: an ellipsis is drawn only on a block's own line of text. */
+.dt-kv-v { flex: 1; min-width: 0; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.dt-kv-v > * + * { margin-left: 6px; }
 .dt-kv-v .truncate { min-width: 0; }
 .dt-kv-v.attn { color: var(--attention); }
 .dt-kv-v.live { color: var(--live); }
@@ -229,7 +231,7 @@
   .panel-sheet .ov-row > .ic:last-child { grid-area: chev; }
   .panel-sheet .ov-board { margin: 12px 8px 0; }
   .panel-sheet .ov-tasks { font-size: var(--fs-15); gap: 12px; }
-  .panel-sheet .details.inspector { padding: 0 0 var(--space-6); }
+  .panel-sheet .details.inspector { padding: 0 8px var(--space-6); }
   .panel-sheet .dt-kv, .panel-sheet .dt-prop { min-height: var(--row-h-touch); font-size: var(--fs-15); }
   .panel-sheet .dt-kv-k, .panel-sheet .dt-prop-k { width: 132px; }
   .panel-sheet .dt-prop-v .truncate { max-width: 120px; }

@@ -1803,7 +1803,11 @@ def workspace_shots(page: Page) -> None:
         p.wait_for_selector(".panel-body.split .source-view")
 
     page.set_viewport_size({"width": 2560, "height": 1400})
+    # The tree stands beside the file only in a panel 720 px wide or more, which the default (at most
+    # 520) never is: the picture is of a panel the operator dragged wide.
+    page.evaluate("() => localStorage.setItem('daedalus.width.panel', '1100')")
     shot(page, "session-explorer-wide", f"agents/{S1}?panel=files", wait=".explorer-tree [data-path='src']", before=open_code_tree)
+    page.evaluate("() => localStorage.removeItem('daedalus.width.panel')")
     page.set_viewport_size(DESK)
 
 
