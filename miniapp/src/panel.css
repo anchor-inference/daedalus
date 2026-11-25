@@ -270,3 +270,16 @@
 @media (max-width: 399px) {
   .dt-window .dt-mini { display: none; }
 }
+
+/* The tools that keep their own bodies (the helpers' cards, the background jobs, the files, a page of
+   Details) stand at the same 24 px from the panel's edges as the Overview's words and the Board's
+   cards; at the shared body's 12 they read as a wider, older panel inside this one. */
+@media (min-width: 1024px) {
+  .panel .panel-body.tab-subagents { padding: 0 24px 16px; }
+  .panel .panel-body.tab-jobs { padding: 8px 24px 16px; }
+  .panel .panel-body.tab-details > .dt-drill { padding: 8px 20px 16px; }
+  .panel .panel-body.tab-files .explorer-head { padding: 8px 16px 6px 24px; }
+  .panel .panel-body.tab-files .explorer-filter { margin: 0 24px 8px; }
+  .panel .panel-body.tab-files .explorer-note { margin: 0 24px 6px; }
+  .panel .panel-body.tab-files .explorer-tree { padding: 2px 18px 8px; }
+}
