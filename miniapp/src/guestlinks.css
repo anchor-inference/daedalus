@@ -38,7 +38,7 @@
 /* A choice of a few long words wraps onto a second line rather than being clipped: the segments size to
    their words (a basis of zero, as the shared control has, makes three of them share a line whatever
    they say), and a word too long even for a line of its own breaks inside its button. */
-.guest-form .segmented { margin: 0 0 12px; flex-wrap: wrap; gap: 2px; }
+.guest-form .segmented { margin: 0 0 16px; flex-wrap: wrap; gap: 2px; }
 .guest-form .segmented button { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .guest-form .sub { margin: 4px 0 0; }
 .guest-form .sub.guest-warning { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); }
@@ -65,7 +65,9 @@
   .guest-limit .settings-row-ctl > .settings-num, .guest-daily .settings-row-ctl > .settings-num { flex: 1 1 0; min-width: 0; }
 }
 .guest-daily { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
-.guest-daily .settings-row-ctl { flex-wrap: wrap; }
+/* The limit's name and what is spent have the width of the sheet; the number, Save and No limit take the line under them (beside them the name was squeezed to a column of two words in Russian). */
+.guest-sheet .guest-daily { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 600px) { .guest-sheet .guest-daily .settings-row-ctl { flex-wrap: wrap; justify-self: stretch; justify-content: flex-start; } }
 .guest-draft { align-self: flex-start; margin: -4px 0 12px; }
 .guest-toggle { align-self: flex-start; }
 .guest-form .toggle-row { margin: 0 0 12px; }
