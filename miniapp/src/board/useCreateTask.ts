@@ -18,6 +18,8 @@ export type NewTask = {
   due_at?: string;
   assignee_operator?: boolean;
   session_id: string | null;
+  /** The column to make it in; absent, its dependencies decide (To do, or Blocked while one is open). */
+  status?: "todo" | "doing" | "blocked";
 };
 
 export function useCreateTask(): (projectId: string, task: NewTask) => Promise<void> {

@@ -3381,7 +3381,7 @@ class BoardStub:
                 kept = self.history.get(row["id"])
                 if kept is None:
                     kept = [{"seq": 1, "type": "task.created", "at": row["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None},
-                             "from": None, "to": None, "text": f"Created in {row['status']}"}]
+                             "from": None, "to": row["status"], "text": f"Created in {row['status']}", "operation": "board.task.create", "backfilled": False}]
                 return 200, kept[-int(parse_qs(query).get("limit", ["200"])[0]):]
             if path.endswith("/results") and method == "GET":
                 if row["id"] in self.result_rows:

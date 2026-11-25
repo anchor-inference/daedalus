@@ -92,7 +92,9 @@ export function BoardScreen({ toast, onOpen, selected, project, projects = [], q
     : [
       ...OPEN_COLUMNS.map((status) => ({
         key: status, name: columnLabel(status), drop: status, tasks: shown.filter((task) => task.status === status).sort(byUrgency),
-        onAdd: status === "todo" ? () => setCreating({}) : undefined,
+        // The host makes a card straight into To do, Blocked, or Doing when the operator keeps it; a card
+        // reaches review only through a result, so that column has no "+".
+        onAdd: status === "review" ? undefined : () => setCreating({ status }),
       })),
       ...(showDone ? [{ key: "finished", name: t("board.finished"), drop: "dropped" as Status, tasks: shown.filter(isFinished).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)) }] : []),
     ];
@@ -154,7 +156,7 @@ export function BoardScreen({ toast, onOpen, selected, project, projects = [], q
         </div>
       </section>
       {pane && <TaskPane key={pane.task.id} {...pane} />}
-      {creating && <NewTaskSheet scope={scope} chats={chats.list} onClose={() => setCreating(null)} onCreated={() => { setCreating(null); reload(); }} toast={toast} />}
+      {creating && <NewTaskSheet scope={scope} status={creating.status} chats={chats.list} onClose={() => setCreating(null)} onCreated={() => { setCreating(null); reload(); }} toast={toast} />}
     </div>
   );
 }
@@ -347,10 +349,13 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
  * does it, when it is due and how urgent it is; and the chat whose board it goes on. A chat in a
  * project posts to that project's board, since the board of every chat refuses a project's chat.
  */
-function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scope; chats: SessionSummary[]; onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
+/** A new card. Opened from a column's "+", it is made in that column: the host takes To do and Blocked
+ *  from anyone and Doing only for a card the operator keeps, so that column starts with "You" chosen;
+ *  a refusal (a card someone else would work on, a dependency still open) is the host's words under the form. */
+function NewTaskSheet({ scope, status, chats, onClose, onCreated, toast }: { scope: Scope; status?: Status; chats: SessionSummary[]; onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
   const offline = useOffline();
   const createTask = useCreateTask();
-  const [form, setForm] = useState({ title: "", description: "", acceptance: "", checklist: "", priority: 3, due: "", you: false, session_id: scope.kind === "chat" ? scope.id : "" });
+  const [form, setForm] = useState({ title: "", description: "", acceptance: "", checklist: "", priority: 3, due: "", you: status === "doing", session_id: scope.kind === "chat" ? scope.id : "" });
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   const chat = chats.find((s) => s.id === form.session_id);
@@ -369,6 +374,7 @@ function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scop
         ...(form.due ? { due_at: form.due } : {}),
         ...(form.you ? { assignee_operator: true } : {}),
         session_id: form.session_id || null,
+        ...(status === "doing" || status === "blocked" ? { status } : {}),
       });
       onCreated();
     } catch (e) {
@@ -379,7 +385,7 @@ function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scop
     }
   }
   return (
-    <Sheet title={t("board.new")} onClose={onClose} size="md" className="board-new"
+    <Sheet title={status && status !== "todo" ? t("board.new.in", { name: columnLabel(status) }) : t("board.new")} onClose={onClose} size="md" className="board-new"
       footer={<>
         <Button variant="quiet" onClick={onClose}>{t("common.cancel")}</Button>
         <Button variant="primary" busy={busy} disabled={offline || !form.title.trim()} onClick={() => void create()}>{t("common.create")}</Button>
