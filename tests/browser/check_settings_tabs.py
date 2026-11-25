@@ -127,12 +127,19 @@ def open_page(browser, width: int, lang: str) -> Page:  # type: ignore[no-untype
     return page
 
 
+# How long a condition may take to come true before it is called a failure. A wait that is met returns
+# at once, so this costs nothing on a quiet machine; it is long because a loaded one starts the app,
+# redirects and draws a section at a tenth of the speed, and a limit that a slow start can reach says
+# nothing about the page.
+BOUND_MS = 30_000
+
+
 def drawn(page: Page, section: str, lang: str, want: set[str]) -> set[str]:
     page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
-    page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row, .settings-col .empty", timeout=15000)
+    page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row, .settings-col .empty", timeout=BOUND_MS)
     # Cards that read their own listing draw their rows after it answers: waited for, up to a limit.
     try:
-        page.wait_for_function("(want) => want.every((key) => document.querySelector(`.settings-col [data-setting=\"${key}\"], .settings-head [data-setting=\"${key}\"]`))", arg=sorted(want), timeout=10000)
+        page.wait_for_function("(want) => want.every((key) => document.querySelector(`.settings-col [data-setting=\"${key}\"], .settings-head [data-setting=\"${key}\"]`))", arg=sorted(want), timeout=BOUND_MS)
     except Exception:  # noqa: BLE001
         pass
     # The page's header belongs to the section too: Models and providers keeps Add a model there.
@@ -160,23 +167,25 @@ def old_addresses(browser, lang: str, width: int, problems: list[str]) -> None:
         where = f"[{lang} {width}] /settings/{old}{'#' + row if row else ''}"
         page.goto(f"{BASE}/settings/{old}{'&' if '?' in old else '?'}token=t&lang={lang}{'#' + row if row else ''}")
         try:
-            page.wait_for_url(f"**/settings/{home}**", timeout=8000, wait_until="commit")
+            page.wait_for_url(f"**/settings/{home}**", timeout=BOUND_MS, wait_until="commit")
         except Exception:  # noqa: BLE001
             problems.append(f"{where}: stayed at {page.url}, not /settings/{home}")
             continue
-        page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row", timeout=15000)
+        page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row", timeout=BOUND_MS)
         if "tab=" in page.url:
             problems.append(f"{where}: the old tab is still in the address: {page.url}")
         if row:
             try:
-                page.wait_for_function("(key) => window.__flashed.has(key)", arg=row, timeout=10000)
+                page.wait_for_function("(key) => window.__flashed.has(key)", arg=row, timeout=BOUND_MS)
             except Exception:  # noqa: BLE001
                 problems.append(f"{where}: the row did not blink on /settings/{home}")
                 continue
-            page.wait_for_timeout(700)
-            seen = page.evaluate("""(key) => { const r = document.querySelector(`[data-setting="${key}"]`).getBoundingClientRect();
-                return r.bottom > 0 && r.top < window.innerHeight; }""", row)
-            if not seen:
+            # The row is scrolled to once it has blinked; whether it got there is read when it has, not
+            # after a pause that a busy machine may not have been long enough for.
+            try:
+                page.wait_for_function("""(key) => { const r = document.querySelector(`[data-setting="${key}"]`).getBoundingClientRect();
+                    return r.bottom > 0 && r.top < window.innerHeight; }""", arg=row, timeout=BOUND_MS)
+            except Exception:  # noqa: BLE001
                 problems.append(f"{where}: the row is not in view")
         print(f"{where} → {page.url.split('/app', 1)[1]}")
     page.context.close()
@@ -189,8 +198,13 @@ def listing(browser, lang: str, width: int, problems: list[str]) -> None:
     # On a phone the list is the first level; on a desktop it stands beside the open section, here the
     # last one of all, so its entry is far below the first screenful of the list.
     page.goto(f"{BASE}/settings{'' if phone else '/about'}?token=t&lang={lang}")
-    page.wait_for_selector(".settings-index .settings-link", timeout=15000)
-    page.wait_for_timeout(600)
+    page.wait_for_selector(".settings-index .settings-link", timeout=BOUND_MS)
+    # Measured once the fonts the entries are set in are in, and on a desktop once the list has brought
+    # the open section's entry into view, which it does after the first paint.
+    page.evaluate("document.fonts.ready.then(() => true)")
+    if not phone:
+        page.wait_for_function("""() => { const a = document.querySelector('.settings-link.active'), l = document.querySelector('.settings-index');
+            if (!a || !l) return false; const b = l.getBoundingClientRect(), r = a.getBoundingClientRect(); return r.top >= b.top - 0.5 && r.bottom <= b.bottom + 0.5; }""", timeout=BOUND_MS)
     state = page.evaluate("""() => {
         const blocks = [...document.querySelectorAll('.settings-index .settings-group-block')];
         const vw = document.documentElement.clientWidth;
