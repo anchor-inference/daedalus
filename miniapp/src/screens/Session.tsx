@@ -2299,7 +2299,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             />,
           }}
           // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
-          badges={{ ...(boardOffered && boardFigures.all > 0 ? { board: boardTag } : {}), ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
+          // The open Board says its "done of all" in its own heading; the tab says it only while closed.
+          badges={{ ...(boardOffered && boardFigures.all > 0 && panel.state.tab !== "board" ? { board: boardTag } : {}), ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
           marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
           details={hasDetails ? (ids) =>
             <SessionDetails

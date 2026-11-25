@@ -171,10 +171,14 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-card .settings-value { font-size: var(--fs-14); }
 /* On a phone a row whose control needs the width (a number, a line of text, a key) puts it under its
    words, as the same rows do outside a card (pages.css); a switch, a segmented choice, a select and a
-   button stay beside them. */
+   button stay beside them. A model with its effort under it is two controls, and in 64 % of a phone's
+   row the Russian default effort ("По умолчанию — как у модели") was cut: it goes under its words too. */
 @media (max-width: 599px) {
-  .set-card .settings-row.stack, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
-  .set-card .settings-row.stack > .settings-row-ctl, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+  .set-card .settings-row.stack, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key, .task-model)) { flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
+  .set-card .settings-row.stack > .settings-row-ctl, .set-card .settings-row:has(> .settings-row-ctl > :is(.settings-num, input.field, textarea, .keyproxy-key, .task-model)) > .settings-row-ctl { max-width: none; justify-content: stretch; }
+  .set-card .settings-row-ctl > .task-model { align-items: stretch; }
+  .set-card .settings-row-ctl > .task-model .task-effort { justify-content: space-between; flex-wrap: wrap; gap: 0 12px; }
+  .set-card .settings-row-ctl > .task-model .task-effort-value { min-width: 0; max-width: 100%; }
   /* The field takes what the unit leaves, however narrow: its own width made a number run 16 px past the row's padding at 360. */
   .set-card .settings-row-ctl > .settings-num { min-width: 0; max-width: 100%; }
   .set-card .settings-row-ctl > .settings-num input.field { flex: 1 1 0; width: 0; }

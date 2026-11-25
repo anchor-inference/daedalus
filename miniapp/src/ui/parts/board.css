@@ -233,8 +233,10 @@
 .cb-sub { margin-top: 2px; font-size: var(--fs-12); color: var(--fg-3); }
 .cb-bar { height: 6px; margin-top: 8px; border-radius: 3px; background: var(--selected); overflow: hidden; }
 .cb-bar i { display: block; height: 100%; background: var(--live); }
-.cb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px; scrollbar-width: thin; }
-.cb-add-wrap { flex: none; margin: 12px; }
+/* The cards stand 24 px from the panel's edges, where the Overview's rows put their words and the
+   heading above starts; at 12 they ran wider than everything else in the panel. */
+.cb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; scrollbar-width: thin; }
+.cb-add-wrap { flex: none; margin: 12px 24px; }
 .cb-add { height: 52px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; display: flex; align-items: center; gap: 10px; color: var(--fg-3); }
 .cb-add:focus-within { border-color: var(--accent); color: var(--fg-2); }
 .cb-add.refused { border-color: var(--attention); }

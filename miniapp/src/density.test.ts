@@ -494,12 +494,14 @@ describe("a page's header", () => {
   const DESKTOP = "min-width: 1024px";
   const desktopRule = (selector: string) => all.filter((r) => r.media.includes(DESKTOP) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("is one 52 px row with its title 24 px in, on every page, whatever the column under it", () => {
+  it("is one 52 px row with its title and its actions 24 px in, on every page, whatever the column under it", () => {
     // --head-h is every header's height: a page's, the conversation's, the panel's tabs. It was 48
     // until the design set 52 for all of them.
     expect(all.find((r) => r.selector === ":root" && !r.media)!.body).toContain("--head-h: 52px");
     expect(desktopRule(".pagehead-row")).toContain("min-height: var(--head-h)");
-    expect(desktopRule(".pagehead")).toContain("padding: 0 12px 0 24px");
+    // The same 24 px at both ends: with 12 at the right a page's primary button stood half as far from
+    // the window's edge as its title stood from the sidebar, and the header read as lopsided.
+    expect(desktopRule(".pagehead")).toContain("padding: 0 24px");
     // The header once followed the page's column (padding in to the 1120 or 1680 px column's edge), so
     // the titles stood at six different x positions. No rule may pad it by the column again.
     expect(all.filter((r) => /\.pagehead:has\(\+ \.screen\.(narrow|wide)\)/.test(r.selector)).map((r) => r.selector)).toEqual([]);
