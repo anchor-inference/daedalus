@@ -25,7 +25,7 @@ import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
 import { Select, Segmented, SelectionList, Switch } from "../ui/index";
 import { Button, confirmDialog } from "../ui/primitives";
-import { type Changed, NumInput, NumRow, Row, SetBlock, SetFoot, SetGroup, TextBlock } from "../settingsrow";
+import { type Changed, NumInput, NumRow, Row, SetBlock, SetGroup, TextBlock } from "../settingsrow";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
 import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
