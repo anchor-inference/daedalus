@@ -977,7 +977,11 @@ class OpenAICompatibleProvider(ILLMProvider):
             elif isinstance(extra.get("tool_choice"), dict):
                 body["tool_choice"] = extra["tool_choice"]
         effort = str(extra.get("reasoning_effort") or "medium")
-        self._apply_thinking(body, thinking=thinking, effort=effort, off=bool(extra.get("thinking_off")))
+        # A run whose thinking is off says so with an explicit False (the core always sends the pair); that
+        # is "off" as much as a helper's ``thinking_off``. Treating only the helper's word as off left a run
+        # set to no thinking thinking anyway on the key proxy's Claude routes. An absent key states nothing.
+        off = bool(extra.get("thinking_off")) or extra.get("enable_thinking") is False
+        self._apply_thinking(body, thinking=thinking, effort=effort, off=off)
         if extra.get("json_object") and self.endpoint.kind in DEEPSEEK_SHAPED:
             # A caller that parses the answer as JSON itself asks for it here. DeepSeek-shaped endpoints
             # otherwise scatter stray characters inside the object ('{"ops":#…') even on a trivial
@@ -1055,8 +1059,9 @@ class OpenAICompatibleProvider(ILLMProvider):
         return _remembering(load), inline
 
     def _apply_thinking(self, body: dict[str, Any], *, thinking: bool, effort: str, off: bool = False) -> None:
-        """``off`` is a caller that must not think at all (a helper's short call), which for the key proxy's
-        Claude routes is a word of its own: sending no effort leaves a current Claude model thinking."""
+        """``off`` is a caller that must not think at all (a helper's short call, or a run set to no thinking),
+        which for the key proxy's Claude routes is a word of its own: sending no effort leaves a current Claude
+        model thinking."""
         kind = self.endpoint.kind
         if kind == "llamacpp":
             # The loaded chat template reads these as jinja variables. Sending nothing leaves the
