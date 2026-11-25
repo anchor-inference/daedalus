@@ -42,6 +42,20 @@ export function stillAtEnd({ pinned, gap, top, lastTop, hand }: { pinned: boolea
   return pinned && !hand && top >= lastTop - 1;
 }
 
+/** The height every unmeasured item is reckoned at: the average of those measured so far, except
+ *  that it stays where it was while the reader has a finger or a wheel on the list.
+ *
+ *  A jump of a few screens renders items nobody has seen, and measuring them moves the average;
+ *  with a hundred items still unmeasured above the reader a change of forty pixels each moves the
+ *  reader's place by thousands. The list holds their place by adding to `scrollTop`, which it must
+ *  not do under a hand, so a reader a few screens from the end had the list shrink beneath them
+ *  until the browser clamped them to the end, and the pin took it from there. Held, the spacers
+ *  keep their size for as long as the reader drives; the next layout after they let go takes the
+ *  new average with the reader's item held in place. */
+export function heldGuess(live: number, previous: number | null, hand: boolean): number {
+  return hand && previous !== null ? previous : live;
+}
+
 /** The keys that scroll a list, which the reader drives it with as they would with a wheel. */
 export const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
@@ -109,7 +123,10 @@ export type WindowedProps = {
   estimate?: number;
   /** How much above and below the viewport is rendered anyway, in pixels. */
   overscan?: number;
-  /** The gap the list's own layout puts between items, so the spacers land where the items would. */
+  /** The gap the list's own layout puts between items until it has been read off the page, so the
+   *  spacers land where the items would. Read from the page once there are items: a stylesheet that
+   *  changed the gap while this stayed behind made every spacer short by the difference for each item
+   *  above it, and a window whose edge item was in the list or out of it by turns, a frame each. */
   gap?: number;
   threshold?: number;
   /** True while the screen is pinned to the bottom: the anchor must not fight the pin. */
@@ -122,8 +139,11 @@ export type WindowedProps = {
   handle?: { current: WindowedHandle | null };
 };
 
-export function Windowed({ keys, render, scroller, estimate = 260, overscan = 900, gap = 14, threshold = 60, pinned, dragging, onTop, handle }: WindowedProps) {
+export function Windowed({ keys, render, scroller, estimate = 260, overscan = 900, gap: assumedGap = 14, threshold = 60, pinned, dragging, onTop, handle }: WindowedProps) {
   const sizes = useRef(new Map<string, number>());
+  /** The gap the list's container really puts between its children, once an item has been laid out. */
+  const laidGap = useRef<number | null>(null);
+  const gap = laidGap.current ?? assumedGap;
   /** The width every stored height was measured at: at another width they describe nothing. */
   const width = useRef(0);
   /** The item the reader is looking at and how far below the top of the screen it starts, so it can be
@@ -135,6 +155,8 @@ export function Windowed({ keys, render, scroller, estimate = 260, overscan = 90
    *  guessed at. Not what they measure now: a turn whose steps the reader opened says nothing about
    *  the turns nobody has seen, and counting it moved the spacer above the reader on every click. */
   const firstSeen = useRef({ sum: 0, count: 0 });
+  /** The height an unmeasured item is reckoned at, as it was last allowed to change; see `heldGuess`. */
+  const guessed = useRef<number | null>(null);
   const [, bump] = useState(0);
   const [range, setRange] = useState({ start: 0, end: keys.length });
   const windowed = keys.length > threshold;
@@ -144,7 +166,9 @@ export function Windowed({ keys, render, scroller, estimate = 260, overscan = 90
   // grow under the reader as they scroll into it.
   const offsets = useRef<number[]>([]);
   if (windowed) {
-    const guess = firstSeen.current.count ? firstSeen.current.sum / firstSeen.current.count : estimate;
+    const live = firstSeen.current.count ? firstSeen.current.sum / firstSeen.current.count : estimate;
+    guessed.current = heldGuess(live, guessed.current, !!dragging?.());
+    const guess = guessed.current;
     const out = new Array<number>(keys.length + 1);
     out[0] = 0;
     for (let i = 0; i < keys.length; i++) out[i + 1] = out[i] + (sizes.current.get(keys[i]) ?? guess) + gap;
@@ -211,6 +235,12 @@ export function Windowed({ keys, render, scroller, estimate = 260, overscan = 90
     }
     if (w) width.current = w;
     let dirty = false;
+    const container = host.querySelector<HTMLElement>("[data-slot]")?.parentElement;
+    const rowGap = container ? Number.parseFloat(getComputedStyle(container).rowGap) : Number.NaN;
+    if (Number.isFinite(rowGap) && rowGap !== laidGap.current) {
+      laidGap.current = rowGap;
+      dirty = true;
+    }
     for (const slot of host.querySelectorAll<HTMLElement>("[data-slot]")) {
       const key = slot.dataset.slot!;
       const h = slot.offsetHeight;

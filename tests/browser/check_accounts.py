@@ -27,6 +27,7 @@ from playwright.sync_api import expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -118,7 +119,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     dialog = page.locator(".sheet-backdrop.confirm .dialog")
     expect(dialog).to_be_visible()
     dialog.locator("button").last.click()
-    page.wait_for_timeout(400)
+    until(page, lambda: ("DELETE", "subscription-accounts/claude/k3v9q2ma", {}) in sent)
     if ("DELETE", "subscription-accounts/claude/k3v9q2ma", {}) not in sent:
         problems.append(f"{lang} {width}: Remove sent {sent[2:]}")
     context.close()

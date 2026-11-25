@@ -144,6 +144,47 @@ SHOTS = {
 # ---- the launcher ------------------------------------------------------------------------------
 
 
+# The build downloads the launcher's Go modules into a container that is thrown away afterwards, so it
+# needs the module proxy every time it runs. Long enough for a cold download on a slow line.
+BUILD_TIMEOUT_S = 900
+MODULE_PROXY = ("proxy.golang.org", 443)
+
+
+def cannot_build() -> str | None:
+    """Why the launcher cannot be built on this machine now, or None when it can.
+
+    A check that builds it runs a container and downloads from the network. Without Docker, with a
+    Docker that does not answer, or with no way to the module proxy, that build hangs or fails for the
+    machine's sake and says nothing of the launcher; naming the reason lets the check skip. A binary
+    named by LAUNCHER needs none of this and is never asked about.
+    """
+    if shutil.which("docker") is None:
+        return "docker is not installed, and the launcher is built in a container (set LAUNCHER to a built binary)"
+    try:
+        subprocess.run(["docker", "info"], check=True, capture_output=True, timeout=20)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return "docker does not answer, and the launcher is built in a container (set LAUNCHER to a built binary)"
+    try:
+        socket.create_connection(MODULE_PROXY, timeout=5).close()
+    except OSError:
+        return f"{MODULE_PROXY[0]} cannot be reached, and the build downloads the launcher's modules (set LAUNCHER to a built binary)"
+    return None
+
+
+def binary_or_none() -> Path | None:
+    """The launcher binary a check drives, or None after saying why it cannot be had.
+
+    Only the machine's means are a reason to skip: a build that was possible and failed, or ran past
+    its limit, raises, and so fails the check.
+    """
+    if os.environ.get("LAUNCHER"):
+        return build()
+    if reason := cannot_build():
+        print(f"skipped: {reason}")
+        return None
+    return build()
+
+
 def build() -> Path:
     """The binary these pictures are of: the shipped variant, built the way build.sh builds it."""
     if named := os.environ.get("LAUNCHER"):
@@ -163,6 +204,7 @@ def build() -> Path:
             "go", "build", "-tags", "nowebview", "-trimpath", "-o", "/out/daedalus-desktop", ".",
         ],
         check=True,
+        timeout=BUILD_TIMEOUT_S,
     )
     return out
 

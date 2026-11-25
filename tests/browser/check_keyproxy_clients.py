@@ -28,6 +28,7 @@ from playwright.sync_api import expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -87,7 +88,7 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     if posted != ["keyproxy/clients/claude/update"]:
         problems.append(f"{lang} {width}: Update posted {posted}")
     section.locator('[data-action="check"]').click()
-    page.wait_for_timeout(300)
+    until(page, lambda: posted[-1:] == ["keyproxy/clients/check"])
     if posted[-1:] != ["keyproxy/clients/check"]:
         problems.append(f"{lang} {width}: Check now posted {posted}")
     context.close()

@@ -78,7 +78,10 @@ function sameRow(xterm: string[], ghostty: string[]): boolean {
 
 describe("the Ghostty unicode provider", () => {
   for (const entry of (fixture as { cases: Case[] }).cases) {
-    it(`lays out "${entry.name}" as libghostty-vt does`, async () => {
+    // Every write waits for the terminal's callback, one turn of the event loop each, and the bytewise
+    // case writes over a thousand of them; a busy machine makes every turn long. The allowance grows
+    // with the number of writes rather than being one number for all.
+    it(`lays out "${entry.name}" as libghostty-vt does`, { timeout: 30_000 + 100 * entry.writes.length }, async () => {
       const term = terminal(entry.cols, entry.rows);
       await feed(term, entry.writes.map(bytes));
       const got = grid(term);

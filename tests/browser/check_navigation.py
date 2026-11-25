@@ -28,6 +28,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, SAMPLE_PAGE, expect_app  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -137,7 +138,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
 
     # Board dragged into Hidden.
     page.locator("[data-nav-row='board']").drag_to(page.locator("[data-nav-list='hidden'] .set-label"))
-    page.wait_for_timeout(600)
+    until(page, lambda: "board" in host.settings["navigation"]["hidden"])
     if "board" not in host.settings["navigation"]["hidden"]:
         say(f"dragging Board into Hidden left {host.settings['navigation']}")
     expect(page.locator("[data-nav-row='board']")).to_have_attribute("data-place", "hidden")

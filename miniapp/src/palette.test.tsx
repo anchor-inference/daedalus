@@ -26,6 +26,10 @@ const ITEMS: PaletteItem[] = [
 ];
 
 beforeEach(() => {
+  // The palette waits for the typing to pause before it asks the host. On the clock's own time that is
+  // a quarter of a second of waiting in every test, and under load a test long enough to be cut off;
+  // on a fake one the pause is stepped over, and what it does at the end of it is the same.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   setLang("en");
   run.mockReset();
   beside.mockReset();
@@ -40,13 +44,14 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 /** The host's search answer: the chats it found, by words and by meaning. */
 const answer = (sessions: object[]) => new Response(JSON.stringify({ sessions, projects: [], semantic: true }), { status: 200 });
 const QUARTERLY = { id: "s-9", title: "Quarterly summary", project: "Ops", status: "idle", last_message_at: new Date().toISOString(), metadata: {}, match: { score: 1, snippet: "the sales figures" } };
 
-const settle = (ms = 40) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+const settle = (ms = 40) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 const field = () => document.querySelector<HTMLInputElement>(".palette-sheet .combo-input")!;
 const rows = () => [...document.querySelectorAll(".palette-row")].map((row) => row.querySelector(".palette-title")?.textContent);
 const labels = () => [...document.querySelectorAll(".palette-box .combo-group-label")].map((el) => el.firstChild?.textContent);
@@ -65,7 +70,9 @@ async function open(initialQuery = "") {
   await settle();
 }
 
-describe("the groups", () => {
+// Each test draws the palette and its combobox in jsdom, the first one with the start-up of React and
+// jsdom besides, which a busy machine stretches past the default five seconds.
+describe("the groups", { timeout: 30_000 }, () => {
   it("draws the chats, actions and places a visit starts from, each under its label", async () => {
     await open();
     expect(labels()).toEqual(["Chats", "Actions", "Go to"]);
@@ -99,7 +106,7 @@ describe("the groups", () => {
   });
 });
 
-describe("the host's search by meaning", () => {
+describe("the host's search by meaning", { timeout: 30_000 }, () => {
   it("adds a chat whose name does not hold the words, after the ones whose names do", async () => {
     vi.mocked(fetch).mockImplementation(async () => answer([QUARTERLY]));
     await open();
@@ -122,7 +129,7 @@ describe("the host's search by meaning", () => {
   });
 });
 
-describe("opening a row", () => {
+describe("opening a row", { timeout: 30_000 }, () => {
   it("opens the highlighted row on Enter and closes", async () => {
     await open();
     await type("changes");

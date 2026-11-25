@@ -47,7 +47,9 @@ def run() -> int:
         expect(page.locator(".task-list")).to_be_visible(timeout=20000)
 
         assert page.locator(".jobs .task-list").count() == 1, "one jobs list"
-        assert page.get_by_text("Background jobs").count() == 0, "no second list"
+        # The one list carries its own heading; a second place that says it would be a second list.
+        assert page.get_by_text("Background jobs").count() == 1, "no second list"
+        expect(page.locator(".jobs .task-list .dt-label").first).to_contain_text("Background jobs")
         assert page.locator(".task-row").count() == 6, page.locator(".task-row").count()
         expect(page.locator(".task-list .dt-aside")).to_have_text("3 running · 6")
         expect(page.locator(".task-flag")).to_have_text("possibly stuck")

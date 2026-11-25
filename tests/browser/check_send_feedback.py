@@ -15,6 +15,7 @@ from playwright.sync_api import expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", shots.BASE)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -35,14 +36,14 @@ def run() -> None:
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"scopes": [{"kind": "chat", "id": shots.S1, "name": "Chat"}], "items": [item]}))
         if path == f"/api/sessions/{shots.S1}/messages" and request.method == "POST":
             sent.append({"text": request.post_data_json["text"], "id": request.post_data_json["client_message_id"]})
-            return route.fulfill(status=200, content_type="application/json", body='{"run_id":"slow-run"}')
+            return route.fulfill(status=200, content_type="application/json", body='{"run_id":"slow-run","receipt":{"status":"consumed"}}')
         if path == f"/api/sessions/{shots.S1}/upload" and request.method == "POST":
             raw = request.post_data_buffer.decode("utf-8")
             def field(name: str) -> str:
                 return raw.split(f'name="{name}"', 1)[1].split("\r\n\r\n", 1)[1].split("\r\n", 1)[0]
             sent.append({"text": field("text") + "\n\nAttached files:\n- /data/workspaces/s1/inbox/sample.txt (text/plain, 7 bytes)", "id": field("client_message_id"), "upload": "yes",
                          "attachments": [{"name": "sample.txt", "mime": "text/plain", "size": 7, "file": "sample.txt"}]})
-            return route.fulfill(status=200, content_type="application/json", body='{"run_id":"upload-run"}')
+            return route.fulfill(status=200, content_type="application/json", body='{"run_id":"upload-run","receipt":{"status":"consumed"}}')
         if path == f"/api/sessions/{shots.S1}" and request.method == "GET":
             page = deepcopy(shots.detail(shots.S1))
             for index, item in enumerate(sent):
@@ -70,7 +71,8 @@ def run() -> None:
         expect(page.locator(".timeline .msg.user").last).to_contain_text(WORDS, timeout=1000)
         expect(page.locator(".timeline .msg.user").last).to_be_in_viewport(timeout=1000)
         assert not sent, "the temporary bubble should precede the delayed request"
-        page.wait_for_timeout(4600)
+        # The page holds the request back for four seconds on purpose, and the host's answer follows it.
+        until(page, lambda: bool(sent), bound_ms=30_000)
         assert len(sent) == 1 and sent[0]["text"] == WORDS
         expect(page.locator(".timeline .msg.user").filter(has_text=WORDS)).to_have_count(1, timeout=8000)
         page.locator('.composer input[type="file"]').first.set_input_files({"name": "sample.txt", "mimeType": "text/plain", "buffer": b"example"})
@@ -84,8 +86,13 @@ def run() -> None:
         expect(page.locator(".timeline .msg.user").filter(has_text="Attached files")).to_have_count(0)
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        if page.get_by_role("dialog", name="Project files panel").is_visible():
+        # The panel that was open beside the chat on a desktop is a full sheet over it on a phone. It
+        # comes with the phone's bar, in the same render, so the bar is waited for before looking.
+        expect(page.locator(".ph-chat-top")).to_be_visible()
+        panel = page.get_by_role("dialog", name="Chat panel")
+        if panel.is_visible():
             page.keyboard.press("Escape")
+            expect(panel).to_have_count(0)
         # A phone keeps the chat's canvases as a counted tile of the bar's ⋮ sheet.
         page.locator(".ph-chat-top button[aria-haspopup='menu']").first.click()
         tile = page.locator(".ph-session-menu [data-tile='canvas']")

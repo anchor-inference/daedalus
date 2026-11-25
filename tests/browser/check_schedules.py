@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from schedule_stub import ScheduleStub  # noqa: E402
 from screenshots import S1, S4, UNHANDLED, ago, detail, respond, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -138,13 +139,13 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     shot(page, "schedules-detail")
 
     page.get_by_role("switch", name=WORDS["enabled"]).click()
-    page.wait_for_timeout(400)
+    until(page, lambda: any(w[0] == "PATCH" for w in host.writes))
     patches = [w for w in host.writes if w[0] == "PATCH"]
     if not patches or patches[0][2].get("enabled") is not False or patches[0][2].get("expected_collection_revision") != 9:
         problems.append(f"The switch did not post the revision shown: {patches}")
 
     page.locator(f".schedrow[data-schedule='{RESET}'] button", has_text=WORDS["approve"]).click()
-    page.wait_for_timeout(500)
+    until(page, lambda: any(w[1].endswith("/accept") for w in host.writes))
     accepts = [w for w in host.writes if w[1].endswith("/accept")]
     if not accepts:
         problems.append("Approve in the proposal's row did not post")

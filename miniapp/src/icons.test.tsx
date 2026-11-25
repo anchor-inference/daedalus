@@ -43,7 +43,10 @@ const shapes = (svg: string): Shape[] => Array.from(new DOMParser().parseFromStr
 const expected = (glyph: Node[]): Shape[] => glyph.map(([tag, attrs]) => [tag, Object.entries(attrs).sort(byName)]);
 
 describe("the set", () => {
-  it("keeps all 131 names, each drawn by the glyph the mapping names", () => {
+  // Each of the 131 names is drawn and parsed back by jsdom's DOMParser, and the three loops below do
+  // that again and again: about a tenth of a second on an idle machine, over the default five seconds
+  // on a busy one.
+  it("keeps all 131 names, each drawn by the glyph the mapping names", { timeout: 30_000 }, () => {
     expect(ICON_NAMES.length).toBe(131);
     expect(new Set(ICON_NAMES)).toEqual(new Set([...Object.keys(GLYPHS), "logo"]));
     for (const [name, exportName] of Object.entries(GLYPHS)) {
@@ -61,7 +64,7 @@ describe("the set", () => {
     expect(isIconName(null)).toBe(false);
   });
 
-  it("draws every name, in the one stroke, and the logo with its own path", () => {
+  it("draws every name, in the one stroke, and the logo with its own path", { timeout: 30_000 }, () => {
     for (const name of ICON_NAMES) {
       const svg = iconSvg(name);
       expect(shapes(svg).length, name).toBeGreaterThan(0);
@@ -94,7 +97,7 @@ describe("sizes", () => {
 });
 
 describe("the component and the string renderer", () => {
-  it("draw the same shapes for every name", () => {
+  it("draw the same shapes for every name", { timeout: 30_000 }, () => {
     for (const name of ICON_NAMES) {
       const component = renderToStaticMarkup(<Icon name={name} size={20} />);
       expect(shapes(component), name).toEqual(shapes(iconSvg(name, 20)));

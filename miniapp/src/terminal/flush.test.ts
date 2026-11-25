@@ -10,6 +10,12 @@ import { describe, expect, it } from "vitest";
 import { flushOnlyUnparsed } from "./flush";
 
 const LINES_PER_CHUNK = 900;
+// Each test parses this many chunks of about 64 KiB, several megabytes through a real parser: the
+// work is the test, and it is slower for as long as the machine is busy. Enough chunks that the
+// resize lands inside a sliced parse many times; no more than that.
+const CHUNKS = 20;
+// Generous for that work, not for a hang: a stuck flush is told by its callbacks, not by this limit.
+const PARSE_TIMEOUT = 60_000;
 
 function chunk(c: number): string {
   let s = "";
@@ -60,17 +66,17 @@ async function floodWhileResizing(term: Headless, chunks: number): Promise<numbe
 }
 
 describe("a resize during a sliced parse", () => {
-  it("parses every chunk once and calls its callback once", async () => {
+  it("parses every chunk once and calls its callback once", { timeout: PARSE_TIMEOUT }, async () => {
     const term = terminal(true);
-    const chunks = 60;
+    const chunks = CHUNKS;
     expect(await floodWhileResizing(term, chunks)).toBe(chunks);
     expect(numbered(term)).toEqual({ count: chunks * LINES_PER_CHUNK, breaks: 0 });
     term.dispose();
   });
 
-  it("is what stock xterm.js gets wrong, so the test has teeth", async () => {
+  it("is what stock xterm.js gets wrong, so the test has teeth", { timeout: PARSE_TIMEOUT }, async () => {
     const term = terminal(false);
-    const chunks = 60;
+    const chunks = CHUNKS;
     const callbacks = await floodWhileResizing(term, chunks);
     const lines = numbered(term);
     expect(callbacks).toBeGreaterThan(chunks);
@@ -100,11 +106,11 @@ describe("a resize from inside a write callback", () => {
     return { callbacks, lines };
   }
 
-  it("does not parse the chunk whose callback asked for it again", async () => {
+  it("does not parse the chunk whose callback asked for it again", { timeout: PARSE_TIMEOUT }, async () => {
     expect(await resizeInCallback(true)).toEqual({ callbacks: 3, lines: { count: 3 * LINES_PER_CHUNK, breaks: 0 } });
   });
 
-  it("which stock xterm.js does", async () => {
+  it("which stock xterm.js does", { timeout: PARSE_TIMEOUT }, async () => {
     const stock = await resizeInCallback(false);
     expect(stock.callbacks).toBeGreaterThan(3);
   });

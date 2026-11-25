@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from memory_stub import MemoryStub  # noqa: E402
 from screenshots import MEMORY_PROJECTS, MEMORY_RECORDS, MEMORY_SUGGESTIONS, SETTINGS, UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -165,7 +166,7 @@ def check_settings(browser, width: int, lang: str, problems: list[str]) -> None:
     if page.locator(".memory-settings [data-subject]").count() != 5:
         problems.append(f"{where}: not five sensitive topics")
     page.locator('.memory-settings [data-subject="health"] [role=switch]').click()
-    page.wait_for_timeout(500)
+    until(page, lambda: bool(saved) and (saved[-1].get("memory") or {}).get("sensitive_allowed") == ["health"])
     sent = (saved[-1].get("memory") or {}) if saved else {}
     if sent.get("sensitive_allowed") != ["health"] or sent.get("consolidate") is not True:
         problems.append(f"{where}: switching health on saved {sent}")
