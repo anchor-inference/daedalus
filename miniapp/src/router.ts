@@ -10,8 +10,8 @@ export const BASE = "/app";
 export type Screen = "agents" | "companion" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "canvas" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page" | "primitives";
 
 export const SCREENS: Screen[] = ["agents", "companion", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "canvas", "services", "memory", "usage", "health", "settings"];
-/** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
- *  (its tab on a phone) goes there, and so does everything that belongs to it. The primitives page
+/** Orchestration is a mode of its own rather than a destination of the menu: the sidebar's mode
+ *  menu (the drawer's on a phone) goes there, and so does everything that belongs to it. The primitives page
  *  is reached by its address only: it shows the parts the screens are drawn from. */
 const INNER: Screen[] = ["orchestration", "browser", "primitives"];
 

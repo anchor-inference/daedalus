@@ -1,5 +1,5 @@
 // The navigation as the shell draws it: the server's `[navigation]` section and the published pages,
-// read once for the rail, the menus, the drawer and the palette alike.
+// read once for the sidebar, the menus, the drawer and the palette alike.
 
 import { useMemo } from "react";
 import type { SelfDevMode } from "./capabilities";

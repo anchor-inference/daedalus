@@ -505,7 +505,7 @@ class Companion:
         before it starts. So it is written before every turn — the voice preset for a spoken one, the
         background preset for everything else — and only when it differs from what is there.
 
-        It also decides the argument: Settings → Companion is where this conversation's models are
+        It also decides the argument: Settings → Voice mode is where this conversation's models are
         chosen, so a model put on the companion session from the session screen does not outlive the
         next turn. One setting, in the place the operator went looking for it.
         """

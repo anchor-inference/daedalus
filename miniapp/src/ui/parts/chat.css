@@ -1,7 +1,7 @@
 /* ── chat: a flat timeline over a fixed composer ─────────────────────────────────────── */
 .chat { --chat-bg:var(--bg); display:flex; flex-direction:column; height:100%; min-height:0; overflow:hidden; background:var(--chat-bg); }
 /* On a desktop the conversation lies on the page, like every other screen's content, and the frame's
-   colour is the sidebar's and the rail's. Painted with the frame it was a grey slab between them, and
+   colour is the sidebar's. Painted with the frame it was a grey slab between them, and
    the composer's card sat darker than the page it is meant to lie on. Only the chat that fills the
    main column: a pane of the dual view, the coach's window and a panel's chat keep their own ground. */
 @media (min-width: 1024px) { .main > .chat { --chat-bg:var(--wash, var(--bg)); } }

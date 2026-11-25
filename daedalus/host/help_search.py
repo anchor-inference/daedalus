@@ -3,7 +3,7 @@
 The agent used to search the documentation by requiring every word of the question to appear in a
 page. Asked "Как мне включить STT?" it found nothing in English prose, searched again, and sent the
 operator to the voice page — the concierge — when speech recognition for the chat lives in
-Settings → Voice & speech. Two things were missing: a description of the settings themselves, and a
+Settings → Voice input. Two things were missing: a description of the settings themselves, and a
 search that ranks instead of filtering.
 
 The settings index is ``miniapp/src/screens/settings-index.json``, beside the Settings screen that

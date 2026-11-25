@@ -672,7 +672,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   // The chip on an agent that has stopped and is waiting on somebody, and the things the microphone
   // and the two listening transports can fail with. All of them reach the page as words a reader
   // reads, so all of them are here rather than in the module that produces them.
-  // The word beside a destination in the rail: a screen that is still beta, and the one that runs
+  // The word beside a destination in the sidebar and the launcher: a screen that is still beta, and the one that runs
   // against this machine rather than against a server.
   "nav.tag.beta": { en: "beta", ru: "бета" },
   "nav.tag.local": { en: "local", ru: "локально" },

@@ -3,7 +3,7 @@
 // head, the model and the project where a chat picks them, and the rare choices (a private chat, an
 // own directory, a folder of the project, a loop, tools) under its +. A separate window used to ask
 // the same things again.
-// On a phone it is the home of the redesign: the composer at the bottom, the model in the title and
+// On a phone it is the home page: the composer at the bottom, the model in the title and
 // only the live chats above it; the full list is the Chats page (Chats.tsx), at ?view=chats.
 
 import { useEffect, useMemo, useRef, useState } from "react";
