@@ -161,7 +161,7 @@
 .goal-item.result.report_done { box-shadow: inset 2px 0 0 var(--ok); }
 .goal-item.result.report_stuck { box-shadow: inset 2px 0 0 var(--bad); }
 /* A row that opens its card says so on hover (the focus ring is the global one); a result with no card stays plain. */
-.goal-item.linked { cursor: pointer; border-radius: var(--radius-sm); }
+.goal-item.linked { cursor: pointer; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .goal-item.linked:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
 .goal-item-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .goal-title { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
@@ -319,13 +319,15 @@
 /* A row and its menu: the menu shows on the row under the pointer, the current one, or with focus in
    it, as the session rows' do; a finger has no hover, so on a touch screen it is always there. */
 .focus-term-row { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-sm); }
-.focus-term-row > .focus-row { flex: 1; min-width: 0; }
+.focus-term-row > .focus-row { flex: 1; min-width: 0; border: 0; background: none; font: inherit; font-size: var(--fs-14); text-align: left; }
+.focus-term-row > .focus-row:hover { background: var(--hover); }
+.focus-term-row > .focus-row.current { background: var(--selected); }
 .focus-term-row > .term-row-menu { flex: none; opacity: 0; }
 .focus-term-row:hover > .term-row-menu, .focus-term-row.current > .term-row-menu, .focus-term-row > .term-row-menu:focus-within, .focus-term-row > .term-row-menu:has([aria-expanded="true"]) { opacity: 1; }
 @media (pointer: coarse) { .focus-term-row > .term-row-menu { opacity: 1; } }
 .focus-terminal-view { position: relative; min-height: 50vh; display: flex; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--term-bg); }
 @media (min-width: 1024px) {
-  .focus-terminals { grid-template-rows: none; grid-template-columns: 240px minmax(0, 1fr); }
+  .focus-terminals { grid-template-rows: none; grid-template-columns: 280px minmax(0, 1fr); }
   .main:has(.focus-terminals) { overflow: hidden; }
 }
 
@@ -510,3 +512,10 @@
 
 /* Spend where the work is: words under the project's name, a line in each team row, the totals over the journal. */
 .staff-spend { color: var(--fg-2); }
+/* On a desktop's Needs decision page the answers are the Inbox's buttons: a row of 32 px buttons at
+   their own width, the first one primary, not a phone's full-width touch targets. */
+@media (min-width: 1024px) {
+  .focus-attention .ask-answers { margin-top: 6px; }
+  .focus-attention .ask-answers-row .btn, .focus-attention .ask-answers-own .btn { flex: none; min-height: var(--ctl-h); }
+  .focus-attention .ask-answers-own .field { min-height: var(--ctl-h); }
+}
