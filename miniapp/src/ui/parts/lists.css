@@ -265,11 +265,13 @@
 .access-option .sub { display: block; margin-top: 2px; line-height: 1.4; }
 /* A label over a field or a row of controls: the settings' small heading, not a form's bold one. */
 .link-label { display: block; margin: 16px 0 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-/* A tick, drawn as the radio is: a 16 px box that fills violet with a white mark when ticked. */
-input.check { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent center / 12px no-repeat; cursor: pointer; transition: background-color var(--t-fast), border-color var(--t-fast); }
-input.check:checked { border-color: var(--primary); background-color: var(--primary); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E"); }
-input.check:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-input.check:disabled { opacity: .5; cursor: default; }
+/* A tick, drawn as the radio is: a 16 px box that fills violet with a white mark when ticked. Every
+   checkbox of the app is drawn so, not only those that asked for it by a class: the browser's own box
+   (blue in one browser, grey in another, a size of its own) was left on a dozen screens. */
+input[type="checkbox"] { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1.5px solid var(--line-strong); border-radius: var(--radius-xs); background: transparent center / 12px no-repeat; cursor: pointer; transition: background-color var(--t-fast), border-color var(--t-fast); }
+input[type="checkbox"]:checked { border-color: var(--primary); background-color: var(--primary); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E"); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+input[type="checkbox"]:disabled { opacity: .5; cursor: default; }
 .preview-line { margin-top: 10px; padding: 8px 10px; background: var(--inset); box-shadow: var(--shadow-ring); border-radius: var(--radius-sm); color: var(--fg-2); }
 .kind.muted { color: var(--fg-3); }
 

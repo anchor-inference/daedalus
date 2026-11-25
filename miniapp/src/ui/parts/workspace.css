@@ -301,7 +301,6 @@
 .toolgroup { margin-bottom: 8px; }
 .toolrow { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); align-items: center; gap: 8px; padding: 4px 0; min-height: var(--row-h); font-size: var(--fs-14); cursor: pointer; }
 .toolrow.head { font-weight: 500; border-bottom: 1px solid var(--line); }
-.toolrow input { width: 16px; height: 16px; margin: 0; accent-color: var(--fg); }
 .toolrow .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* tool groups: the installation's modes in Settings → Tools, and one session's in its Details */
@@ -349,7 +348,6 @@
 .badge.loop.paused { color: var(--warn); }
 .badge.loop.stopped, .badge.loop.done { color: var(--fg-3); }
 .toggle-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; font-size: var(--fs-14); cursor: pointer; min-height: var(--row-h); }
-.toggle-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--fg); }
 .toggle-row .sub { flex: 1; min-width: 0; }
 .loop-form { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 12px 10px; margin-bottom: 8px; }
 .loop-form select.field, .loop-panel select.field { flex: 1; min-width: 140px; }

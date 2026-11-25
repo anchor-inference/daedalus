@@ -255,7 +255,7 @@ input.field.cal-bedit-title { flex: 1 1 120px; min-width: 0; width: auto; paddin
 .cal-bedit-item.fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 76px auto; }
 .cal-bedit-item.add { grid-template-columns: 22px minmax(0, 1fr); color: var(--fg-3); }
 .cal-bedit-item.add > .ic { justify-self: center; }
-.cal-bedit-item input[type="checkbox"], .cal-bedit-row input[type="checkbox"] { width: 18px; height: 18px; justify-self: center; accent-color: var(--primary); }
+.cal-bedit-item input[type="checkbox"], .cal-bedit-row input[type="checkbox"] { justify-self: center; }
 .cal-bedit-n { justify-self: center; font-size: var(--fs-12); font-weight: 600; color: var(--fg-3); font-variant-numeric: tabular-nums; }
 input.field.cal-bedit-min { width: 100%; }
 .cal-bedit-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }

@@ -314,10 +314,6 @@
 /* The first thing a new project shows: centred in the free height, not pinned under the header with
    the rest of a desktop screen left empty below it, which read as a page that had not finished. */
 .focus-enable { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; min-height: 0; padding-bottom: 8vh; }
-.autonomy-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); cursor: pointer; }
-.autonomy-option.on { border-color: var(--fg); }
-.autonomy-option input { margin-top: 3px; }
-.autonomy-text { display: grid; gap: 2px; min-width: 0; }
 .form-hint { margin: 4px 0 2px; font-size: var(--fs-12); }
 .focus-cost { margin: 12px 0 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--fg); font-size: var(--fs-13); line-height: var(--lh-ui); }
 
