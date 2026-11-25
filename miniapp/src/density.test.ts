@@ -157,7 +157,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   // the tinted copy under the field must match it letter for letter.
   ".ne-title", ".ne-field", ".ne-tint",
   // The open Inbox entry reads as prose at the answer's size, and its title is a pane's heading.
-  ".inbox-prose", ".inbox-pane-title"];
+  ".inbox-prose", ".inbox-pane-title",
+  // A board card's pane is a pane: its title is a pane's heading (18/500) and its description prose.
+  ".task-pane-title", ".task-prose"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -181,6 +183,10 @@ const BOX_ALLOWED = [
   // The open Inbox entry is a page of its own beside the list: the room above its first line and
   // below its last is the room a page has.
   ".inbox-pane",
+  // The board's bar of filters is a bar under the page header, as tall as the bar it holds chips in
+  // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
+  // pane's buttons with the room a dialog's foot has (64).
+  ".board-filters", ".task-pane-head", ".task-pane-foot",
 ];
 
 /** The height a box is given outright, in px, or 0 where it is a token, a calc or a proportion. */
