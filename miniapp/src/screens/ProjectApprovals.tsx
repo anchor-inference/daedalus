@@ -4,7 +4,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type Project } from "../api";
-import { Icon } from "../icons";
+import { Button } from "../ui/primitives";
+import { Row, SetBlock, SetGroup } from "../settingsrow";
 import { t } from "../i18n";
 import { errorText } from "../ui";
 import { shortDateTime } from "../format";
@@ -36,31 +37,23 @@ export function ProjectApprovals({ toast }: { toast: (text: string) => void }) {
   };
   const held = own.filter((p) => (rules[p.id] ?? []).length > 0);
   return (
-    <div className="card project-approvals" data-setting="approvals.project">
-      <div className="section-title">{t("approvals.project.title")}</div>
-      <div className="sub">{t("approvals.project.sub")}</div>
+    <SetGroup title={t("approvals.project.title")} help={t("approvals.project.sub")} className="project-approvals" data-setting="approvals.project">
       {held.length === 0 ? (
-        <p className="sub project-approvals-none">{t("approvals.project.none")}</p>
+        <SetBlock><span className="set-hint project-approvals-none">{t("approvals.project.none")}</span></SetBlock>
       ) : (
         held.map((project) => (
           <div key={project.id} className="project-approvals-group" data-project={project.id}>
-            <div className="settings-subhead">{project.name}</div>
+            <div className="project-approvals-name">{project.name}</div>
             {(rules[project.id] ?? []).map((rule) => (
-              <div key={rule.id} className="settings-row project-approval" data-rule={rule.id}>
-                <div className="settings-row-text">
-                  <div className="settings-row-title"><span className="mono">{rule.label}</span></div>
-                  <div className="settings-row-desc">{t("approvals.project.since", { tool: rule.tool, when: shortDateTime(rule.created_at) })}</div>
-                </div>
-                <div className="settings-row-ctl">
-                  <button type="button" className="btn small" onClick={() => void revoke(project.id, rule.id)}>
-                    <Icon name="close" size={14} /> {t("approvals.project.revoke")}
-                  </button>
-                </div>
-              </div>
+              <Row key={rule.id} className="project-approval" data-rule={rule.id}
+                title={<span className="mono">{rule.label}</span>}
+                desc={t("approvals.project.since", { tool: rule.tool, when: shortDateTime(rule.created_at) })}>
+                <Button size="sm" icon="close" onClick={() => void revoke(project.id, rule.id)}>{t("approvals.project.revoke")}</Button>
+              </Row>
             ))}
           </div>
         ))
       )}
-    </div>
+    </SetGroup>
   );
 }

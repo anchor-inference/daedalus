@@ -8,10 +8,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type AutopilotOverview, type Settings, type UserStyle } from "../api";
 import { plural, t } from "../i18n";
-import { NumRow, Row } from "../settingsrow";
-import { ModelPicker } from "../modelitems";
-import { Switch } from "../ui/index";
-import { confirmAsync, errorText } from "../ui";
+import { NumRow, Row, SetBlock, SetGroup } from "../settingsrow";
+import { ModelChoice } from "../modelchoice";
+import { Button, Switch, confirmDialog } from "../ui/primitives";
+import { errorText } from "../ui";
 import { timeAgo } from "../ui/components";
 import { usd } from "../format";
 
@@ -26,13 +26,12 @@ export function AutopilotSettings({ s, save }: SaveProps) {
   }, [pilot.enabled, pilot.usd_per_day]);
   const verdicts = overview?.verdicts_today ?? {};
   return (
-    <div className="card" data-section="autopilot">
-      <div className="section-title">{t("settings.autopilot")}</div>
+    <SetGroup title={t("settings.autopilot")} data-section="autopilot">
       <Row title={t("settings.autopilot.enabled")} desc={t("settings.autopilot.enabled.sub")} data-setting="autopilot.enabled">
         <Switch checked={pilot.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.autopilot.enabled")} />
       </Row>
       <Row title={t("settings.autopilot.preset")} desc={t("settings.autopilot.preset.sub")} stack data-setting="autopilot.preset">
-        <ModelPicker id="autopilot-preset" label={t("settings.autopilot.preset")} catalogue={s} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
+        <ModelChoice id="autopilot-preset" label={t("settings.autopilot.preset")} catalogue={s} value={pilot.preset ?? ""} onChange={(preset) => put({ preset })}
           defaultOption={{ label: t("settings.autopilot.preset.same") }} />
       </Row>
       <NumRow id="autopilot-turns" setting="autopilot.max_continuations" title={t("settings.autopilot.turns")} desc={t("settings.autopilot.turns.sub")}
@@ -40,22 +39,24 @@ export function AutopilotSettings({ s, save }: SaveProps) {
       <NumRow id="autopilot-usd" setting="autopilot.usd_per_day" title={t("settings.autopilot.usd")} desc={t("settings.autopilot.usd.sub")} unit="$"
         value={pilot.usd_per_day} min={0} step="0.05" onSave={(usd_per_day) => put({ usd_per_day })} />
       {overview && (
-        <div className="sub autopilot-today" data-autopilot-today>
-          {t("settings.autopilot.today", {
-            spent: usd(overview.spent_today),
-            cap: usd(overview.usd_per_day),
-            sessions: plural("settings.autopilot.sessions", overview.sessions_on),
-          })}
-          {" · "}
-          {t("settings.autopilot.verdicts", {
-            go: String(verdicts.continue ?? 0),
-            done: String(verdicts.done ?? 0),
-            asked: String((verdicts.ask ?? 0) + (verdicts.choice ?? 0)),
-            skipped: String(overview.skipped_today),
-          })}
-        </div>
+        <SetBlock data-autopilot-today="">
+          <span className="set-hint">
+            {t("settings.autopilot.today", {
+              spent: usd(overview.spent_today),
+              cap: usd(overview.usd_per_day),
+              sessions: plural("settings.autopilot.sessions", overview.sessions_on),
+            })}
+            {" · "}
+            {t("settings.autopilot.verdicts", {
+              go: String(verdicts.continue ?? 0),
+              done: String(verdicts.done ?? 0),
+              asked: String((verdicts.ask ?? 0) + (verdicts.choice ?? 0)),
+              skipped: String(overview.skipped_today),
+            })}
+          </span>
+        </SetBlock>
       )}
-    </div>
+    </SetGroup>
   );
 }
 
@@ -66,7 +67,7 @@ export function UserStyleCard({ toast }: { toast: (text: string) => void }) {
   }, []);
   useEffect(load, [load]);
   async function forget() {
-    if (!(await confirmAsync(t("settings.style.forget.confirm")))) return;
+    if (!(await confirmDialog({ title: t("settings.style.forget.confirm"), action: t("settings.style.forget"), danger: true }))) return;
     try {
       setStyle(await api.delete<UserStyle>("/api/user-style"));
     } catch (e) {
@@ -74,19 +75,21 @@ export function UserStyleCard({ toast }: { toast: (text: string) => void }) {
     }
   }
   return (
-    <div className="card" data-section="user-style">
-      <div className="section-title">{t("settings.style")}</div>
+    <SetGroup title={t("settings.style")} data-section="user-style">
       <Row title={t("settings.style.profile")} desc={t("settings.style.profile.sub")} data-setting="user_style">
-        <button type="button" className="btn" disabled={!style?.summary} onClick={() => void forget()}>{t("settings.style.forget")}</button>
+        <Button disabled={!style?.summary} onClick={() => void forget()}>{t("settings.style.forget")}</Button>
       </Row>
-      {style?.summary
-        ? <pre className="style-profile" data-style-profile>{style.summary}</pre>
-        : <div className="sub style-empty" data-style-empty>{t("settings.style.empty")}</div>}
-      {style?.summary && (
-        <div className="sub style-learned">
-          {t("settings.style.learned", { count: plural("settings.style.messages", style.learned), when: style.updated_at ? timeAgo(style.updated_at) : "" })}
-        </div>
-      )}
-    </div>
+      {/* The profile is prose the host wrote about the operator, so it is drawn as text, not as code. */}
+      <SetBlock>
+        {style?.summary
+          ? <p className="style-profile" data-style-profile>{style.summary}</p>
+          : <span className="set-hint" data-style-empty>{t("settings.style.empty")}</span>}
+        {style?.summary && (
+          <span className="set-hint style-learned">
+            {t("settings.style.learned", { count: plural("settings.style.messages", style.learned), when: style.updated_at ? timeAgo(style.updated_at) : "" })}
+          </span>
+        )}
+      </SetBlock>
+    </SetGroup>
   );
 }
