@@ -2154,7 +2154,9 @@ export type Question = {
 /** How many notifications want the operator: unseen ones worth a badge, and open requests. */
 export type NotificationSummary = { unseen: number; needs_you: number };
 
-export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean };
+/** `description` says what the button does, in the operator's language; only a producer that knows sets
+ *  it, so a button without one is drawn without one rather than with a guess. */
+export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean; description?: string };
 
 /** One entry of the notification centre, as `/api/notifications` and the `notify` event carry it. */
 export type Notification = {

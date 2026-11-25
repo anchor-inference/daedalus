@@ -1132,11 +1132,14 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         chat = params.get("session", [""])[0]
         return respond(route, [t for t in BOARD if t["origin_session_id"] == chat] if chat else BOARD)
     if rel == "/api/notifications/summary":
-        return respond(route, INBOX_SUMMARY)
+        return respond(route, {"unseen": 0, "needs_you": 0} if getattr(stub, "inbox_empty", False) else INBOX_SUMMARY)
     if rel == "/api/notifications":
+        # ``inbox_empty`` is a scene: a centre with nothing in it, for the empty state's picture.
+        if getattr(stub, "inbox_empty", False):
+            return respond(route, {"entries": [], "next_before": None, "summary": {"unseen": 0, "needs_you": 0}})
         return respond(route, {"entries": notifications_view(params.get("view", ["all"])[0]), "next_before": None, "summary": INBOX_SUMMARY})
     if rel == "/api/proposals":
-        return respond(route, PROPOSALS)
+        return respond(route, [] if getattr(stub, "inbox_empty", False) else PROPOSALS)
     if rel == "/api/proposals/p57/diff":
         return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
     if rel == "/api/schedules" or rel.startswith("/api/recurring/"):
@@ -2019,6 +2022,27 @@ def open_bell(page: Page) -> None:
     page.wait_for_selector(".bell-pop .needs-you .notice-row", timeout=5000)
 
 
+INBOX_READY = ".inbox-split, .ph-page"
+
+
+def open_inbox_entry(page: Page, notice: int) -> None:
+    """The entry's row pressed: its reading pane beside the list, with the buttons that answer it."""
+    page.locator(f".inbox-row[data-notice='{notice}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='n{notice}']", timeout=5000)
+
+
+def open_inbox_proposal(page: Page, proposal: str) -> None:
+    page.locator(f".inbox-row[data-proposal='{proposal}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='p{proposal}']", timeout=5000)
+
+
+def open_inbox_tab(page: Page, tab: str) -> None:
+    """One of the header's views: all, needs, problems or done."""
+    page.locator(f".inbox-tabs [data-tab='{tab}']").click()
+    page.wait_for_selector(f".inbox-tabs [data-tab='{tab}'].on", timeout=5000)
+    page.wait_for_timeout(300)
+
+
 def raise_toasts(page: Page) -> None:
     """Three notifications arriving while the operator reads another conversation."""
     page.wait_for_selector(".notice-toasts .notice-toast", timeout=10000)
@@ -2036,7 +2060,13 @@ def run_notifications() -> int:
         page = desk.new_page()
         page.route("**/api/**", stub)
         shot(page, "bell", "agents", before=open_bell, settle=500)
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
+        shot(page, "inbox-question", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_entry(p, QUESTION["id"]), settle=500)
+        shot(page, "inbox-proposal", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_proposal(p, PROPOSALS[0]["id"]), settle=500)
+        shot(page, "inbox-problems", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_tab(p, "problems"), settle=500)
+        stub.inbox_empty = True  # type: ignore[attr-defined]
+        shot(page, "inbox-empty", "inbox", wait=".inbox-empty", settle=500)
+        stub.inbox_empty = False  # type: ignore[attr-defined]
         stub.events = notify_frames(finished, QUESTION, PERMISSION)  # type: ignore[attr-defined]
         shot(page, "toasts", f"agents/{S1}", wait=".chat-scroll .timeline", before=raise_toasts, settle=300)
         stub.events = ""  # type: ignore[attr-defined]
@@ -2488,7 +2518,7 @@ def run() -> int:
         shot(page, "voice", "companion")
         shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "cron", "schedules")
         shot(page, "services", "services")
         shot(page, "usage", "usage", settle=1500)

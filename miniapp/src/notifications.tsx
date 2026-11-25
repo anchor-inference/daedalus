@@ -24,7 +24,7 @@ export const NOTICE_CATEGORIES = ["run_finished", "question", "permission", "run
 /** How a request can end. Anything else the host says is shown as it said it. */
 export const NOTICE_RESOLUTIONS = ["allow", "deny", "answered", "expired", "withdrawn", "done"] as const;
 
-export type NoticeView = "all" | "unseen" | "problems" | "needs_you";
+export type NoticeView = "all" | "unseen" | "problems" | "needs_you" | "done";
 
 /** Every list key starts with this, so one invalidation reaches every list on screen. */
 export const LIST_PREFIX = "/api/notifications?";
@@ -67,19 +67,23 @@ export function resolutionLabel(resolution: string): string {
   return (NOTICE_RESOLUTIONS as readonly string[]).includes(resolution) ? t(`notice.resolution.${resolution}`) : resolution;
 }
 
-/** The second line of a row: what kind of thing it is, the project and the agent it came from. */
-export function noticeLine(entry: Notification, projects: Map<string, string>): string {
-  const parts = [categoryLabel(entry.category)];
+/** Where an entry came from: the project (the whole app when none) and the chat that raised it. */
+export function whereLine(entry: Notification, projects: Map<string, string>): string {
   const project = entry.project_id ? projects.get(entry.project_id) : undefined;
   // Every line names where the entry came from, the whole app when no project: a bare "System" or
   // "Spending" among "Finished · Bakery site · …" lines read as a line that had failed to fill in.
-  parts.push(project ?? t("notice.anywhere"));
+  const parts = [project ?? t("notice.anywhere")];
   const session = entry.session_id ? peek<SessionList>("/api/sessions")?.sessions.find((s) => s.id === entry.session_id) : undefined;
   // An orchestrator's session is titled "Orchestrator · <project>", so its whole title repeated the
   // project already named and the line read "Anchor Inference · Orchestrator · Anchor Inference".
   const own = (session?.title ?? "").split(" · ").filter((part) => part !== project).join(" · ");
   if (own) parts.push(own);
   return parts.join(" · ");
+}
+
+/** The second line of a bell or toast row: what kind of thing it is, then where it came from. */
+export function noticeLine(entry: Notification, projects: Map<string, string>): string {
+  return `${categoryLabel(entry.category)} · ${whereLine(entry, projects)}`;
 }
 
 export function projectNames(projects: Project[] | undefined): Map<string, string> {
@@ -94,13 +98,20 @@ function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-/** Today and Earlier, in the reader's own day; the list arrives newest first and keeps that order. */
+/** Today, Yesterday and Earlier, in the reader's own day; the list arrives newest first and keeps that order. */
 export function byDay(entries: Notification[], now = new Date()): Group[] {
   const today: Notification[] = [];
+  const yesterday: Notification[] = [];
   const earlier: Notification[] = [];
-  for (const entry of entries) (sameDay(new Date(entry.updated_at), now) ? today : earlier).push(entry);
+  const before = new Date(now);
+  before.setDate(before.getDate() - 1);
+  for (const entry of entries) {
+    const at = new Date(entry.updated_at);
+    (sameDay(at, now) ? today : sameDay(at, before) ? yesterday : earlier).push(entry);
+  }
   const groups: Group[] = [];
   if (today.length) groups.push({ key: "today", label: t("centre.today"), entries: today });
+  if (yesterday.length) groups.push({ key: "yesterday", label: t("centre.yesterday"), entries: yesterday });
   if (earlier.length) groups.push({ key: "earlier", label: t("centre.earlier"), entries: earlier });
   return groups;
 }
@@ -159,6 +170,21 @@ export async function markSeen(ids: number[]): Promise<void> {
   if (!ids.length) return;
   try {
     const r = await api.post<{ marked: number; summary: NotificationSummary }>("/api/notifications/seen", { ids });
+    if (r?.summary) prime(SUMMARY_KEY, r.summary);
+    invalidate(LIST_PREFIX);
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/**
+ * Take entries back to unread. The host keeps the mark, so the badge, the other windows (through the
+ * `notify.unseen` event) and the next read of the list all agree; nothing here is patched locally.
+ */
+export async function markUnseen(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  try {
+    const r = await api.post<{ marked: number; summary: NotificationSummary }>("/api/notifications/unseen", { ids });
     if (r?.summary) prime(SUMMARY_KEY, r.summary);
     invalidate(LIST_PREFIX);
   } catch (e) {
@@ -232,6 +258,7 @@ export function ActionButtons({ entry, onDone }: { entry: Notification; onDone?:
           key={a.id}
           className={STYLE[a.style] ?? STYLE.default}
           data-action={a.id}
+          title={a.description}
           disabled={busy}
           onClick={() => {
             if (a.id === "open") {
@@ -248,16 +275,15 @@ export function ActionButtons({ entry, onDone }: { entry: Notification; onDone?:
 }
 
 /** One entry: its picture in the tone's colour, the title, where it came from, when, and how many times. */
-export function NotificationRow({ entry, names, onActivate, expanded, children, card, showBody }: { entry: Notification; names: Map<string, string>; onActivate: () => void; expanded?: boolean; children?: ReactNode; card?: boolean; showBody?: boolean }) {
+export function NotificationRow({ entry, names, onActivate, children, showBody }: { entry: Notification; names: Map<string, string>; onActivate: () => void; children?: ReactNode; showBody?: boolean }) {
   const tone = toneClass(entry);
-  const classes = ["notice-row", card ? "card" : "flat", entry.seen ? "" : "unread", entry.level === "quiet" ? "quiet" : "", entry.needs_you ? "needs" : ""].filter(Boolean).join(" ");
+  const classes = ["notice-row", "flat", entry.seen ? "" : "unread", entry.level === "quiet" ? "quiet" : "", entry.needs_you ? "needs" : ""].filter(Boolean).join(" ");
   return (
     <div
       className={classes}
       data-notice={entry.id}
       role="button"
       tabIndex={0}
-      aria-expanded={expanded}
       onClick={onActivate}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -272,12 +298,12 @@ export function NotificationRow({ entry, names, onActivate, expanded, children, 
       </span>
       <div className="notice-main">
         <div className="notice-head">
-          <span className={`notice-title ${expanded ? "" : "clamp-2"}`}>{entry.title}</span>
+          <span className="notice-title clamp-2">{entry.title}</span>
           {entry.count > 1 && <span className="notice-count num">×{entry.count}</span>}
           <span className="notice-time num" title={absTime(entry.updated_at)}>{relTime(entry.updated_at)}</span>
         </div>
         <div className="notice-meta">{noticeLine(entry, names)}</div>
-        {showBody && entry.body && !expanded && <div className="notice-body clamp-2">{entry.body}</div>}
+        {showBody && entry.body && <div className="notice-body clamp-2">{entry.body}</div>}
         {children}
       </div>
     </div>
@@ -285,7 +311,7 @@ export function NotificationRow({ entry, names, onActivate, expanded, children, 
 }
 
 /** The open requests, first: a permission to grant, a question to answer. Nothing when nothing waits. */
-export function NeedsYou({ names, onOpened, card, limit = 20, empty }: { names: Map<string, string>; onOpened?: () => void; card?: boolean; limit?: number; empty?: ReactNode }) {
+export function NeedsYou({ names, onOpened, limit = 20, empty }: { names: Map<string, string>; onOpened?: () => void; limit?: number; empty?: ReactNode }) {
   const { data } = useNotifications("needs_you", null, limit);
   const entries = data?.entries ?? [];
   if (entries.length === 0) return <>{data ? empty ?? null : null}</>;
@@ -293,7 +319,7 @@ export function NeedsYou({ names, onOpened, card, limit = 20, empty }: { names: 
     <section className="needs-you" aria-label={t("centre.needs")}>
       <div className="section-title">{t("centre.needs")} <span className="n">{entries.length}</span></div>
       {entries.map((entry) => (
-        <NotificationRow key={entry.id} entry={entry} names={names} card={card} showBody onActivate={() => { openEntry(entry); onOpened?.(); }}>
+        <NotificationRow key={entry.id} entry={entry} names={names} showBody onActivate={() => { openEntry(entry); onOpened?.(); }}>
           <ActionButtons entry={entry} onDone={(r) => { if (!r.resolution) onOpened?.(); }} />
           <NoticeLoginCard entry={entry} toast={toast} />
         </NotificationRow>

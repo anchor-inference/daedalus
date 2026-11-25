@@ -1,28 +1,28 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api, Notification, NotificationPage, NotificationSummary, Proposal } from "../api";
 import { Skeleton } from "../ui/index";
-import { OverflowMenu, Sheet, deleteWithUndo } from "../ui/dialogs";
-import { absTime, relTime } from "../format";
+import { deleteWithUndo } from "../ui/dialogs";
+import { relTime } from "../format";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, screenTitle, useMedia } from "../ui/index";
+import { Button, IconButton, Select, Sheet, Tabs } from "../ui/primitives";
 import { hold, invalidate, prime, release, useQuery } from "../store";
 import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
-import { ActionButtons, NeedsYou, NotificationList, NotificationRow, byDay, byProject, entryPath, listKey, projectNames, useNotifications } from "../notifications";
-import { PushNudge } from "../pushui";
+import { byDay, categoryLabel, listKey, markAllSeen, markSeen, markUnseen, noticeIcon, projectNames, useSummary, whereLine } from "../notifications";
 import { errorText } from "../ui";
 import { plural, t } from "../i18n";
 import { PhoneInbox } from "./InboxPhone";
-import { NoticeLoginCard } from "../browser/login";
+import { InboxDetail, type InboxItem } from "./InboxDetail";
+import { INBOX_FILTERS, INBOX_LIMIT, firstLine, tintOf, useInboxLists, viewOf, waiting, type InboxFilter } from "./inboxdata";
 import { MovesInProgress } from "../project/moves";
-import { PendingSchedules, usePendingSchedules } from "../schedulecard";
-
-type Filter = "all" | "unseen" | "problems" | "projects";
+import { usePendingSchedules, type ScheduleCardView } from "../schedulecard";
 
 /**
- * The notification centre, and on a phone the only one: what needs the operator first, with its
- * buttons; the change proposals waiting for a decision; then everything else, by day or by project.
+ * The notification centre, and on a phone the only one: a list of what happened, what needs the
+ * operator first, and beside it the entry that is open with the buttons that answer it. A request is
+ * answered from here; an entry opened is read, except one that waits on the operator.
  */
 export function InboxScreen(props: { toast: (t: string) => void; onOpen: (id: string) => void }) {
   // A phone draws the same lists from its own pieces (InboxPhone.tsx): rows, sheets and a selection.
@@ -30,25 +30,64 @@ export function InboxScreen(props: { toast: (t: string) => void; onOpen: (id: st
   return phone ? <PhoneInbox {...props} /> : <DesktopInbox {...props} />;
 }
 
+type Group = { key: string; label: string; waiting?: boolean; items: InboxItem[] };
+
+function entryItem(entry: Notification, names: Map<string, string>): InboxItem {
+  return {
+    key: `n${entry.id}`, entry, icon: noticeIcon(entry), tint: tintOf(entry), kind: categoryLabel(entry.category), title: entry.title,
+    preview: firstLine(entry.body) || categoryLabel(entry.category), where: whereLine(entry, names), at: entry.updated_at, unread: !entry.seen,
+  };
+}
+
+function proposalItem(p: Proposal): InboxItem {
+  return { key: `p${p.id}`, proposal: p, icon: "changes", tint: "attention", kind: t("ph.inbox.proposal"), title: p.title, preview: firstLine(p.summary) || p.branch, where: `${p.repo} · ${p.branch}`, at: p.created_at, unread: true };
+}
+
+function scheduleItem(view: ScheduleCardView): InboxItem {
+  const p = view.proposal!;
+  return { key: `s${p.id}`, schedule: view, icon: "clock", tint: "attention", kind: t("inbox.schedule"), title: p.name, preview: firstLine(p.prompt), where: t("notice.anywhere"), at: p.next_run_at, unread: true };
+}
+
 function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (id: string) => void }) {
   const split = useMedia("(min-width: 1280px)");
-  const [filter, setFilter] = useState<Filter>("all");
-  const view = filter === "projects" ? "all" : filter;
-  const key = listKey(view, null, 200);
-  const { data, error, loading, refresh } = useNotifications(view, null, 200);
+  const [filter, setFilter] = useState<InboxFilter>("all");
+  const [project, setProject] = useState<string | null>(null);
+  const view = viewOf(filter);
+  const key = listKey(view, project, INBOX_LIMIT);
+  const lists = useInboxLists(project);
+  const { data, error, loading, refresh } = lists.by[filter];
   const proposals = useQuery<Proposal[]>("/api/proposals", { pollMs: 60000, staleMs: 30000 });
   const projects = useProjects();
-  const names = projectNames(projects.data);
-  const [open, setOpen] = useState<number | null>(null);
-  const unseen = data?.summary.unseen ?? 0;
-  const needs = data?.summary.needs_you ?? 0;
-  // What needs the operator is drawn above, with its buttons; the list below is the rest.
-  const entries = (data?.entries ?? []).filter((e) => !e.needs_you);
-  const pending = (proposals.data ?? []).filter((p) => p.status === "pending");
+  const names = useMemo(() => projectNames(projects.data), [projects.data]);
+  const unseen = useSummary().unseen;
+  const [picked, setPicked] = useState<string | null>(null);
   const schedules = usePendingSchedules();
-  const groups = filter === "projects" ? byProject(entries, names) : byDay(entries);
 
-  /** Show a change before the server has confirmed it; the badge follows from the same summary. */
+  // A proposal or a schedule carries no project and no failure, so only the unfiltered views and the
+  // one for what waits show them.
+  const outside = project === null;
+  const extras = outside && (filter === "all" || filter === "needs");
+  const allPending = outside ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const pending = extras ? allPending : [];
+  const proposed = extras ? schedules : [];
+
+  const groups = useMemo<Group[]>(() => {
+    const entries = data?.entries ?? [];
+    const open = entries.filter(waiting).map((e) => entryItem(e, names));
+    const rest = entries.filter((e) => !waiting(e));
+    const out: Group[] = [];
+    const head = [...open, ...pending.map(proposalItem), ...proposed.map(scheduleItem)];
+    if (head.length) out.push({ key: "waiting", label: t("inbox.waiting"), waiting: true, items: head });
+    for (const g of byDay(rest)) out.push({ key: g.key, label: g.label, items: g.entries.map((e) => entryItem(e, names)) });
+    return out;
+  }, [data, names, pending, proposed]);
+
+  const items = groups.flatMap((g) => g.items);
+  const current = items.find((i) => i.key === picked) ?? (split ? items[0] : undefined);
+  // A tab counts what it would show, whichever tab is open.
+  const counts = (f: InboxFilter) => lists.count(f, allPending.length + (outside ? schedules.length : 0));
+
+  /** The entry as the page last heard of it: the list's copy, or the one an answer brought back. */
   function patch(fn: (list: Notification[]) => Notification[], summary?: NotificationSummary) {
     if (!data) return;
     const next = summary ?? data.summary;
@@ -56,38 +95,17 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
     prime(SUMMARY_KEY, next);
   }
 
-  async function markAll() {
-    try {
-      const r = await api.post<{ marked: number; summary: NotificationSummary }>("/api/notifications/seen", { all: true });
-      patch((l) => l.map((e) => ({ ...e, seen: true })), r.summary);
-      refresh();
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
-
-  async function markSeen(entry: Notification) {
-    if (entry.seen) return;
-    patch((l) => l.map((e) => (e.id === entry.id ? { ...e, seen: true } : e)));
-    try {
-      const r = await api.post<{ marked: number; summary: NotificationSummary }>("/api/notifications/seen", { ids: [entry.id] });
-      prime(SUMMARY_KEY, r.summary);
-    } catch (e) {
-      toast(errorText(e));
-    }
-  }
-
-  function toggle(entry: Notification) {
-    const next = open === entry.id ? null : entry.id;
-    setOpen(next);
-    if (next !== null) void markSeen(entry);
+  function pick(item: InboxItem) {
+    setPicked(item.key);
+    // Opened is read, except what still waits for an answer: reading it is not answering it.
+    if (item.entry && !item.entry.seen && !waiting(item.entry)) void markSeen([item.entry.id]);
   }
 
   function remove(entry: Notification) {
     const before = data;
     hold(key);
     patch((l) => l.filter((e) => e.id !== entry.id));
-    setOpen(null);
+    setPicked(null);
     deleteWithUndo(
       plural("inbox.deleted", 1),
       async () => {
@@ -107,133 +125,111 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
     );
   }
 
-  const detail = (entry: Notification) => (
-        <div className="inbox-body" onClick={(e) => e.stopPropagation()}>
-          {entry.body && <pre className="inbox-text">{entry.body}</pre>}
-          <ActionButtons entry={entry} />
-          <NoticeLoginCard entry={entry} toast={toast} />
-          <div className="btnrow">
-            {(entry.link || entry.session_id) && (
-              <button className="btn small" onClick={() => (entry.session_id && !entry.link ? onOpen(entry.session_id) : navigate(entryPath(entry)))}>
-                <Icon name={entry.session_id ? "bots" : "forward"} size={14} /> {t(entry.session_id ? "inbox.open.session" : "notice.open")}
-              </button>
-            )}
-            <span className="grow" />
-            <OverflowMenu
-              small
-              label={t("inbox.actions")}
-              items={[
-                { label: t("inbox.markunread"), icon: "inbox", onSelect: () => patch((l) => l.map((e) => (e.id === entry.id ? { ...e, seen: false } : e))) },
-                "-",
-                { label: t("common.delete"), icon: "trash", danger: true, onSelect: () => remove(entry) },
-              ]}
-            />
-          </div>
-        </div>
-  );
-  const selected = entries.find((entry) => entry.id === open);
-
-  const row = (entry: Notification) => (
-    <NotificationRow key={entry.id} entry={entry} names={names} card expanded={open === entry.id} onActivate={() => toggle(entry)}>
-      {open === entry.id && !split && detail(entry)}
-    </NotificationRow>
+  const detail = current && (
+    <InboxDetail
+      item={current}
+      names={names}
+      toast={toast}
+      onOpenChat={onOpen}
+      onToggleRead={(entry) => void (entry.seen ? markUnseen([entry.id]) : markSeen([entry.id]))}
+      onDelete={remove}
+      onDecided={() => { proposals.refresh(); invalidate("/api/proposals"); }}
+    />
   );
 
+  /** Up and Down walk the rows with the keyboard; Enter or Space opens the one that has focus. */
+  function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(".inbox-row")];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    if (at < 0) return;
+    e.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))].focus();
+  }
+
+  const empty = data && items.length === 0;
   return (
     <>
       <PageHeader
         title={screenTitle("inbox")}
-        subtitle={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
         ruled
-        actions={<button className="iconbtn" onClick={markAll} disabled={unseen === 0} title={t("inbox.markall")} aria-label={t("inbox.markall")}><Icon name="check" /></button>}
         filters={
-        <div className="chips">
-          <button className="chip select" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>{t("common.all")}</button>
-          <button className="chip select" aria-pressed={filter === "unseen"} onClick={() => setFilter("unseen")}>{t("inbox.filter.unread")}{unseen > 0 ? ` · ${unseen}` : ""}</button>
-          <button className="chip select" aria-pressed={filter === "problems"} onClick={() => setFilter("problems")}>{t("inbox.filter.problems")}</button>
-          <button className="chip select" aria-pressed={filter === "projects"} onClick={() => setFilter("projects")}>{t("centre.projects")}</button>
-        </div>
+          <Tabs
+            variant="page"
+            className="inbox-tabs"
+            label={t("inbox.filters")}
+            value={filter}
+            onChange={(id) => { setFilter(id as InboxFilter); setPicked(null); }}
+            tabs={INBOX_FILTERS.map((f) => ({ id: f.id, label: t(f.label), count: counts(f.id) }))}
+          />
+        }
+        actions={
+          <>
+            <Select
+              size="sm"
+              className="inbox-project"
+              label={t("inbox.project")}
+              value={project ?? "all"}
+              options={[{ id: "all", label: t("inbox.project.all") }, ...(projects.data ?? []).map((p) => ({ id: p.id, label: p.name }))]}
+              onChange={(id) => { setProject(id === "all" ? null : id); setPicked(null); }}
+            />
+            <Button variant="quiet" icon="check" disabled={unseen === 0} onClick={() => void markAllSeen()}>{t("inbox.markall")}</Button>
+            <IconButton icon="settings" label={t("ph.inbox.settings")} onClick={() => navigate(pathFor("settings", "notifications"))} />
+          </>
         }
       />
-      <div className={`inbox-layout ${split ? "split" : ""}`}>
-      <div className="screen narrow inbox-list">
-        <PushNudge />
-        <MovesInProgress projects={projects.data} />
-        <NeedsYou names={names} card />
-        {pending.length > 0 && filter !== "problems" && (
-          <section>
-            <div className="section-title">{t("inbox.waiting")} <span className="n">{pending.length}</span></div>
-            {pending.map((p) => (
-              <ProposalCard key={p.id} p={p} toast={toast} onDone={() => { proposals.refresh(); invalidate("/api/proposals"); }} />
+      {error && !data ? (
+        <div className="empty"><b>{t("inbox.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>
+      ) : empty ? (
+        <div className="empty inbox-empty">
+          <Icon name={filter === "problems" || filter === "done" ? "check" : "inbox"} size={20} />
+          <b>{t(filter === "needs" ? "inbox.empty.needs" : filter === "problems" ? "inbox.empty.problems" : filter === "done" ? "inbox.empty.done" : "inbox.empty")}</b>
+          {filter !== "all" || project !== null ? <button className="btn" onClick={() => { setFilter("all"); setProject(null); }}>{t("ph.inbox.showall")}</button> : <div className="sub">{t("ph.inbox.empty.sub")}</div>}
+        </div>
+      ) : (
+        <div className="inbox-split">
+          <section className="inbox-list" aria-label={t("inbox.list")} onKeyDown={moveFocus}>
+            <MovesInProgress projects={projects.data} />
+            {loading && !data && <Skeleton rows={6} />}
+            {groups.map((group) => (
+              <div key={group.key} className="inbox-group" data-group={group.key}>
+                <div className={`inbox-group-head ${group.waiting ? "waiting" : ""}`}>{group.label}<span className="n">{group.items.length}</span></div>
+                {group.items.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`inbox-row ${current?.key === item.key ? "on" : ""} ${item.unread ? "unread" : ""} ${item.entry?.level === "quiet" ? "quiet" : ""}`}
+                    data-notice={item.entry?.id}
+                    data-proposal={item.proposal?.id}
+                    data-schedule={item.schedule?.proposal?.id}
+                    aria-current={current?.key === item.key}
+                    onClick={() => pick(item)}
+                  >
+                    <span className={`inbox-row-mark ${item.tint}`} aria-hidden="true" />
+                    <span className="inbox-row-body">
+                      <span className="inbox-row-top">
+                        <span className="inbox-row-title">{item.title}</span>
+                        {item.entry && item.entry.count > 1 && <span className="inbox-row-count num">×{item.entry.count}</span>}
+                        <span className="inbox-row-unread" aria-hidden="true" />
+                      </span>
+                      <span className="inbox-row-preview">{item.preview}</span>
+                      <span className="inbox-row-foot">
+                        <span className="inbox-row-where">{item.where}</span>
+                        <span className="inbox-row-time num">{relTime(item.at)}</span>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             ))}
           </section>
-        )}
-        {filter !== "problems" && <PendingSchedules views={schedules} header={(n) => <div className="section-title">{t("inbox.schedules")} <span className="n">{n}</span></div>} />}
-        {loading && !error && <Skeleton rows={6} />}
-        {error && !data && <div className="empty"><b>{t("inbox.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
-        {data && entries.length === 0 && pending.length === 0 && schedules.length === 0 && needs === 0 && (
-          <div className="empty">
-            <b>{t(filter === "unseen" ? "inbox.empty.unread" : filter === "problems" ? "inbox.empty.problems" : "inbox.empty")}</b>
-          </div>
-        )}
-        <NotificationList groups={groups} row={row} />
-      </div>
-      {split && <aside className="inbox-detail" aria-label={t("nav.inbox")}>
-        {selected ? <><div className="inbox-detail-head"><h2>{selected.title}</h2><button className="iconbtn" aria-label={t("common.close")} onClick={() => setOpen(null)}><Icon name="close" /></button></div>{detail(selected)}</> : <div className="empty calm">{t("inbox.select")}</div>}
-      </aside>}
-      </div>
-    </>
-  );
-}
-
-/** A change waiting for a decision: approve here, reject with a reason, or read the diff on Changes. */
-export function ProposalCard({ p, toast, onDone }: { p: Proposal; toast: (t: string) => void; onDone: () => void }) {
-  const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function decide(decision: "approve" | "reject") {
-    setBusy(true);
-    try {
-      await api.post(`/api/proposals/${p.id}/decide`, { decision, reason });
-      setRejecting(false);
-      onDone();
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="erow action">
-      <span className="kind warning"><Icon name="changes" size={16} /></span>
-      <div className="erow-main">
-        <div className="erow-head">
-          <span className="erow-title clamp-2">{p.title}</span>
-          <span className="erow-time num" title={absTime(p.created_at)}>{relTime(p.created_at)}</span>
+          {split ? (
+            <section className="inbox-detail" aria-label={t("inbox.open")}>{detail}</section>
+          ) : (
+            picked && current && <Sheet size="md" ariaLabel={current.title} onClose={() => setPicked(null)}>{detail}</Sheet>
+          )}
         </div>
-        <div className="erow-meta">
-          <span className="mono">{p.branch}</span>
-          {p.pr_number && <span className="sep">·</span>}
-          {p.pr_number && <span className="nowrap">PR #{p.pr_number}</span>}
-        </div>
-        {p.summary && <div className="sub clamp-3" style={{ marginTop: 4 }}>{p.summary}</div>}
-        <div className="btnrow">
-          <button className="btn small primary" disabled={busy} onClick={() => decide("approve")}>{t("inbox.approve")}</button>
-          <button className="btn small" disabled={busy} onClick={() => setRejecting(true)}>{t("inbox.reject")}</button>
-          <button className="btn small ghost" onClick={() => navigate(pathFor("changes", p.id))}>{t("inbox.diff")}</button>
-        </div>
-      </div>
-      {rejecting && (
-        <Sheet title={t("inbox.reject.title")} onClose={() => setRejecting(false)} size="sm">
-          <div className="sub">{p.title}</div>
-          <label className="field">{t("inbox.reason")}</label>
-          <textarea className="field" rows={3} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("inbox.reason.placeholder")} />
-          <div className="sheet-foot">
-            <button className="btn ghost" onClick={() => setRejecting(false)}>{t("common.cancel")}</button>
-            <button className="btn danger solid" disabled={busy} onClick={() => decide("reject")}>{t("inbox.reject.do")}</button>
-          </div>
-        </Sheet>
       )}
-    </div>
+    </>
   );
 }

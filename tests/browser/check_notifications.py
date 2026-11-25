@@ -104,6 +104,8 @@ class Centre:
             return [e for e in rows if e["needs_you"]]
         if name == "unseen":
             return [e for e in rows if not e["seen"] and e["level"] != "quiet"]
+        if name == "problems":
+            return [e for e in rows if e["tone"] in ("warning", "error")]
         if name == "done":
             return [e for e in rows if e["category"] == "run_finished"]
         return rows
@@ -153,6 +155,74 @@ def toasts(page) -> list[str]:  # type: ignore[no-untyped-def]
 
 def overlap(a: dict, b: dict) -> bool:
     return a["x"] < b["x"] + b["width"] and b["x"] < a["x"] + a["width"] and a["y"] < b["y"] + b["height"] and b["y"] < a["y"] + a["height"]
+
+
+def desktop_inbox(browser, route_api) -> list[str]:  # type: ignore[no-untyped-def]
+    problems: list[str] = []
+    finished = notification(21, "Bakery finished", session=S3)
+    permission = notification(22, "Bakery asks to run a command", session=S1, category="permission", level="urgent", tone="warning", request=f"policy:{S1}:cmd")
+    question = notification(23, "Keep the usual 8?", session=S2, category="question", tone="warning", request=f"ask:{S2}:q1")
+    question["body"] = "The digest has 14 items this week."
+    question["actions"] = [{"id": "answer:0", "label": "Keep 8", "style": "primary", "quick": True}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}]
+    spend = notification(24, "DeepSeek balance below $5", session=None, category="spend", tone="warning")
+    spend["seen"] = True
+    Centre.entries[:] = [finished, permission, question, spend]
+    Centre.acted.clear()
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    context.route("**/api/**", route_api)
+    page = context.new_page()
+    page.goto(f"{BASE}/inbox?token=t&lang=en", wait_until="commit")
+    page.wait_for_selector(".inbox-row", timeout=20000)
+    tabs = page.eval_on_selector_all(".inbox-tabs [data-tab]", "els => els.map(e => e.dataset.tab)")
+    if tabs != ["all", "needs", "problems", "done"]:
+        problems.append(f"the Inbox's views are {tabs}, not all, needs, problems and done")
+    if "Unread" in page.locator(".pagehead").inner_text():
+        problems.append("the Inbox still offers an Unread view")
+    groups = page.eval_on_selector_all(".inbox-group", "els => els.map(e => [e.dataset.group, e.querySelectorAll('.inbox-row').length])")
+    # The two requests and the stub's change proposal that waits for a decision.
+    if groups[:1] != [["waiting", 3]]:
+        problems.append(f"the first group is not what waits for the operator: {groups}")
+    # What waits is not read by opening it; what finished is.
+    page.locator(".inbox-row[data-notice='22']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n22']")
+    if page.locator(".inbox-pane .inbox-outcomes-row").count() != 2:
+        problems.append("the permission's table of outcomes does not carry the two buttons the host described")
+    page.wait_for_timeout(300)
+    if permission["seen"]:
+        problems.append("opening a request that waits marked it read")
+    page.locator(".inbox-row[data-notice='21']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n21']")
+    if not wait(page, lambda: finished["seen"], 3):
+        problems.append("opening a finished entry did not mark it read")
+    if page.locator(".inbox-pane .inbox-outcomes").count():
+        problems.append("an entry whose buttons the host did not describe draws a table of outcomes")
+    page.locator(".inbox-pane button[aria-label='Mark unread']").click()
+    if not wait(page, lambda: not finished["seen"], 3):
+        problems.append("Mark unread did not reach the host")
+    if not wait(page, lambda: page.locator(".inbox-row[data-notice='21'].unread").count() == 1, 3):
+        problems.append("the row did not turn unread after the host said so")
+    # A question is answered in one's own words; a permission has no such line.
+    page.locator(".inbox-row[data-notice='22']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n22']")
+    if page.locator(".inbox-reply").count():
+        problems.append("a permission offers a free answer the host refuses")
+    page.locator(".inbox-row[data-notice='23']").click()
+    page.wait_for_selector(".inbox-reply-input")
+    page.locator(".inbox-reply-input").fill("keep 8 and add the shopfront")
+    page.locator(".inbox-reply-input").press("Enter")
+    if not wait(page, lambda: Centre.acted[-1:] == [(23, {"action": "answer", "value": "keep 8 and add the shopfront"})], 3):
+        problems.append(f"the free answer was sent as {Centre.acted}")
+    if not wait(page, lambda: page.locator(".inbox-pane .inbox-outcome").count() == 1, 3):
+        problems.append("the answered question did not give way to its outcome")
+    # The views.
+    page.locator(".inbox-tabs [data-tab='done']").click()
+    if not wait(page, lambda: page.locator(".inbox-row").count() == 1, 3):
+        problems.append(f"the Finished view lists {page.locator('.inbox-row').count()} entries, not one")
+    page.locator(".inbox-tabs [data-tab='problems']").click()
+    if not wait(page, lambda: page.locator(".inbox-row").count() == 3, 3):
+        problems.append(f"the Errors view lists {page.locator('.inbox-row').count()} entries, not three")
+    context.close()
+    return problems
 
 
 def run() -> int:
@@ -387,6 +457,11 @@ def run() -> int:
                 if not Streams.open:
                     break
                 time.sleep(0.05)
+
+            # The Inbox on a desktop: four views and no Unread, a list that opens an entry beside it, an entry
+            # read by opening it except while it waits, mark unread answered by the host, a question answered in
+            # one's own words, and a table of outcomes only for the buttons the host described.
+            problems += desktop_inbox(browser, route_api)
 
             # The phone: one banner, the home bell's badge, and Needs you first on the Inbox.
             Centre.entries[:] = [e for e in Centre.entries if e["id"] < 6]
