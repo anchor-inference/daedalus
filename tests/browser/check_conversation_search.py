@@ -102,6 +102,8 @@ def run() -> int:
         page = browser.new_page(viewport={'width': 1280, 'height': 860})
         page.route('**/api/**', route)
         page.goto(f'{BASE}/agents?token=t&lang=en')
+        # The field opens from the search button in the sidebar's head.
+        page.locator('.sidebar .sidebar-head .sb-search-btn').click()
         search = page.locator('.sidebar').get_by_role('searchbox', name='Search conversations')
         search.fill('vegetables outside')
         expect(page.locator('.sidebar .search-passage')).to_have_text('Grow tomatoes on the balcony')

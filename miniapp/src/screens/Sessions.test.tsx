@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// The desktop's sidebar: the pinned block, the projects and the chats apart by the project rule, a collapsed project
-// that still shows what asks for the operator, the two buttons under "New chat", and the keyboard.
-import { act } from "react";
+// The desktop sidebar's list: the pinned block, the projects and the chats apart by the project rule, a collapsed
+// project that still shows what asks for the operator, the filters on the Chats label, the search, and the keyboard.
+import { act, useState } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectFolder, SessionSummary, api } from "../api";
@@ -76,8 +76,13 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
-async function render(current?: string) {
-  await act(async () => root.render(<SessionsScreen onOpen={onOpen} toast={toast} current={current} onProjects={onProjects} />));
+/** The list as the sidebar holds it: the search's open state is the sidebar's, opened from its head or with `/`. */
+function Column({ current, search = false }: { current?: string; search?: boolean }) {
+  const [open, setOpen] = useState(search);
+  return <SessionsScreen onOpen={onOpen} toast={toast} current={current} onProjects={onProjects} searchOpen={open} onSearchOpen={setOpen} />;
+}
+async function render(current?: string, search = false) {
+  await act(async () => root.render(<Column current={current} search={search} />));
 }
 const projectRow = (id: string) => host.querySelector<HTMLElement>(`[data-project="${id}"] .sb-prow`)!;
 const rowsOf = (id: string) => Array.from(host.querySelectorAll<HTMLElement>(`[data-project="${id}"] [data-session]`)).map((r) => r.dataset.session);
@@ -87,7 +92,7 @@ describe("the sidebar", () => {
   it("lists projects and chats apart by the project rule, and the chats by day", async () => {
     await render();
     const sections = Array.from(host.querySelectorAll(".sb-sec")).map((s) => s.textContent);
-    expect(sections).toEqual(["Projects3", "Chats2"]);
+    expect(sections).toEqual(["Projects", "Chats"]);
     // A project made by hand is a project with one chat in it; Voice is one whatever it holds.
     expect(Array.from(host.querySelectorAll("[data-project]")).map((s) => (s as HTMLElement).dataset.project).sort()).toEqual(["esp", "home", "voice"]);
     expect(Array.from(host.querySelectorAll(".sb-day")).map((d) => [(d as HTMLElement).dataset.day, Array.from(d.querySelectorAll("[data-session]")).map((r) => (r as HTMLElement).dataset.session)]))
@@ -98,7 +103,9 @@ describe("the sidebar", () => {
     await render();
     expect(projectRow("home").getAttribute("aria-expanded")).toBe("false");
     expect(rowsOf("home")).toEqual(["h1"]);
-    expect(projectRow("home").querySelector(".sb-st.waiting")).not.toBeNull();
+    // The folder says in a word that something in it asks, where it would otherwise say its count.
+    expect(projectRow("home").querySelector(".sb-word.waiting")?.textContent).toBe("needs you");
+    expect(projectRow("esp").querySelector(".sb-pcount")?.textContent).toBe("1");
     expect(rowsOf("esp")).toEqual([]);
     await act(async () => projectRow("home").click());
     expect(projectRow("home").getAttribute("aria-expanded")).toBe("true");
@@ -113,15 +120,16 @@ describe("the sidebar", () => {
     expect(localStorage.getItem("daedalus.folder.esp")).toBeNull();
   });
 
-  it("draws a chat in two lines: the state in words when it asks, the host, the model and the time", async () => {
+  it("draws a chat in one line: its state in a word or its time, its marks, the model in its tooltip", async () => {
     await render();
     const waiting = host.querySelector('[data-session="h1"]')!;
-    expect(waiting.querySelector(".sb-word.waiting")?.textContent).toBe("Needs you");
-    expect(waiting.querySelector(".sb-st.waiting")).not.toBeNull();
+    expect(waiting.querySelector(".sb-word.waiting")?.textContent).toBe("needs you");
+    // The word takes the time's place: a row says one thing at its right edge.
+    expect(waiting.querySelector(".sb-time")).toBeNull();
     const onHost = host.querySelector('[data-session="c2"]')!;
     expect(onHost.querySelector(".host-mark .term-env.host")).not.toBeNull();
     expect(onHost.querySelector(".sb-word")).toBeNull();
-    expect(onHost.querySelector(".sb-ell")?.textContent).toContain("Local model");
+    expect(onHost.getAttribute("title")).toContain("Local model");
     expect(onHost.querySelector(".sb-time")?.getAttribute("title")).toBeTruthy();
     const unread = host.querySelector('[data-session="c1"]')!;
     expect(unread.classList.contains("unread")).toBe(true);
@@ -135,23 +143,22 @@ describe("the sidebar", () => {
     expect(host.querySelector(".host-mark")).toBeNull();
   });
 
-  it("offers All projects and New project side by side under New chat", async () => {
+  it("leads to every project from the Projects label, and makes one with its +", async () => {
     await render();
-    const buttons = Array.from(host.querySelectorAll(".sb-pbtns button")).map((b) => b.textContent);
-    expect(buttons).toEqual(["All projects", "New project"]);
-    expect(host.querySelector(".sb-new")?.textContent).toContain("New chat");
-    await act(async () => host.querySelector<HTMLButtonElement>(".sb-pbtns .project-chip")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".sb-sec-projects .sb-sec-link")!.click());
     expect(onProjects).toHaveBeenCalled();
-    // New project starts a project and nothing else; continuing a session another program left on
-    // the machine is the second door of New chat, a split button.
-    await act(async () => host.querySelector<HTMLButtonElement>(".sb-newproject")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".sb-sec-projects .sb-sec-add")!.click());
     expect(newProject.open).toHaveBeenCalledWith();
-    expect(document.querySelector(".menu [role=menuitem]")).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>(".sb-newsplit .sb-new-more")!.click());
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>(".menu [role=menuitem]"));
-    expect(items.map((b) => b.textContent)).toEqual(["New chat", "New agent", "Import session"]);
-    await act(async () => items[2].click());
-    expect(importer.open).toHaveBeenCalledWith();
+  });
+
+  it("holds the filters in one menu on the Chats label, and says on the label which is on", async () => {
+    await render();
+    expect(host.querySelector(".sb-sec-filter")).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>(".sb-chats-menu")!.click());
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]'));
+    expect(items.map((b) => b.querySelector(".menu-row-t, span")?.textContent ?? b.textContent)).toEqual(expect.arrayContaining(["Every kind", "Waiting", "Working", "Loops", "Archive"]));
+    await act(async () => items.find((b) => (b.textContent ?? "").startsWith("Waiting"))!.click());
+    expect(host.querySelector(".sb-sec-filter")?.textContent).toBe("Waiting");
   });
 
   it("says in words when a project lens narrows the column, and lifts it in one click or with Escape", async () => {
@@ -159,7 +166,7 @@ describe("the sidebar", () => {
     // lens was a grey chip naming the project, with nothing to say the list was filtered.
     const onClearProject = vi.fn();
     const home = listing.data.projects[0];
-    await act(async () => root.render(<SessionsScreen onOpen={onOpen} toast={toast} onProjects={onProjects} project="home" projects={[home as never]} onClearProject={onClearProject} />));
+    await act(async () => root.render(<SessionsScreen onOpen={onOpen} toast={toast} onProjects={onProjects} project="home" projects={[home as never]} onClearProject={onClearProject} searchOpen onSearchOpen={() => undefined} />));
     const strip = host.querySelector<HTMLElement>(".sb-lens")!;
     expect(strip.textContent).toContain("2 chats in Smart home");
     expect(strip.textContent).toContain("Show all");
@@ -267,7 +274,7 @@ describe("the sidebar", () => {
   it("lists what is pinned in a block above both sections, and not again below it", async () => {
     listing.data.projects = listing.data.projects.map((p) => p.id === "esp" ? { ...p, pinned_at: "2026-10-01T09:00:00Z" } : p.id === "c2" ? { ...p, pinned_at: "2026-10-02T09:00:00Z" } : p);
     await render();
-    expect(Array.from(host.querySelectorAll(".sb-sec")).map((s) => s.textContent)).toEqual(["Pinned2", "Projects2", "Chats1"]);
+    expect(Array.from(host.querySelectorAll(".sb-sec")).map((s) => s.textContent)).toEqual(["Pinned", "Projects", "Chats"]);
     const block = host.querySelector("[data-pinned]")!;
     // Newest pin first: the chat, then the project, which keeps its fold.
     expect(Array.from(block.querySelectorAll("[data-session], [data-project-head]")).map((r) => (r as HTMLElement).dataset.session ?? (r.closest("[data-project]") as HTMLElement).dataset.project)).toEqual(["c2", "esp"]);
@@ -306,8 +313,8 @@ describe("the sidebar", () => {
 
   it("searches after a pause and says when the search is exact only", async () => {
     const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ sessions: [{ ...chat("c1", "c1", 1), match: { snippet: "Grow tomatoes on the balcony", score: 1 } }], projects: listing.data.projects, semantic: false, reason: "off", partial: false, indexing: false })));
-    await render();
-    expect(Array.from(host.querySelectorAll(".sb-chips .sb-chip")).map((c) => c.textContent)).toEqual(["All5", "Waiting1", "Working0", ""]);
+    await render(undefined, true);
+    expect(host.querySelector(".sb-chats-menu")).not.toBeNull();
     const input = host.querySelector('input[type="search"]') as HTMLInputElement;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "vegetables outside");
@@ -317,6 +324,17 @@ describe("the sidebar", () => {
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/api/sessions/search?q=vegetables%20outside"), expect.anything());
     expect(host.textContent).toContain("Exact search only");
     expect(host.querySelector(".search-passage")?.textContent).toBe("Grow tomatoes on the balcony");
-    expect(host.querySelector(".sb-chips")).toBeNull();
+    // A search looks through every kind and state, so the filters' menu stands down while it runs.
+    expect(host.querySelector(".sb-chats-menu")).toBeNull();
+  });
+
+  it("closes the search with Escape on an empty field, and forgets what it held", async () => {
+    await render();
+    expect(host.querySelector(".sb-search")).toBeNull();
+    await key(document.body, { key: "/" });
+    const input = host.querySelector<HTMLInputElement>(".sb-search input")!;
+    expect(document.activeElement).toBe(input);
+    await key(input, { key: "Escape" });
+    expect(host.querySelector(".sb-search")).toBeNull();
   });
 });

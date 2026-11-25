@@ -23,7 +23,7 @@ READ_HINT = (
     "настройки настройка конфиг параметр значение текущие показать посмотреть какие лимиты модель язык"
 )
 CHANGE_HINT = (
-    "change settings configuration set switch turn on off enable disable answer language compaction navigation rail "
+    "change settings configuration set switch turn on off enable disable answer language compaction navigation pinned sidebar "
     "изменить измени поменять поменяй поставь включи выключи настройки язык ответа сжатие навигация"
 )
 

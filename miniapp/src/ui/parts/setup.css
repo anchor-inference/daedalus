@@ -331,10 +331,10 @@ input.field[type="range"] {
   .diff-line > span:last-child { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   .diff-line .linenum, .diff-sign { flex: none; }
 }
-.diff-add { background:color-mix(in srgb, var(--ok) 13%, transparent); }
-.diff-del { background:color-mix(in srgb, var(--bad) 13%, transparent); }
-.tk-add { color:var(--ok); }
-.tk-del { color:var(--bad); }
+.diff-add { background:var(--added-bg); }
+.diff-del { background:var(--removed-bg); }
+.tk-add { color:var(--live); }
+.tk-del { color:var(--attention); }
 .image-pan { overflow:auto; flex:1; }
 .image-pan .preview-image { cursor:zoom-in; }
 .image-pan.actual .preview-image { max-width:none; max-height:none; margin:0; object-fit:none; cursor:zoom-out; }

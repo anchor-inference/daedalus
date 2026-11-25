@@ -107,7 +107,7 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     imports = ImportStub()
     context, page, errors = start(browser, lang, False, imports)
     page.goto(f"{BASE}/agents?token=t&lang={lang}")
-    expect(page.locator(".rail")).to_be_visible(timeout=15000)
+    expect(page.locator("nav.sidebar")).to_be_visible(timeout=15000)
 
     # The start screen's card: fresh sessions of the machine, each opening the explorer on itself.
     card = page.locator(".imp-card")
@@ -120,8 +120,9 @@ def desktop(browser, lang: str, problems: list[str]) -> None:  # type: ignore[no
     page.keyboard.press("Escape")
     expect(sheet).to_have_count(0)
 
-    # The second door of the split New chat button.
-    page.locator(".sb-newsplit .sb-new-more").click()
+    # The chevron at the end of the sidebar's New chat row.
+    page.locator(".sb-newchat").hover()
+    page.locator(".sb-newchat .sb-new-more").click()
     page.get_by_role("menuitem", name=words["entry"]).click()
     expect(sheet).to_be_visible()
     expect(sheet.locator(".sheet-head h3")).to_have_text(words["title"])

@@ -1,45 +1,11 @@
-/* One desktop column owns navigation and its contextual list. Lists retain their scroll containers. */
-@media (min-width:1024px) {
-  .app { grid-template-columns:calc(var(--rail-w) + var(--sidebar-w)) minmax(0,1fr); }
-  .desktop-column { position:fixed; inset:0 auto 0 0; width:calc(var(--rail-w) + var(--sidebar-w)); display:flex; background:var(--bg); z-index:var(--z-sidebar); }
-  .desktop-column .rail { position:relative; inset:auto; width:var(--rail-w); flex:none; border-right:1px solid var(--line); padding:var(--space-2) var(--space-1); gap:var(--space-1); }
-  .desktop-column .rail-item { width:var(--row-h); height:var(--row-h); flex:none; justify-content:center; padding:0; }
-  .desktop-column .rail-label { display:none; }
-  .desktop-column .rail-modes, .desktop-column .rail-places { display:flex; flex-direction:column; gap:var(--space-1); }
-  .desktop-column .rail-modes .rail-item.mode { background:var(--surface-3); color:var(--fg); }
-  .desktop-column .rail-rule { margin:var(--space-1) 0; }
-  .desktop-column .rail-foot { margin-top:auto; display:flex; flex-direction:column; gap:var(--space-1); }
-  .desktop-column .rail-tip { display:flex; }
-  .desktop-context { flex:1; min-width:0; position:relative; overflow:hidden; }
-  .desktop-context .sidebar { position:absolute; inset:0; width:100%; border:0; border-right:1px solid var(--line); }
-  .desktop-column.folded .desktop-context { display:none; }
-  .desktop-column .rail-item:focus-visible { outline: 2px solid var(--ring); outline-offset:1px; }
-  .bulkbar { left:calc(var(--rail-w) + var(--sidebar-w)); }
-}
 .model-row { border-radius:var(--radius-sm); gap:var(--space-2); padding-inline:var(--space-2); }
 /* The chosen row says so with its check in ink at the right edge; the accent is kept for what is live. */
 .model-row.on > .ic { color:var(--fg); }
 .model-row > .ic:first-child { color:var(--fg-3); }
-.inbox-layout { min-height:0; flex:1; }
-.inbox-layout.split { display:grid; grid-template-columns:minmax(320px, 44%) minmax(0,1fr); overflow:hidden; }
-.inbox-layout.split .inbox-list { width:100%; max-width:none; margin:0; overflow:auto; padding-top:var(--space-3); }
-.inbox-detail { min-width:0; overflow:auto; padding:var(--space-4) var(--space-6); border-left:1px solid var(--line); }
-.inbox-detail-head { display:flex; align-items:flex-start; gap:var(--space-3); margin-bottom:var(--space-4); }
-.inbox-detail-head h2 { flex:1; min-width:0; margin:0; font-size:var(--fs-18); font-weight:600; letter-spacing:-0.015em; text-wrap:balance; overflow-wrap:anywhere; }
-.inbox-detail .inbox-text { white-space:pre-wrap; overflow-wrap:anywhere; }
-.inbox-detail .inbox-body { padding:0; }
-.inbox-list .erow[aria-expanded="true"] { background:var(--surface-3); }
-.desktop-column > .pane-handle { z-index:20; }
-@media (min-width:1024px) {
-  .desktop-column.folded .rail-home { height:var(--row-h-touch); flex-direction:column; gap:2px; }
-  .desktop-column.folded .rail-unfold-word { display:block; }
-}
-
 
 /* Cursor menus stay at their measured point throughout opening. */
 .context-menu { animation:none; }
 
-/* A model identifier distinguishes choices and must remain readable in the picker. */
 /* A provider's mark is a neutral tile: outlined and in a brand's colour each, a list of five was five
    coloured boxes competing with the names beside them. */
 .provider-mark { display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border:0; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg); }

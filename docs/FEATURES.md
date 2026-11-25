@@ -11,7 +11,7 @@ Every session has its own workspace and speaks in the chat under its own name �
 <td width="33%" valign="top">
 
 **🖥️ A real web app**<br/>
-Every screen is an address under `/app`: agents, live transcripts, the files an agent sends you attached under its answer, a file browser with previews (images, Markdown, CSV, PDF, Word, Excel), the files and receipts an answer cites as chips that open the file at the lines it named, two sessions side by side, drag-and-drop and clipboard attachments, a microphone. Beside a chat, a side panel keeps its model, context and spend in a strip over every tab, and Files shows the folder's real path. A rail, a More launcher and a ⌘K palette on a desk, a drawer on a phone; Settings opens as a popup over wherever you were, and its search shows the rows themselves. Installable as a PWA.
+Every screen is an address under `/app`: agents, live transcripts, the files an agent sends you attached under its answer, a file browser with previews (images, Markdown, CSV, PDF, Word, Excel), the files and receipts an answer cites as chips that open the file at the lines it named, two sessions side by side, drag-and-drop and clipboard attachments, a microphone. Beside a chat, a side panel keeps its model, context and spend in a strip over every tab, and Files shows the folder's real path. A sidebar with pinned destinations, a More launcher and a ⌘K palette on a desk, a drawer on a phone; Settings opens as a popup over wherever you were, and its search shows the rows themselves. Installable as a PWA.
 
 </td>
 <td width="33%" valign="top">

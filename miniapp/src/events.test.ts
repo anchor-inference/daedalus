@@ -355,6 +355,14 @@ describe("the cache", () => {
     unwire();
   });
 
+  it("hears another window mark an entry unread, so the badge and the lists follow it", () => {
+    const { primed, invalidated, send, unwire } = wired();
+    send({ ...event(6, new Date().toISOString(), "notify.unseen"), payload: { ids: [3], summary: { unseen: 2, needs_you: 0 } } });
+    expect(primed).toEqual([[SUMMARY_KEY, { unseen: 2, needs_you: 0 }]]);
+    expect(invalidated).toEqual(["/api/notifications?"]);
+    unwire();
+  });
+
   it("reads the calendar again when an event, a block or a plan changed elsewhere", () => {
     const { invalidated, send, unwire } = wired();
     send(event(9, new Date().toISOString(), "calendar.changed"));

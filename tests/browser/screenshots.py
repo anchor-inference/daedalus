@@ -40,6 +40,7 @@ from api_stub import (  # noqa: E402
     GATES,
     INBOX_PDF,
     INBOX_SHOT,
+    PROPOSALS,
     VISION_DEFAULT,
     BoardStub,
     FocusStub,
@@ -585,7 +586,6 @@ def notify_frames(*entries: dict) -> str:
         frames.append(f"id: {n}\nevent: notify\ndata: {json.dumps(event)}\n\n")
     return "".join(frames)
 
-PROPOSALS = [{"id": "p57", "repo": "daedalus", "branch": "bot/websearch-retry", "pr_number": 57, "pr_url": "https://github.com/example/daedalus/pull/57", "title": "WebSearch: retry a backend that timed out once before falling back", "summary": "A backend that answers 504 once is tried again after a second; only a second failure falls through to the next backend. Unit test added.", "status": "pending", "reason": None, "created_at": ago(minutes=20)}]
 
 # The Schedules screen's host: the realistic set of schedule_stub.py (long instructions, five cron
 # shapes, a failed run, a paused schedule, a finished one-off) in the picture's language. Its proposal
@@ -639,7 +639,7 @@ SETTINGS = {
     # and the translator is left to the host, which names the cheap model it picks.
     "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
     # Settings → Navigation: the layout the app ships with.
-    "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
@@ -1050,6 +1050,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # Its quick agent's models, and the quick agents a running call looks for its helper among.
     if rel.startswith("/api/sessions/") and rel.endswith(("/quick-models", "/quick-agents")) and fulfil_shared(route):
         return None
+    if rel.startswith("/api/proposals"):
+        # A recipe's ``proposals_empty`` flag answers the list with nothing, and so does the empty inbox's scene:
+        # a waiting proposal is an inbox entry too.
+        PROPOSALS.empty = bool(getattr(stub, "proposals_empty", False) or getattr(stub, "inbox_empty", False))
+        if fulfil_shared(route):
+            return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -1157,13 +1163,12 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         chat = params.get("session", [""])[0]
         return respond(route, [t for t in BOARD if t["origin_session_id"] == chat] if chat else BOARD)
     if rel == "/api/notifications/summary":
-        return respond(route, INBOX_SUMMARY)
+        return respond(route, {"unseen": 0, "needs_you": 0} if getattr(stub, "inbox_empty", False) else INBOX_SUMMARY)
     if rel == "/api/notifications":
+        # ``inbox_empty`` is a scene: a centre with nothing in it, for the empty state's picture.
+        if getattr(stub, "inbox_empty", False):
+            return respond(route, {"entries": [], "next_before": None, "summary": {"unseen": 0, "needs_you": 0}})
         return respond(route, {"entries": notifications_view(params.get("view", ["all"])[0]), "next_before": None, "summary": INBOX_SUMMARY})
-    if rel == "/api/proposals":
-        return respond(route, PROPOSALS)
-    if rel == "/api/proposals/p57/diff":
-        return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
     if rel == "/api/schedules" or rel.startswith("/api/recurring/"):
         answered = SCHEDULE_HOST.answer(route.request.method, rel, json.loads(route.request.post_data or "{}") if route.request.method in ("POST", "PATCH") else None)
         if answered is not None:
@@ -1560,10 +1565,10 @@ def open_phone_new_project(page: Page) -> None:
 
 def open_projects(page: Page) -> None:
     """The projects page beside the list already grouped by project: the folders in the column, the table in the conversation's place."""
-    # A picture before this one folds the sidebar, and folded there is only the rail: unfold it first.
+    # A picture before this one folds the sidebar, and folded there is only the corner's button: unfold it first.
     if not page.locator("nav.sidebar").count():
-        page.locator(".rail .rail-home.folded").click()
-    page.locator(".sidebar .project-chip").click()
+        page.locator(".sidebar-unfold").click()
+    page.locator(".sidebar [data-action='all-projects']").click()
     page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
 
 
@@ -1576,13 +1581,13 @@ def open_hire(page: Page) -> None:
 
 
 def open_menu(page: Page) -> None:
-    """The More launcher from the rail's foot: its search, the Frequent tiles and every destination with its count — over the conversation."""
-    page.locator(".rail [data-rail='menu']").click()
+    """The More launcher from the sidebar's More row: its search, the Frequent tiles and every destination with its count — over the conversation."""
+    page.locator(".sb-pinned-nav [data-nav='menu']").click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
 
 
 def fold_sidebar(page: Page) -> None:
-    """The sidebar folded away: the rail alone beside the conversation, its Home turned into the way to unfold."""
+    """The sidebar folded away: the conversation has the window, and a button in its corner brings the sidebar back."""
     page.keyboard.press("Control+\\")
     page.wait_for_timeout(400)
 
@@ -2040,10 +2045,25 @@ def run_terminals() -> int:
     return UNHANDLED.report()
 
 
-def open_bell(page: Page) -> None:
-    """The bell's popover over the agents: what needs you, with its buttons, and the day's feed."""
-    page.locator(".sidebar .bell").click()
-    page.wait_for_selector(".bell-pop .needs-you .notice-row", timeout=5000)
+INBOX_READY = ".inbox-split, .ph-page"
+
+
+def open_inbox_entry(page: Page, notice: int) -> None:
+    """The entry's row pressed: its reading pane beside the list, with the buttons that answer it."""
+    page.locator(f".inbox-row[data-notice='{notice}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='n{notice}']", timeout=5000)
+
+
+def open_inbox_proposal(page: Page, proposal: str) -> None:
+    page.locator(f".inbox-row[data-proposal='{proposal}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='p{proposal}']", timeout=5000)
+
+
+def open_inbox_tab(page: Page, tab: str) -> None:
+    """One of the header's views: all, needs, problems or done."""
+    page.locator(f".inbox-tabs [data-tab='{tab}']").click()
+    page.wait_for_selector(f".inbox-tabs [data-tab='{tab}'].on", timeout=5000)
+    page.wait_for_timeout(300)
 
 
 def raise_toasts(page: Page) -> None:
@@ -2054,7 +2074,7 @@ def raise_toasts(page: Page) -> None:
 
 
 def run_notifications() -> int:
-    """The bell, the toasts and the Inbox as the centre, on a desktop and on a phone."""
+    """The toasts and the Inbox as the centre, on a desktop and on a phone."""
     OUT.mkdir(parents=True, exist_ok=True)
     finished = next(e for e in INBOX if e["id"] == 31)
     with sync_playwright() as p:
@@ -2062,8 +2082,13 @@ def run_notifications() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "bell", "agents", before=open_bell, settle=500)
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
+        shot(page, "inbox-question", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_entry(p, QUESTION["id"]), settle=500)
+        shot(page, "inbox-proposal", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_proposal(p, PROPOSALS[0]["id"]), settle=500)
+        shot(page, "inbox-problems", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_tab(p, "problems"), settle=500)
+        stub.inbox_empty = True  # type: ignore[attr-defined]
+        shot(page, "inbox-empty", "inbox", wait=".inbox-empty", settle=500)
+        stub.inbox_empty = False  # type: ignore[attr-defined]
         stub.events = notify_frames(finished, QUESTION, PERMISSION)  # type: ignore[attr-defined]
         shot(page, "toasts", f"agents/{S1}", wait=".chat-scroll .timeline", before=raise_toasts, settle=300)
         stub.events = ""  # type: ignore[attr-defined]
@@ -2508,14 +2533,14 @@ def run() -> int:
         shot(page, "team", f"project/{P1}/team", wait=".staff-row")
         shot(page, "team-hire", f"project/{P1}/team", wait=".staff-row", before=open_hire, settle=700)
         # The start canvas under a folded sidebar has neither a list nor a chat, so waiting for
-        # either timed out here and stopped every picture after this one; the rail is there either
-        # way, and the switcher opens from the sidebar it unfolds.
-        shot(page, "projects", "agents", wait=".rail", before=open_projects)
-        shot(page, "new-project", "agents", wait=".rail", before=open_new_project, settle=600)
+        # either timed out here and stopped every picture after this one; the sidebar or its corner's
+        # button is there either way, and the projects open from the sidebar it unfolds.
+        shot(page, "projects", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_projects)
+        shot(page, "new-project", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_new_project, settle=600)
         shot(page, "voice", "companion")
         shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "cron", "schedules")
         shot(page, "services", "services")
         shot(page, "usage", "usage", settle=1500)
@@ -2739,7 +2764,7 @@ def run_canvas() -> int:
             if toggle.count():
                 toggle.click()
             page.locator(".cv-comment textarea").fill("Сделай заголовок как на вывеске" if ru else "Make the heading look like the shop sign")
-            # Off the rail, whose tooltips would otherwise sit in the picture.
+            # Off the sidebar, whose tooltips would otherwise sit in the picture.
             page.mouse.move(1300, 840)
             page.wait_for_timeout(700)
             page.screenshot(path=str(OUT / "canvas.png"))
@@ -2871,10 +2896,11 @@ def run_features() -> int:
 
 
 def run_selfdev() -> int:
-    """Capture the current Changes screen over the same invented proposal as the Inbox."""
-    def open_diff(page: Page) -> None:
-        page.locator(".proposal-sheet [role=tab]").nth(1).click()
-        page.wait_for_selector(".proposal-sheet pre.diff")
+    """Capture the Changes screen over the invented proposals: the list, a change set open for review
+    in both views, a two-thousand-line diff, a decided one and an empty list."""
+    def split(page: Page) -> None:
+        page.get_by_role("radio", name="Split" if LANG == "en" else "Рядом").click()
+        page.wait_for_selector(".dp-body.split")
 
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -2882,9 +2908,17 @@ def run_selfdev() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "changes", "changes", wait=".proposal.erow")
-        shot(page, "changes-summary", "changes/p57", wait=".proposal-sheet")
-        shot(page, "changes-diff", "changes/p57", wait=".proposal-sheet", before=open_diff)
+        shot(page, "changes-list", "changes", wait=".proposal.erow")
+        shot(page, "changes", "changes/p57", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-large", "changes/p58", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-decided", "changes/p55", wait=".review .dp-line, .review .dp-pair")
+        # The layout is remembered in the browser, so the split view goes last of the ones that read lines.
+        shot(page, "changes-split", "changes/p57", wait=".review .dp-line, .review .dp-pair", before=split)
+        stub.proposals_empty = True  # type: ignore[attr-defined]
+        try:
+            shot(page, "changes-empty", "changes", wait=".empty")
+        finally:
+            stub.proposals_empty = False  # type: ignore[attr-defined]
         desk.close()
         browser.close()
     return UNHANDLED.report()
@@ -2945,9 +2979,9 @@ def run_imports() -> int:
         desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); } catch (e) {}")
         page = desk.new_page()
         page.route("**/api/**", route)
-        shot(page, "import-explorer", "agents", wait=".rail", before=explorer, settle=600)
-        shot(page, "import-large", "agents", wait=".rail", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
-        shot(page, "import-progress", "agents", wait=".rail", before=progress, settle=400)
+        shot(page, "import-explorer", "agents", wait="nav.sidebar, .sidebar-unfold", before=explorer, settle=600)
+        shot(page, "import-large", "agents", wait="nav.sidebar, .sidebar-unfold", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
+        shot(page, "import-progress", "agents", wait="nav.sidebar, .sidebar-unfold", before=progress, settle=400)
         imports.hold = None
         shot(page, "import-session", f"agents/{IMPORTED_ID}", wait=".imp-banner", settle=900)
         desk.close()

@@ -62,7 +62,7 @@ QUESTIONS: list[tuple[str, str]] = [
     ("Telegram topics instead of the private chat", "setting:telegram.mode"),
     ("change the voice that reads answers aloud", "setting:companion.tts.local_voice"),
     ("модель для голосового режима консьержа", "setting:companion.preset"),
-    ("как поменять порядок пунктов в боковой панели", "setting:navigation.rail"),
+    ("как поменять порядок пунктов в боковой панели", "setting:navigation.pinned"),
     ("разрешить агенту менять свой код без моего подтверждения", "setting:self_change.approval"),
     ("how many browsers can run at once", "setting:browser.running_cap"),
     # Asked after the ranking was tuned on the ones above, and kept as they came.

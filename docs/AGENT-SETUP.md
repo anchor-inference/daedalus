@@ -149,7 +149,7 @@ docker exec deploy-daedalus-1 /srv/venv/bin/python -m daedalus check   # "model:
 
 ## 3b. Projects, when the operator has folders of their own on the server
 
-A **project** is a folder the operator adds in the app (Projects in the rail, or the grid icon on the
+A **project** is a folder the operator adds in the app (the "Projects" label of the sidebar, or the grid icon on the
 Agents screen): the agents started in it work in that folder, and every path they resolve is checked
 against it — the file tools, the file browser, the preview, the download and the files they send.
 `Exec` runs in the folder; the body of a command is bounded by `tools.exec.sandbox`, which is `off` by

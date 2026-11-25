@@ -135,23 +135,21 @@
   --radius-pill: 999px;
   /* Rows and controls. A phone gets the touch sizes below. */
   --row-h: 32px;        /* every one-line row: sidebar, menus, settings' sections, explorer rows, nav items */
-  --row-h-2: 44px;      /* a chat in the sidebar: its title over a line of state, host, model and time */
-  --row-h-kid: 40px;    /* a chat hung from an open project in the sidebar, under the project's tile */
+  --row-h-2: 44px;      /* a two-line row: a title over a line of meta, in a list that is not the sidebar's */
   --row-h-dense: 28px;  /* a dense row: explorer tree, terminal pane headers, aside rows, a step of a run */
   --row-h-touch: 44px;  /* phones only: rows and icon buttons */
   --ctl-h: 32px;        /* icon buttons and buttons on a desktop */
   --composer-toolbar-h: 32px;
   --ctl-h-sm: 28px;     /* small icon buttons, small buttons, filter chips */
-  --chip-h-dense: 24px; /* the sidebar's filter chips: four of them share the column's one line */
+  --chip-h-dense: 24px; /* a dense chip: memory pills, a terminal pane's chips, a question's steps */
   --ctl-h-lg: 40px;     /* large icon buttons and voice actions */
   --icon: 16px; --icon-sm: 16px; --icon-xs: 14px;
   --dot: 6px;           /* the status dot in a session row */
   --avatar: 24px;
-  --plate: 24px;        /* a sidebar row's round plate (a chat) or square tile (a project) */
+  --plate: 24px;        /* a list row's square tile (a memory entry) */
   /* Layout. */
   --sidebar-w: 300px;   /* the default; dragged between the two below and remembered */
   --sidebar-w-min: 232px; --sidebar-w-max: 360px;
-  --rail-w: 52px;       /* the rail of icons at the left edge, always there on a desktop */
   --panel-w: 42%; --panel-w-min: 360px;
   --pip-w: 240px;       /* the browser's corner preview, 16:10 above a 24 px footer */
   --reading-w: 760px;   /* prose max width: the answer and the user's card */

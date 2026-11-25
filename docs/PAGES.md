@@ -2,7 +2,7 @@
 
 A custom page is a screen of your own inside the Daedalus app: a dashboard, a form, a specialised
 client for some API, a 3D or CAD viewer, a calculator, or an existing web application you already
-run. It opens at `/app/p/<slug>`, can sit in the rail and the phone drawer, follows your theme, and
+run. It opens at `/app/p/<slug>`, can be pinned in the sidebar and the phone drawer, follows your theme, and
 works on a phone and a desktop.
 
 A page is **data, not app code**. It is a folder in the state volume, so adding, changing or removing
@@ -254,7 +254,7 @@ token and closed when the check ends, inside a frame that answers the bridge as 
 page's `/api` requests are answered 401 there, and the result says so. The check is advice: the
 agent decides when to publish.
 
-The agent puts a published page on the rail through the `[navigation]` setting (`page:<slug>`).
+The agent pins a published page in the sidebar through the `[navigation]` setting (`page:<slug>` in `pinned`).
 
 ## A page's own agent
 

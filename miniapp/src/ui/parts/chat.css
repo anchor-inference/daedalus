@@ -381,13 +381,6 @@
 .question { border-color: var(--line-strong); }
 .option { display: block; width: 100%; text-align: left; margin-top: 6px; }
 .option.selected { border-color: var(--fg-3); background: var(--surface-2); }
-pre.diff { font-family: var(--mono); font-size: var(--fs-mono); white-space: pre; overflow-x: auto; background: var(--inset); box-shadow: var(--shadow-ring); padding: 10px 12px; border-radius: var(--radius-sm); }
-pre.diff .add { color: var(--ok); }
-pre.diff .del { color: var(--bad); }
-pre.diff .hunk { color: var(--info); }
-/* A phone wraps a diff rather than scrolling it sideways: the scroll had no mark, and a long file
-   header simply stopped at the sheet's edge with its second path gone. */
-@media (max-width: 1023px) { pre.diff { white-space: pre-wrap; overflow-wrap: anywhere; } }
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
 td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; }

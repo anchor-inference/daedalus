@@ -110,7 +110,7 @@ def run() -> int:
 
         # Archive "Old shop" from its settings: it leaves the table for the fold. The column's
         # projects chip opens the projects page on a desktop.
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         rows = page.locator(".projects-row:not(.head)")
         expect(rows).to_have_count(2)
         expect(page.locator(".projects-archived")).to_have_count(0)

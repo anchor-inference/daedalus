@@ -7,7 +7,7 @@ import os
 from urllib.parse import urlsplit
 
 from api_stub import DEFAULT_APP, expect_app
-from check_nav_rail import go, serve
+from check_sidebar_nav import go, serve
 from playwright.sync_api import expect, sync_playwright
 from screenshots import UNHANDLED
 

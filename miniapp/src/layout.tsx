@@ -1,5 +1,5 @@
 // The layout is the operator's, not the session's: which panes are open, how wide they were dragged,
-// whether the sidebar is a column or folded away behind the rail. All of it is remembered per
+// whether the sidebar is a column or folded away. All of it is remembered per
 // browser and none of it travels with a session, so leaving for Settings and coming back does not mean reopening anything.
 
 import { useCallback, useRef, useState } from "react";
@@ -165,11 +165,11 @@ export function PaneHandle({ side, drag }: { side: "left" | "right"; drag: PaneD
   );
 }
 
-// ── the sidebar: a column beside the rail, or folded away ───────────────────────────────────
+// ── the sidebar: a column, or folded away ───────────────────────────────────
 
 const SIDEBAR = "daedalus.sidebar";
 
-/** Below this the column would take a third of the window, so folded is the default there: the rail alone is left. */
+/** Below this the column would take a third of the window, so folded is the default there: the conversation has the window. */
 export const SIDEBAR_COLUMN_MIN = 1100;
 
 /** Whether the sidebar is folded: what the operator chose, or, having chosen nothing, what the window allows. */

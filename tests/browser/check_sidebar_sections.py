@@ -1,11 +1,11 @@
-"""The desktop sidebar: the projects and the chats apart, the two buttons under "New chat", a collapsed
-project that still shows its live chats, and the keyboard.
+"""The desktop sidebar's list: the projects and the chats apart under their labels, a collapsed
+project that says what its chats are doing, and the keyboard.
 
 A chat's own scratch project (settings.ephemeral) is listed among the chats, by day; a project made by
 hand, or kept, is listed under "Projects" whatever it holds, and so is Voice. Projects start collapsed,
-the one holding the open chat opens itself, and a collapsed project keeps its waiting, working and
-failed chats in sight. "All projects" and "New project" share one row, and neither label is cut at the
-column's 300 px default, in English or in Russian.
+the one holding the open chat opens itself, and a collapsed project says in a word that one of its
+chats works or waits, and keeps a waiting one in sight. The "Projects" label leads to every project
+and its + makes one; every row is one 32 px line whose text starts 12 px in, in English or in Russian.
 
     cd miniapp && npm run build
     python3 tests/browser/serve_app.py 9047 /tmp/app-root &
@@ -47,14 +47,14 @@ def main() -> int:
             expect(side.locator(".sb-row").first).to_be_visible(timeout=15000)
 
             width = side.evaluate("el => Math.round(el.getBoundingClientRect().width)")
-            # 300 less the one pixel its right edge's line reserves, as check_density.py measures it.
-            check(width == 299, f"{lang}: the column is 300 px wide ({width} inside its edge)")
-            buttons = side.locator(".sb-pbtns button")
-            check(buttons.count() == 2, f"{lang}: All projects and New project share one row")
-            clipped = side.evaluate("""el => [...el.querySelectorAll('.sb-pbtns button .truncate')].filter((s) => s.scrollWidth > s.clientWidth + 1).map((s) => s.textContent)""")
-            check(clipped == [], f"{lang}: neither project button's label is cut ({clipped})")
-            tops = buttons.evaluate_all("els => els.map((b) => Math.round(b.getBoundingClientRect().top))")
-            check(len(set(tops)) == 1, f"{lang}: the two buttons stand on one line ({tops})")
+            check(width == 300, f"{lang}: the column is 300 px wide ({width})")
+            labels = side.locator(".sb-sec").evaluate_all("els => els.map((e) => e.textContent)")
+            check(labels == (["Projects", "Chats"] if lang == "en" else ["Проекты", "Чаты"]), f"{lang}: the list's labels are {labels}")
+            check(side.locator(".sb-sec-projects [data-action='all-projects']").count() == 1 and side.locator(".sb-sec-projects .sb-sec-add").count() == 1, f"{lang}: the Projects label leads to every project and carries the +")
+            # Every row one 32 px line with its text 12 px in from the row's edge (36 inside a project).
+            rows = side.evaluate("""el => [...el.querySelectorAll('.sb-list .sb-row')].map((r) => { const b = r.getBoundingClientRect(); const t = r.querySelector('.sb-t').getBoundingClientRect(); const icon = r.querySelector(':scope > .sb-tile'); return { h: Math.round(b.height), x: Math.round(b.left), pad: Math.round((icon ? icon.getBoundingClientRect().left : t.left) - b.left), nested: !!r.closest('.sb-kids') }; })""")
+            bad = [r for r in rows if r["h"] != 32 or r["x"] != 8 or r["pad"] != (36 if r["nested"] else 12)]
+            check(rows and not bad, f"{lang}: every row is 32 px with its text 12 px in ({bad or rows[:1]})")
 
             projects = side.locator("[data-project]").evaluate_all("els => els.map((e) => e.dataset.project)")
             check(sorted(projects) == sorted([shots.P1, shots.P3, "5a8d1c0b6e22", shots.PV]), f"{lang}: the projects section holds the projects and Voice ({projects})")
@@ -64,13 +64,14 @@ def main() -> int:
             bakery = side.locator(f"[data-project='{shots.P1}']")
             check(bakery.locator(".sb-prow").get_attribute("aria-expanded") == "false", f"{lang}: a project starts collapsed")
             live = bakery.locator("[data-session]").evaluate_all("els => els.map((e) => e.dataset.session)")
-            check(live == [shots.S1], f"{lang}: the collapsed project still shows its working chat and nothing idle ({live})")
+            check(live == [], f"{lang}: the collapsed project lists no working or idle chat ({live})")
+            check(bakery.locator(".sb-prow .sb-word.running").count() == 1, f"{lang}: and says in a word that one of its chats works")
 
             # The keyboard: / to search, arrows down the rows, right to open a project, left to close it.
             page.locator(".start .composer-field").blur()
             page.mouse.click(900, 860)
             page.keyboard.press("/")
-            check(page.evaluate("document.activeElement?.closest('.sb-search') !== null"), f"{lang}: / reaches the search")
+            check(page.evaluate("document.activeElement?.closest('.sb-search') !== null"), f"{lang}: / opens the search")
             page.keyboard.press("ArrowDown")
             first = side.locator(".sb-prow").first
             check(first.evaluate("el => el === document.activeElement"), f"{lang}: down from the search lands on the first row")

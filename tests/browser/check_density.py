@@ -64,11 +64,14 @@ READ = """
   const single = rows.filter((r) => !r.querySelector('.erow-meta') && !r.querySelector('.erow-line2'));
   const double = rows.filter((r) => r.querySelector('.erow-meta') || r.querySelector('.erow-line2'));
   const acts = all('.act:not(.head)');
-  // The sidebar's own rows: a chat two lines at 44, a project one at 36, a chat under a project 40;
-  // a chat's plate is round and a project's tile square.
+  // The sidebar's own rows: every one a 32 px line, a chat, a chat inside a project and a project alike;
+  // the pinned destinations too.
   const sbChat = all('.sidebar .sb-chat:not(.nested)').map((r) => box(r).h);
   const sbNested = all('.sidebar .sb-chat.nested').map((r) => box(r).h);
   const sbProject = all('.sidebar .sb-prow').map((r) => box(r).h);
+  const sbNav = all('.sidebar .sb-pinned-nav .sb-nav').map((r) => box(r).h);
+  const sbHead = box(one('.sidebar .sidebar-head'));
+  const sbFoot = box(one('.sidebar .sidebar-foot'));
   const radius = (el) => el ? getComputedStyle(el).borderTopLeftRadius : null;
   // Only what is drawn: the desktop-only buttons are display:none on a phone and measure 0×0.
   const icons = all('.chat-head .iconbtn', '.pagehead .iconbtn').filter((el) => el.getBoundingClientRect().width > 0);
@@ -92,8 +95,7 @@ READ = """
     answerFs: px(one('.answer'), 'fontSize'),
     userFs: px(one('.msg.user'), 'fontSize'),
     userW: box(one('.msg.user')),
-    sbChat, sbNested, sbProject,
-    plate: box(one('.sidebar .sb-chat:not(.nested) .sb-plate')), plateRadius: radius(one('.sidebar .sb-chat:not(.nested) .sb-plate')), tileRadius: radius(one('.sidebar .sb-tile')),
+    sbChat, sbNested, sbProject, sbNav, sbHead, sbFoot,
     rowSingle: single.map((r) => box(r).h),
     rowDouble: double.map((r) => box(r).h),
     rowFs: px(one('.erow-title'), 'fontSize'),
@@ -103,8 +105,6 @@ READ = """
     iconbtn: icons.map(box),
     chips: all('.chat-head .chip').map(box),
     phoneRows,
-    menuBtn: box(one('.rail [data-rail="menu"]', '.sidebar-menu')),
-    rail: box(one('.rail')),
     small: smallText(),
   };
   // Every drawn text under the 12 px floor: an element that holds words of its own, is on the
@@ -165,15 +165,15 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
     return out
 
 
-# The width of what stands left of the conversation: the rail, plus the sidebar when it is open.
+# The width of what stands left of the conversation: the sidebar's column when it is open, nothing when folded.
 LEFT = """() => {
   const w = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().width) : 0; };
-  return { rail: w('.desktop-column'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
+  return { column: w('.desktop-column'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
 }"""
 
 
 def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
-    """The fold and the menu, which are behaviour rather than sizes: the rail left alone, its persistence, the popover's keyboard."""
+    """The fold and the menu, which are behaviour rather than sizes: the sidebar gone, its persistence, the popover's keyboard."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     context.add_init_script(OPEN_FOLDERS)
     page = open_page(context, f"agents/{S1}", ".sidebar")
@@ -183,14 +183,14 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(400)
     out["collapsed"] = page.evaluate(LEFT)
     page.reload()
-    page.wait_for_selector(".rail", timeout=15000)
+    page.wait_for_selector(".sidebar-unfold", timeout=15000)
     page.wait_for_timeout(400)
     out["collapsedAfterReload"] = page.evaluate(LEFT)
     page.keyboard.press("Control+\\")
     page.wait_for_timeout(400)
     out["reopened"] = page.evaluate(LEFT)
 
-    page.locator('.rail [data-rail="menu"]').click()
+    page.locator('.sb-pinned-nav [data-nav="menu"]').click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
     out["menuItems"] = page.locator(".navmenu [data-launch]").count()
     out["menuLang"] = page.locator(".navmenu .lang").count()
@@ -209,7 +209,7 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     out["menuClosed"] = page.locator(".navmenu").count() == 0
-    out["focusBack"] = page.evaluate("() => document.activeElement === document.querySelector('.rail [data-rail=\"menu\"]')")
+    out["focusBack"] = page.evaluate("() => document.activeElement === document.querySelector('.sb-pinned-nav [data-nav=\"menu\"]')")
     page.keyboard.press("Control+Shift+M")
     page.wait_for_timeout(300)
     out["shortcutOpens"] = page.locator(".navmenu[role='dialog']").count() == 1
@@ -637,21 +637,22 @@ def judge(m: dict) -> list[str]:
     if m["small"]["under"]:
         problems.append(f"{m['vw']}: text under the 12 px floor: {m['small']['under']}")
     if not phone:
-        # 52 px of rail and the 300 px column the design opens the sidebar at (288 before it, and 272
-        # until the rows went to two lines). The operator's drag still moves it; this is the default.
-        if not m["left"] or m["left"]["w"] != 352:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 352 wide")
-        # A project row is the 32 px one-line row every list shares now (36 before).
-        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 32)):
+        # The 300 px column the design opens the sidebar at, alone: the 52 px rail of icons beside it
+        # is gone (288 before, and 272 until the rows went to two lines). The operator's drag still
+        # moves it; this is the default.
+        if not m["left"] or m["left"]["w"] != 300:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 300 wide")
+        # Every row is the 32 px one-line row every list shares: a chat was two lines of 44 (40 under a
+        # project) with its model and host on the second line, which went to the row's tooltip.
+        for name, rows in (("chat", m["sbChat"]), ("nested chat", m["sbNested"]), ("project", m["sbProject"]), ("pinned", m["sbNav"])):
             for h in rows:
-                if h != want:
-                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not {want}")
-        if not m["sbChat"] or not m["sbProject"]:
-            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows and {len(m['sbProject'])} project rows")
-        if m["plate"] and m["plate"]["w"] != 24:
-            problems.append(f"{m['vw']}: a chat's plate is {m['plate']['w']}px, not 24")
-        if m["plateRadius"] != "50%" or m["tileRadius"] in (None, "50%"):
-            problems.append(f"{m['vw']}: a chat's plate is not round or a project's tile not square ({m['plateRadius']}, {m['tileRadius']})")
+                if h != 32:
+                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not 32")
+        if not m["sbChat"] or not m["sbProject"] or not m["sbNav"]:
+            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows, {len(m['sbProject'])} project rows and {len(m['sbNav'])} pinned rows")
+        for name in ("sbHead", "sbFoot"):
+            if not m[name] or m[name]["h"] != 52:
+                problems.append(f"{m['vw']}: the sidebar's {name[2:].lower()} is {m[name]}, not 52 high")
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
@@ -713,10 +714,9 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 52 px rail
-        # and the 300 px sidebar is a 1088 px chat area, 58 % of it the conversation, and the
-        # timeline is that less the gutters, 583 px. The floor was 590 while the sidebar was 288; the
-        # 12 px the design's wider column takes come out of it, so the floor is 578.
+        # Beside the 42 % panel a 1440 window keeps a conversation column: 1440 less the 300 px
+        # sidebar is a 1140 px chat area, 58 % of it the conversation. The floor of 578 was set while a
+        # 52 px rail stood beside the sidebar as well; without it the column is wider still.
         if m["vw"] == 1440 and m["timeline"]["w"] < 578:
             problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 578")
     return problems
@@ -724,24 +724,24 @@ def judge(m: dict) -> list[str]:
 
 def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
-    # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
-    # Folding retains a 52 px icon column; the conversation starts at its edge.
-    # The column opens 300 wide, the design's default (288 before, 272 before that).
-    want = {"open": (352, 299, 352), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (352, 299, 352)}
-    for key, (rail, sidebar, main) in want.items():
+    # The sidebar is the first column alone, 300 wide, the design's default (288 before, 272 before
+    # that); folded, nothing of it is left and the conversation starts at the window's edge.
+    want = {"open": (300, 300, 300), "collapsed": (0, 0, 0), "collapsedAfterReload": (0, 0, 0), "reopened": (300, 300, 300)}
+    for key, (column, sidebar, main) in want.items():
         got = s[key]
-        if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
-            problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
-    # The launcher lists every destination, the rail's included, as Frequent tiles and the catalogue
+        if (got["column"], got["sidebar"], got["main"]) != (column, sidebar, main):
+            problems.append(f"{key}: column/sidebar/conversation start {got['column']}/{got['sidebar']}/{got['main']}, not {column}/{sidebar}/{main}")
+    # The launcher lists every destination, the pinned ones included, as Frequent tiles and the catalogue
     # (the stub's thirteen screens and its one published page), then Settings, Customise and About.
     if s["menuItems"] != 17:
         problems.append(f"the launcher has {s['menuItems']} items")
     # The language and the companion went to Settings -> Appearance.
     if s["menuLang"]:
         problems.append("the launcher still has a language switch")
-    # It opens from the rail's foot, beside the rail rather than over it, 600 wide while the window allows.
-    if not 48 <= s["menuBox"]["x"] <= 58 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 600:
-        problems.append(f"the launcher is not beside its rail trigger at 600 wide: {s['menuBox']}")
+    # It opens from the sidebar's More row, beside the sidebar rather than over it, 600 wide while the
+    # window allows.
+    if not 296 <= s["menuBox"]["x"] <= 306 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 600:
+        problems.append(f"the launcher is not beside its More row at 600 wide: {s['menuBox']}")
     if s["menuRow"] != 32:
         problems.append(f"a catalogue row is {s['menuRow']}px")
     for key in ("menuFocusInside", "arrowMoves", "escClears", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):

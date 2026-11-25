@@ -417,7 +417,7 @@ export function wireCache(to: { on: typeof onEvent; prime: typeof prime; invalid
     }, LIST_DEBOUNCE_MS);
   };
   const offs = [
-    to.on(["notify", "notify.seen", "notify.resolved"], (event) => {
+    to.on(["notify", "notify.seen", "notify.unseen", "notify.resolved"], (event) => {
       const summary = event.payload.summary;
       if (summary && typeof summary.unseen === "number" && typeof summary.needs_you === "number") to.prime(SUMMARY_KEY, { unseen: summary.unseen, needs_you: summary.needs_you });
       to.invalidate("/api/notifications?");

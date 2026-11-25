@@ -2451,7 +2451,7 @@ NAV_LIST_MAX = 200
 
 
 class NavigationConfig(BaseModel):
-    """Where each destination of the app sits: the desktop rail, its More launcher, the phone drawer.
+    """Where each destination of the app sits: pinned in the desktop sidebar, its More launcher, the phone drawer.
 
     Every list empty is the layout the app ships with. An id the app does not know (a page that was
     removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
@@ -2459,10 +2459,11 @@ class NavigationConfig(BaseModel):
     this section, and a typo that silently vanished would read as a change that did not take.
     """
 
-    rail: list[str] = Field(default_factory=list)
-    """The desktop rail, top to bottom. A built-in place not listed anywhere keeps its usual spot."""
+    pinned: list[str] = Field(default_factory=list)
+    """Pinned under New chat at the top of the desktop sidebar, top to bottom. A built-in place not
+    listed anywhere keeps its usual spot."""
     more: list[str] = Field(default_factory=list)
-    """Items in the rail's More launcher, in order within their group."""
+    """Items in the sidebar's More launcher, in order within their group."""
     drawer: list[str] = Field(default_factory=list)
     """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
     waits in the phone's More launcher. Empty is each mode's usual drawer."""
@@ -2471,7 +2472,7 @@ class NavigationConfig(BaseModel):
     icons: dict[str, str] = Field(default_factory=dict)
     """Item id → the name of a built-in icon to draw in place of its own."""
 
-    @field_validator("rail", "more", "drawer", "hidden")
+    @field_validator("pinned", "more", "drawer", "hidden")
     @classmethod
     def _ids(cls, value: list[str]) -> list[str]:
         if len(value) > NAV_LIST_MAX:
@@ -2520,8 +2521,8 @@ class AgentSettingsConfig(BaseModel):
 
     auto_apply: list[str] = Field(default_factory=lambda: ["navigation", "answer_language", "compaction"])
     """Sections a change of the agent's applies at once, the operator told afterwards in the chat. The
-    defaults change how things look and read, never what the agent may do or spend: the rail and the
-    drawer, the language of the answers, and when and how long the history is summarised."""
+    defaults change how things look and read, never what the agent may do or spend: the sidebar's
+    pinned rows and the drawer, the language of the answers, and when and how long the history is summarised."""
     proposal_hours: int = Field(default=24, ge=1, le=24 * 14)
     """How long a change waiting for the operator stays open; then it expires and the agent is told."""
 
@@ -3339,7 +3340,7 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
 
     Every key carries over as it was — the model, the relay limits and the whole ``tts`` table — and
     the navigation's ``voice`` entry becomes ``companion`` wherever the operator placed it, so the
-    page keeps its spot on the rail rather than falling back to where a new screen ships.
+    page keeps its spot where the operator placed it rather than falling back to where a new screen ships.
     """
     changed = False
     voice = raw.pop("voice", None)
@@ -3385,6 +3386,19 @@ def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
     return changed
 
 
+def _migrate_rail_to_pinned(raw: dict[str, Any]) -> bool:
+    """The desktop's rail of icons became the rows pinned at the top of the sidebar, and ``[navigation]
+    rail`` became ``pinned``. The list carries over as it was, so what the operator put on the rail is
+    what is pinned now. Runs after the renames above, which still read ``rail`` in the files they fix.
+    """
+    navigation = raw.get("navigation")
+    if not isinstance(navigation, dict) or "rail" not in navigation:
+        return False
+    rail = navigation.pop("rail")
+    navigation.setdefault("pinned", rail)
+    return True
+
+
 def _drop_session_modes(raw: dict[str, Any]) -> bool:
     """Session modes and the per-message depth sort are gone; their tables leave the file.
 
@@ -3420,6 +3434,7 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
     changed = _migrate_diagrams_to_canvas(raw) or changed
+    changed = _migrate_rail_to_pinned(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):

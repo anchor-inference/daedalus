@@ -7,8 +7,10 @@
 @import "./parts/chat.css";
 @import "./parts/composer.css";
 @import "./parts/workspace.css";
+@import "./parts/sidebar.css";
 @import "./parts/chat-parts.css";
 @import "./parts/lists.css";
+@import "./parts/inbox.css";
 @import "./parts/pages.css";
 @import "./parts/voice.css";
 @import "./parts/setup.css";

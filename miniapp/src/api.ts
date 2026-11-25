@@ -2154,7 +2154,9 @@ export type Question = {
 /** How many notifications want the operator: unseen ones worth a badge, and open requests. */
 export type NotificationSummary = { unseen: number; needs_you: number };
 
-export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean };
+/** `description` says what the button does, in the operator's language; only a producer that knows sets
+ *  it, so a button without one is drawn without one rather than with a guess. */
+export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean; description?: string };
 
 /** One entry of the notification centre, as `/api/notifications` and the `notify` event carry it. */
 export type Notification = {
@@ -2212,6 +2214,9 @@ export type Proposal = {
   status: string;
   reason: string | null;
   created_at: string;
+  /** The chat that made the change and when it was decided; rows from before these were kept have none. */
+  session_id?: string | null;
+  decided_at?: string | null;
 };
 
 /** What a watch waits for: ``event`` and the fields that kind of event has (the host adds the ids and
@@ -2475,7 +2480,7 @@ export type Settings = {
   terminals?: { running_cap: number; host_memory_cap?: string };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;
-  /** The rail, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */
+  /** The sidebar's pinned rows, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
   assist?: { predict: boolean; predict_preset?: string; predict_usd_per_day?: number };

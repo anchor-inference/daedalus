@@ -1265,5 +1265,5 @@
      the name's; the arrows and the place selector do the moving. */
   .nav-cfg-grip { display: none; }
   .nav-cfg-row { gap: var(--space-1); padding: 0; }
-  .nav-cfg-place.field { width: 96px; }
+  .nav-cfg-place { width: 96px; }
 }

@@ -154,8 +154,8 @@ synthesis_usd_per_day = 0.5  # what memory's model calls may spend in a day; 0 =
 paused = false               # keep memory but hand nothing to the agent and learn nothing new
 
 [navigation]                 # where the app puts each destination; Settings -> Navigation edits it
-rail = ["inbox", "terminals", "page:dosing"]  # the desktop rail, top to bottom
-more = ["usage"]             # off the rail, in the More launcher's catalogue, in order within its group
+pinned = ["inbox", "terminals", "page:dosing"]  # pinned at the top of the desktop sidebar, in order
+more = ["usage"]             # not pinned, in the More launcher's catalogue, in order within its group
 drawer = ["inbox", "terminals", "board"]  # the phone drawer; non-empty is the whole drawer, the rest
                              # waits in the phone's More launcher
 hidden = ["voice"]           # never shown on any device; wins over the lists above

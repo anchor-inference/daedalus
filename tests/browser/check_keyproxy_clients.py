@@ -125,7 +125,9 @@ def notification(browser, lang: str) -> list[str]:  # type: ignore[no-untyped-de
     page.route("**/api/**", stub)
     page.route("**/api/notifications**", notices)
     page.goto(f"{BASE}/inbox?token=t&lang={lang}")
-    row = page.locator('[data-notice="72"]').first
+    # The one entry is the open one: its buttons are in the reading pane beside the list.
+    page.locator('.inbox-row[data-notice="72"]').first.click()
+    row = page.locator('.inbox-pane[data-item="n72"]')
     expect(row).to_be_visible(timeout=15000)
     button = row.locator('[data-action="update"]')
     expect(button).to_have_text(words["update"])

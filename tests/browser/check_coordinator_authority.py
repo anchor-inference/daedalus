@@ -158,9 +158,9 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
     def open_authority() -> object:
         # The desktop's column has the project chip; a phone's project switcher is the drawer's
         # Projects "See all".
-        page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
-        if page.locator(".project-chip:visible").count():
-            page.locator(".project-chip:visible").first.click()
+        page.wait_for_selector("[data-action='all-projects']:visible, .ph-menu:visible")
+        if page.locator("[data-action='all-projects']:visible").count():
+            page.locator("[data-action='all-projects']:visible").first.click()
         else:
             open_drawer(page)
             page.locator(".ph-drawer-root.open [data-nav='projects']").click()
