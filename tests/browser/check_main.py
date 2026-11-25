@@ -192,7 +192,7 @@ def phone(page: Page, lang: str) -> None:
     fits(page, f"{lang} phone questions")
     page.locator(".panel-sheet .sheet-backdrop, .panel-sheet").first.press("Escape")
     expect(page.locator(".panel-sheet")).to_have_count(0)
-    page.locator(".chat-head > button.iconbtn, .chat-head > .ph-ib").first.click()
+    page.locator(".chat-head .pagehead-row > .ph-ib, .chat-head > button.iconbtn").first.click()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(page.locator(".ph-orch [data-main-entry] .list-row")).to_be_visible()
 

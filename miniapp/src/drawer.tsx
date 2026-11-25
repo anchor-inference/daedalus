@@ -69,11 +69,11 @@ export function AppDrawer(p: AppDrawerProps) {
   // drawer's own history entry (router.ts, navigate), so Back from there returns to the page under it.
   const at = window.location.pathname + window.location.search;
   useEffect(() => { closeDrawer(); }, [at]);
-  // A link to where the reader already is changes no address, so the drawer closes itself once the
-  // link has had its click. Not before it: closing first took the drawer's history entry back while
-  // the link's own move was still to come, and Back's late arrival undid that move.
+  // A link or a chat's row for where the reader already is changes no address, so the drawer closes
+  // itself once the row has had its click. Not before it: closing first took the drawer's history
+  // entry back while the row's own move was still to come, and Back's late arrival undid that move.
   const onClick = (e: MouseEvent) => {
-    const link = (e.target as Element).closest?.("a[href]");
+    const link = (e.target as Element).closest?.("a[href], [data-nav='chat']");
     if (link && !(e.metaKey || e.ctrlKey || e.shiftKey)) closeDrawer();
   };
   const here = currentId(route.screen, route.detail);

@@ -294,7 +294,7 @@
   .composer[data-shape] .ctx-ring { order: 2; }
   .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside { order: 3; }
   .composer[data-shape] .roundbtn { order: 4; }
-  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside, .composer[data-shape] .composer-access { flex: none; width: var(--tap); height: var(--tap); min-width: var(--tap); min-height: var(--tap); margin: 0; padding: 0; justify-content: center; border-radius: 12px; background: transparent; color: var(--fg-2); }
+  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .stop-aside, .composer[data-shape] .composer-access { position: relative; flex: none; width: var(--tap); height: var(--tap); min-width: var(--tap); min-height: var(--tap); margin: 0; padding: 0; justify-content: center; border-radius: 12px; background: transparent; color: var(--fg-2); }
   .composer[data-shape] .iconbtn.plus > .ic, .composer[data-shape] .composer-tools > .mic > .ic, .composer[data-shape] .composer-access > .ic { width: 20px; height: 20px; }
   /* The access is its shield alone, in the attention colour while everything is let through. */
   .composer[data-shape] .composer-access .access-word, .composer[data-shape] .composer-access .access-more { display: none; }
@@ -371,6 +371,15 @@
   .ph-tray-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: 4px; }
   .ph-tray-actions .ph-btn { width: 100%; min-width: 0; }
   .ph-btn.ph-deny { background: none; color: var(--bad); }
+}
+
+/* Under 380 px the glyphs give the model's name the ten characters that tell one model from another:
+   drawn a little narrower, each still reaches 44 px to the finger through its ::after. */
+@media (max-width: 379px) {
+  .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .composer-access { width: 38px; min-width: 38px; }
+  .composer[data-shape] .iconbtn.plus::after, .composer[data-shape] .composer-tools > .mic::after, .composer[data-shape] .composer-access::after { content: ""; position: absolute; inset: 0 -3px; }
+  .composer[data-shape] .ctx-ring { min-width: 32px; padding: 0; }
+  .composer[data-shape] .ctx-ring::after { content: ""; position: absolute; inset: 0 -6px; }
 }
 
 /* The slash palette floats over the conversation like any menu: one surface, rows that light. */

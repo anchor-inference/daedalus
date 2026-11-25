@@ -1891,9 +1891,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     : remote ? <span className="ph-chat-remote">{remotePlace(remote)}</span>
     : detail?.fallback ? <span className="ph-chat-fallback">{shortModel(detail.fallback.to, 28)}</span>
     : null;
-  // Over the title: the chat it helps, or the project it lives in, as the desktop's header leads with.
+  // Over the title: the chat it helps, or the project it lives in, as the desktop's header leads with,
+  // and like it not when the project's name is the chat's own.
   const phoneOver = detail?.subagent_of ? (detail.leader_title ?? t("session.leader.word"))
-    : detail && isProject(detail.project) ? detail.project.name
+    : detail && isProject(detail.project) && detail.project.name !== detail.title ? detail.project.name
     : undefined;
   const phoneChip = phone && browserShown
     ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
