@@ -9,9 +9,9 @@
 // on a second, screen-sized canvas over the first, so a move of the pointer redraws a few hundred
 // thousand pixels rather than a large screenshot's sixteen million.
 
-import { useContext, useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { useLayer } from "../ui/dialogs";
+import { Button, FullscreenLayer, IconButton, Tooltip } from "../ui/primitives";
 import { Icon } from "../icons";
 import { t } from "../i18n";
 import { errorText } from "../ui";
@@ -82,7 +82,14 @@ export type AnnotateProps = {
 export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, finish = "attach", title, name }: AnnotateProps) {
   const host = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
-  const stage = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement | null>(null);
+  // The layer draws its body a moment after this component mounts, so what measures the stage or
+  // puts the picture in its host waits for the stage to be there.
+  const [layerUp, setLayerUp] = useState(false);
+  const stageRef = useCallback((el: HTMLDivElement | null) => {
+    stage.current = el;
+    setLayerUp(el !== null);
+  }, []);
   const field = useRef<HTMLInputElement>(null);
   const [history, dispatch] = useReducer(historyReducer, initial, (start) => (start?.length ? historyOf(start) : EMPTY_HISTORY));
   const [tool, setTool] = useState<Tool>("arrow");
@@ -142,7 +149,7 @@ export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, f
     if (!box || !sheet) return;
     sheet.className = "annotate-canvas";
     if (box.firstChild !== sheet) box.replaceChildren(sheet);
-  }, [sheet]);
+  }, [sheet, layerUp]);
 
   // The words being typed, read by whichever of Enter, a blur, a stroke, a tool change or Done comes
   // first, and taken by it: a click on the picture both blurs the field and starts a stroke, and the
@@ -221,7 +228,7 @@ export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, f
       sheet.style.height = `${shown.height}px`;
     }
     paintOverlay();
-  }, [shown.width, shown.height, sheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown.width, shown.height, sheet, layerUp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape inside the text field drops the words, and in the middle of a drag drops the drag, rather
   // than closing the editor.
@@ -281,7 +288,7 @@ export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, f
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [layerUp]);
 
   const typingOpen = typing !== null;
   useEffect(() => {
@@ -380,22 +387,24 @@ export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, f
 
   const plate = labelBox(letters * scale, [0]);
   const key = (code: string) => ` (${letterOf(code)})`;
-  return createPortal(
-    <div className="annotate" role="dialog" aria-modal="true" aria-label={title ?? t("annotate.title")} data-tool={tool} data-marks={history.ops.length}>
-      <div className="annotate-bar">
-        <button type="button" className="btn small ghost annotate-cancel" onClick={onCancel}>{t("common.cancel")}</button>
-        <span className="annotate-where truncate" title={snapshot.where}>{snapshot.where}</span>
-        <div className="annotate-group annotate-history">
-          <button type="button" className="iconbtn small annotate-undo" disabled={!history.past.length} onClick={() => dispatch({ kind: "undo" })} aria-label={t("annotate.undo")} title={`${t("annotate.undo")} (Ctrl+Z)`}><Icon name="undo" size={16} /></button>
-          <button type="button" className="iconbtn small annotate-redo" disabled={!history.future.length} onClick={() => dispatch({ kind: "redo" })} aria-label={t("annotate.redo")} title={`${t("annotate.redo")} (Ctrl+Shift+Z)`}><Icon name="undo" size={16} /></button>
-          <button type="button" className="iconbtn small annotate-clear" disabled={!history.ops.length} onClick={() => dispatch({ kind: "clear" })} aria-label={t("annotate.clear")} title={t("annotate.clear")}><Icon name="trash" size={16} /></button>
+  return (
+    <FullscreenLayer label={title ?? t("annotate.title")} onClose={onCancel} className="annotate" data={{ tool, marks: history.ops.length }}
+      toolbar={(
+        <div className="annotate-bar">
+          <span className="annotate-where truncate" title={snapshot.where}>{snapshot.where}</span>
+          <div className="annotate-group annotate-history">
+            <IconButton icon="undo" label={`${t("annotate.undo")}`} kbd="Ctrl Z" className="annotate-undo" disabled={!history.past.length} onClick={() => dispatch({ kind: "undo" })} />
+            <IconButton icon="undo" label={`${t("annotate.redo")}`} kbd="Ctrl ⇧ Z" className="annotate-redo" disabled={!history.future.length} onClick={() => dispatch({ kind: "redo" })} />
+            <IconButton icon="trash" label={t("annotate.clear")} className="annotate-clear" disabled={!history.ops.length} onClick={() => dispatch({ kind: "clear" })} />
+          </div>
+          <Button variant="primary" size="sm" icon={finish === "attach" ? "attach" : undefined} className="annotate-attach" disabled={busy} onClick={() => void finishEditing()} title={finish === "done" ? `${t("annotate.done")} (Enter)` : undefined}>
+            {finish === "done" ? t("annotate.done") : t("annotate.attach")}
+          </Button>
         </div>
-        <button type="button" className="btn small primary annotate-attach" disabled={busy} onClick={() => void finishEditing()} title={finish === "done" ? `${t("annotate.done")} (Enter)` : undefined}>
-          {finish === "attach" && <Icon name="attach" size={14} />}{finish === "done" ? t("annotate.done") : t("annotate.attach")}
-        </button>
-      </div>
+      )}
+    >
       {snapshot.note && <div className="annotate-note" role="status">{snapshot.note}</div>}
-      <div className="annotate-stage" ref={stage}>
+      <div className="annotate-stage" ref={stageRef}>
         <div className="annotate-sheet" style={{ width: shown.width, height: shown.height }}
           onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancelDrag}>
           <div ref={host} className="annotate-host" />
@@ -421,26 +430,33 @@ export function Annotate({ snapshot, onCancel, onAttach, onUnchanged, initial, f
       <div className="annotate-strip">
         <div className="annotate-group" role="group" aria-label={t("annotate.tools")}>
           {TOOLS.map((name) => (
-            <button key={name} type="button" className={`iconbtn small annotate-tool ${tool === name ? "on" : ""}`} data-tool={name} aria-pressed={tool === name}
-              aria-label={t(`annotate.tool.${name}`)} title={t(`annotate.tool.${name}`) + key(TOOL_KEYS[name])} onClick={() => choose(name)}>
-              <ToolGlyph tool={name} />
-            </button>
+            <Tooltip key={name} label={t(`annotate.tool.${name}`)} kbd={letterOf(TOOL_KEYS[name])}>
+              <button type="button" className={`iconbtn annotate-tool ${tool === name ? "on" : ""}`} data-tool={name} aria-pressed={tool === name}
+                aria-label={t(`annotate.tool.${name}`)} onClick={() => choose(name)}>
+                <ToolGlyph tool={name} />
+              </button>
+            </Tooltip>
           ))}
         </div>
         <div className="annotate-group">
-          <button type="button" className="iconbtn small annotate-rotate" onClick={rotate} aria-label={t("annotate.rotate")} title={t("annotate.rotate") + key(ROTATE_KEY)}><RotateGlyph /></button>
-          <button type="button" className="iconbtn small annotate-weight" data-weight={weight} onClick={() => setWeight((w) => (w + 1) % WEIGHTS.length)}
-            aria-label={t(`annotate.weight.${weight}`)} title={`${t(`annotate.weight.${weight}`)} ([ ])`}><WeightGlyph weight={weight} /></button>
+          <Tooltip label={t("annotate.rotate")} kbd={letterOf(ROTATE_KEY)}>
+            <button type="button" className="iconbtn annotate-rotate" onClick={rotate} aria-label={t("annotate.rotate")}><RotateGlyph /></button>
+          </Tooltip>
+          <Tooltip label={t(`annotate.weight.${weight}`)} kbd="[ ]">
+            <button type="button" className="iconbtn annotate-weight" data-weight={weight} onClick={() => setWeight((w) => (w + 1) % WEIGHTS.length)}
+              aria-label={t(`annotate.weight.${weight}`)}><WeightGlyph weight={weight} /></button>
+          </Tooltip>
         </div>
         <div className="annotate-group" role="radiogroup" aria-label={t("annotate.color")}>
           {SWATCHES.map((swatch, i) => (
-            <button key={swatch} type="button" role="radio" aria-checked={color === swatch} className={`annotate-swatch ${color === swatch ? "on" : ""}`}
-              style={{ background: swatch }} aria-label={t(`annotate.color.${i}`)} title={`${t(`annotate.color.${i}`)} (${i + 1})`} onClick={() => setColor(swatch)} />
+            <Tooltip key={swatch} label={t(`annotate.color.${i}`)} kbd={String(i + 1)}>
+              <button type="button" role="radio" aria-checked={color === swatch} className={`annotate-swatch ${color === swatch ? "on" : ""}`}
+                style={{ background: swatch }} aria-label={t(`annotate.color.${i}`)} onClick={() => setColor(swatch)} />
+            </Tooltip>
           ))}
         </div>
       </div>
-    </div>,
-    document.body,
+    </FullscreenLayer>
   );
 }
 
@@ -453,7 +469,7 @@ function clampPoint(p: Point, width: number, height: number): Point {
  * the live view's frame is the one on screen at the press. Without a conversation to attach to, there
  * is no button, since its one outcome would have nowhere to go.
  */
-export function SnapshotButton({ capture, session, toast, className = "iconbtn small", children }: {
+export function SnapshotButton({ capture, session, toast, className = "iconbtn", children }: {
   capture: () => Promise<Snapshot | null> | Snapshot | null;
   /** The conversation to attach to, when it is not the panel's own (the browser's page of its own). */
   session?: string | null;
@@ -484,9 +500,11 @@ export function SnapshotButton({ capture, session, toast, className = "iconbtn s
   };
   return (
     <>
-      <button type="button" className={`${className} annotate-open`} onClick={() => void press()} aria-label={t("annotate.open")} title={t("annotate.open")}>
-        {children ?? <Icon name="camera" size={16} />}
-      </button>
+      <Tooltip label={t("annotate.open")}>
+        <button type="button" className={`${className} annotate-open`} onClick={() => void press()} aria-label={t("annotate.open")}>
+          {children ?? <Icon name="camera" size={16} />}
+        </button>
+      </Tooltip>
       {open && <Annotate snapshot={open} onCancel={() => setOpen(null)} onAttach={attach} />}
     </>
   );

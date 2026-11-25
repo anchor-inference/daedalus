@@ -8,7 +8,8 @@ import { t } from "../../i18n";
 import { closeHandler, useFocusBack, useLayer } from "./layers";
 import { STOP } from "./sheet";
 
-export function FullscreenLayer({ label, onClose, toolbar, className = "", children }: { label: string; onClose: () => void; toolbar?: ReactNode; className?: string; children: ReactNode }) {
+/** `data` is written onto the layer as `data-*` attributes, for a layer whose state its own styles and checks read (the annotation editor's tool and mark count). */
+export function FullscreenLayer({ label, onClose, toolbar, className = "", data, children }: { label: string; onClose: () => void; toolbar?: ReactNode; className?: string; data?: Record<string, string | number>; children: ReactNode }) {
   const isTop = useLayer(onClose);
   const opener = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   useFocusBack(() => opener.current);
@@ -16,6 +17,7 @@ export function FullscreenLayer({ label, onClose, toolbar, className = "", child
     <Dialog.Root open modal onOpenChange={closeHandler(isTop, onClose)}>
       <Dialog.Portal className="overlay-root">
         <Dialog.Popup className={`fullscreen-layer ${className}`.trim()} aria-label={label} aria-modal="true" data-overlay-root="" {...STOP}
+          {...Object.fromEntries(Object.entries(data ?? {}).map(([k, v]) => [`data-${k}`, String(v)]))}
           finalFocus={false}>
           <div className="fullscreen-bar">
             <Dialog.Title className="fullscreen-title">{label}</Dialog.Title>
