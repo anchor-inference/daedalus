@@ -372,6 +372,8 @@ class Orchestrators:
         self._models: dict[str, str] = {}
         """The model each enabled project's orchestrator runs, by project: read on every engine build,
         which is synchronous, so it is kept here and written with every change of the setting."""
+        self._efforts: dict[str, str] = {}
+        """How hard each one thinks, by project, kept beside :attr:`_models` for the same reason."""
         self.state_sections: list[Callable[[Project], Awaitable[Section]]] = []
         """Further sections of the state block, each ``project -> (lines, where the rest is)``: what a
         later feature (the dispatches a project was handed) wants its orchestrator to see every turn."""
@@ -448,7 +450,7 @@ class Orchestrators:
         self._check_cap(cap)
         return self.manager.config.orchestrator_preset(project.settings.orchestrator.model if model is None else model)
 
-    async def enable(self, project_id: str, *, model: str | None = None, autonomy: str | None = None, concurrency_cap: int | None = None, by: str = "operator") -> Project:
+    async def enable(self, project_id: str, *, model: str | None = None, effort: str | None = None, autonomy: str | None = None, concurrency_cap: int | None = None, by: str = "operator") -> Project:
         """Switch the project's orchestrator on: a session of its own, its settings, its wake-ups.
 
         Enabling a project that already has a working orchestrator changes only what was passed. Two
@@ -460,9 +462,9 @@ class Orchestrators:
             project = await self.project(project_id)
             orchestrator = project.settings.orchestrator
             if orchestrator.enabled and orchestrator.session_id and await self.manager.get_state(orchestrator.session_id) is not None:
-                if model is None and autonomy is None and concurrency_cap is None:
+                if model is None and effort is None and autonomy is None and concurrency_cap is None:
                     return project
-                return await self._update_locked(project, model=model, autonomy=autonomy, concurrency=None, concurrency_cap=concurrency_cap, by=by)
+                return await self._update_locked(project, model=model, effort=effort, autonomy=autonomy, concurrency=None, concurrency_cap=concurrency_cap, by=by)
             if model is not None:
                 self._check_model(model)
             await self._preflight_model(project, model)
@@ -471,7 +473,7 @@ class Orchestrators:
             cap = concurrency_cap if concurrency_cap is not None else (config.default_concurrency_cap if first else orchestrator.concurrency_cap)
             self._check_cap(cap)
             concurrency = min(config.default_concurrency, cap) if first else min(orchestrator.concurrency, cap)
-            project = await self.manager.projects.update_orchestrator(project_id, enabled=True, model=model, autonomy=autonomy, concurrency=concurrency, concurrency_cap=cap)
+            project = await self.manager.projects.update_orchestrator(project_id, enabled=True, model=model, effort=effort, autonomy=autonomy, concurrency=concurrency, concurrency_cap=cap)
             stale = orchestrator.session_id
             try:
                 session_id = await self._new_session(project, predecessor=stale, reason="its session could not be loaded" if stale else "")
@@ -494,30 +496,33 @@ class Orchestrators:
             await self._changed(project_id, "orchestrator.enabled", by)
             return project
 
-    async def update(self, project_id: str, *, model: str | None = None, autonomy: str | None = None, concurrency: int | None = None, concurrency_cap: int | None = None, by: str = "operator") -> Project:
+    async def update(self, project_id: str, *, model: str | None = None, effort: str | None = None, autonomy: str | None = None, concurrency: int | None = None, concurrency_cap: int | None = None, by: str = "operator") -> Project:
         async with self.lock(project_id):
             project = await self.project(project_id)
             if not project.settings.orchestrator.enabled:
                 raise ProjectError(f"{project.name} has no orchestrator; switch it on first")
-            return await self._update_locked(project, model=model, autonomy=autonomy, concurrency=concurrency, concurrency_cap=concurrency_cap, by=by)
+            return await self._update_locked(project, model=model, effort=effort, autonomy=autonomy, concurrency=concurrency, concurrency_cap=concurrency_cap, by=by)
 
-    async def _update_locked(self, project: Project, *, model: str | None, autonomy: str | None, concurrency: int | None, concurrency_cap: int | None, by: str) -> Project:
+    async def _update_locked(self, project: Project, *, model: str | None, autonomy: str | None, concurrency: int | None, concurrency_cap: int | None, by: str, effort: str | None = None) -> Project:
         if model is not None:
             self._check_model(model)
             await self._preflight_model(project, model)
         if concurrency_cap is not None:
             self._check_cap(concurrency_cap)
         before = project.settings.orchestrator
-        updated = await self.manager.projects.update_orchestrator(project.id, model=model, autonomy=autonomy, concurrency=concurrency, concurrency_cap=concurrency_cap)
+        updated = await self.manager.projects.update_orchestrator(project.id, model=model, effort=effort, autonomy=autonomy, concurrency=concurrency, concurrency_cap=concurrency_cap)
         after = updated.settings.orchestrator
         changes = []
         if model is not None and before.model != after.model:
             changes.append(f"model {self.model_of(updated)}")
+        if effort is not None and before.effort != after.effort:
+            changes.append(f"effort {after.effort or 'default'}")
         if before.autonomy != after.autonomy:
             changes.append(f"autonomy {after.autonomy}")
         if before.concurrency != after.concurrency or before.concurrency_cap != after.concurrency_cap:
             changes.append(f"concurrency {after.concurrency} of {after.concurrency_cap}")
         self._models[project.id] = after.model
+        self._efforts[project.id] = after.effort
         if model is not None:
             await self._sync_model(updated)
         if changes:
@@ -661,6 +666,7 @@ class Orchestrators:
 
     async def _took_office(self, project: Project) -> None:
         self._models[project.id] = project.settings.orchestrator.model
+        self._efforts[project.id] = project.settings.orchestrator.effort
         await self._sync_model(project)
         # Wake-ups set before the orchestrator was switched off wake whoever holds the office now.
         await wakeups.repoint(self.app, project.id, project.settings.orchestrator.session_id)
@@ -670,6 +676,7 @@ class Orchestrators:
 
     async def _left_office(self, project_id: str) -> None:
         self._models.pop(project_id, None)
+        self._efforts.pop(project_id, None)
         await self.stop_queue(project_id)
         await self.manager.db.kv_set(CURSOR_KEY.format(project_id=project_id), None)
 
@@ -698,6 +705,13 @@ class Orchestrators:
         if not project_id or project_id not in self._models:
             return None
         return self.manager.config.orchestrator_preset(self._models[project_id])
+
+    def effort_for(self, state: SessionState) -> str | None:
+        """The manager's effort hook: an orchestrator thinks as its project says, else as Settings say."""
+        project_id = str(state.metadata.get("orchestrator_of") or "")
+        if not project_id or project_id not in self._models:
+            return None
+        return self._efforts.get(project_id) or self.manager.config.orchestrator.effort
 
     async def _sync_model(self, project: Project) -> None:
         """Write the effective preset on the session too, so the chat's model chip shows what it runs."""
@@ -747,6 +761,23 @@ class Orchestrators:
                 return False
             await self._update_locked(current, model="" if clear else preset, autonomy=None,
                                       concurrency=None, concurrency_cap=None, by="operator")
+        return True
+
+    async def effort_chosen(self, session_id: str, effort: str) -> bool:
+        """The composer's effort on an orchestrator's chat: the choice is the project's, as the model's is.
+
+        Kept on the session alone it would be overruled at the next turn by the project's effort, which
+        the run is built from, and the chip would go back to a value the operator had just changed."""
+        try:
+            project, _ = await self.current(session_id)
+        except NotCurrent:
+            return False
+        async with self.lock(project.id):
+            try:
+                current, _ = await self.current(session_id)
+            except NotCurrent:
+                return False
+            await self._update_locked(current, model=None, effort=effort, autonomy=None, concurrency=None, concurrency_cap=None, by="operator")
         return True
 
     # -- what it sees ---------------------------------------------------------------------------------
@@ -2083,6 +2114,7 @@ class Orchestrators:
         manager.turn_notes_hooks.append(self.turn_notes)
         manager.steer_hooks.append(self.steer_note)
         manager.preset_hooks.append(self.preset_for)
+        manager.effort_hooks.append(self.effort_for)
         manager.on_finished(self.on_run_finished)
         manager.delete_hooks.append(self.on_session_deleted)
         notifications = self.app.notifications
@@ -2140,6 +2172,7 @@ class Orchestrators:
             orchestrator = project.settings.orchestrator
             if orchestrator.enabled and orchestrator.session_id:
                 self._models[project.id] = orchestrator.model
+                self._efforts[project.id] = orchestrator.effort
                 try:
                     await self.give_home(project)
                 except Exception:  # noqa: BLE001 — its queue still starts, and says why it cannot deliver

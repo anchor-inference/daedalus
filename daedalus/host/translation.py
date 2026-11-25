@@ -381,7 +381,7 @@ class Translations:
 
         async def attempt() -> str:
             try:
-                answer = await manager.small_model(masked, preset, purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions)
+                answer = await manager.small_model(masked, preset, purpose=PURPOSE, session_id=session_id, max_tokens=output_tokens(masked), temperature=0.0, instructions=instructions, effort=settings.effort)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — a refusal, an outage, a budget: the original goes instead

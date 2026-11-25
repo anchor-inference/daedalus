@@ -15,12 +15,13 @@ import { Sheet, toast } from "../ui/dialogs";
 import { Switch } from "../ui/index";
 import { undoToast } from "../memory/undo";
 import { ModelPicker } from "../modelitems";
+import { WithEffort } from "../taskeffort";
 
 type MemorySection = NonNullable<Settings["memory"]>;
 
 const DEFAULTS: Required<MemorySection> = {
-  classify_preset: "", sensitive_allowed: [], consolidate: true, auto_merge: true,
-  search_chats: true, generate: true, synthesis_preset: "", synthesis_usd_per_day: 0.5, paused: false,
+  classify_preset: "", classify_effort: "", sensitive_allowed: [], consolidate: true, auto_merge: true,
+  search_chats: true, generate: true, synthesis_preset: "", synthesis_effort: "", synthesis_usd_per_day: 0.5, paused: false,
 };
 
 /** The word the reset sheet asks for, in the language the page is in; the host takes either. */
@@ -68,14 +69,16 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
           <Switch checked={memory.paused} label={t("settings.memory.paused")} onChange={(paused) => put({ paused })} />
         </Row>
         <Row title={t("settings.memory.synthesis")} desc={t("settings.memory.synthesis.sub")} stack data-setting="memory.synthesis_preset">
-          <ModelPicker
-            id="memory-synthesis"
-            label={t("settings.memory.synthesis")}
-            catalogue={s}
-            value={memory.synthesis_preset}
-            onChange={(synthesis_preset) => put({ synthesis_preset })}
-            defaultOption={{ label: t("settings.memory.synthesis.default") }}
-          />
+          <WithEffort id="memory-synthesis-effort" value={memory.synthesis_effort} onChange={(synthesis_effort) => put({ synthesis_effort })} fallback="off">
+            <ModelPicker
+              id="memory-synthesis"
+              label={t("settings.memory.synthesis")}
+              catalogue={s}
+              value={memory.synthesis_preset}
+              onChange={(synthesis_preset) => put({ synthesis_preset })}
+              defaultOption={{ label: t("settings.memory.synthesis.default") }}
+            />
+          </WithEffort>
         </Row>
         <NumRow id="memory-budget" setting="memory.synthesis_usd_per_day" title={t("settings.memory.budget")} desc={t("settings.memory.budget.sub")} unit="$"
           value={memory.synthesis_usd_per_day} min={0} step="0.05" onSave={(synthesis_usd_per_day) => put({ synthesis_usd_per_day })} />
@@ -106,14 +109,16 @@ export function MemorySettings({ s, save, part }: { s: Settings; save: (patch: P
     <>
       <div className="card">
         <Row title={t("settings.memory.classify")} desc={t("settings.memory.classify.sub")} stack data-setting="memory.classify_preset">
-          <ModelPicker
-            id="memory-classify"
-            label={t("settings.memory.classify")}
-            catalogue={s}
-            value={memory.classify_preset}
-            onChange={(classify_preset) => put({ classify_preset })}
-            defaultOption={{ label: t("settings.memory.classify.none") }}
-          />
+          <WithEffort id="memory-classify-effort" value={memory.classify_effort} onChange={(classify_effort) => put({ classify_effort })} fallback="off">
+            <ModelPicker
+              id="memory-classify"
+              label={t("settings.memory.classify")}
+              catalogue={s}
+              value={memory.classify_preset}
+              onChange={(classify_preset) => put({ classify_preset })}
+              defaultOption={{ label: t("settings.memory.classify.none") }}
+            />
+          </WithEffort>
         </Row>
         <Row title={t("settings.memory.tidy")} desc={t("settings.memory.tidy.sub")} data-setting="memory.consolidate">
           <Switch checked={memory.consolidate} label={t("settings.memory.tidy")} onChange={(consolidate) => put({ consolidate })} />

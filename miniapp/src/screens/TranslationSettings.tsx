@@ -13,13 +13,14 @@
 import { type Settings } from "../api";
 import { lang, t } from "../i18n";
 import { ModelPicker } from "../modelitems";
+import { WithEffort } from "../taskeffort";
 import { NumRow, Row } from "../settingsrow";
 import { Dropdown } from "../ui/index";
 import { AGENT_LANGUAGES, languageName } from "../agentlang";
 
 type SaveProps = { s: Settings; save: (patch: Partial<Settings>) => void; presetLabel: (id: string) => string };
 
-export const TRANSLATION_DEFAULTS: NonNullable<Settings["translation"]> = { operator_language: "ru", agent_language: "", preset: "", timeout_seconds: 120 };
+export const TRANSLATION_DEFAULTS: NonNullable<Settings["translation"]> = { operator_language: "ru", agent_language: "", preset: "", effort: "", timeout_seconds: 120 };
 
 /** The answer languages the page offers; any other the configuration names is shown as it is written,
  *  since the prompt takes the name as it stands ("Always answer the operator in …"). */
@@ -83,14 +84,16 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
       {/* The same picker as every other single model in Settings, so the translator is found by name,
           provider or model id like the rest; empty is Automatic, naming the model the host would use. */}
       <Row title={t("settings.translation.preset")} desc={t("settings.translation.preset.sub")} stack data-setting="translation.preset">
-        <ModelPicker
-          id="translation-preset"
-          label={t("settings.translation.preset")}
-          catalogue={s}
-          value={current.preset}
-          onChange={(preset) => put({ preset })}
-          defaultOption={{ label: suggested ? t("settings.translation.preset.auto", { name: presetLabel(suggested) }) : t("settings.translation.preset.auto.plain") }}
-        />
+        <WithEffort id="translation-effort" value={current.effort} onChange={(effort) => put({ effort })} fallback="off">
+          <ModelPicker
+            id="translation-preset"
+            label={t("settings.translation.preset")}
+            catalogue={s}
+            value={current.preset}
+            onChange={(preset) => put({ preset })}
+            defaultOption={{ label: suggested ? t("settings.translation.preset.auto", { name: presetLabel(suggested) }) : t("settings.translation.preset.auto.plain") }}
+          />
+        </WithEffort>
       </Row>
       <NumRow id="translation-timeout" setting="translation.timeout_seconds" title={t("settings.translation.timeout")} desc={t("settings.translation.timeout.sub")} unit={t("settings.unit.seconds")}
         value={current.timeout_seconds} min={5} step={5} onSave={(timeout_seconds) => put({ timeout_seconds })} />

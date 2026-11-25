@@ -28,7 +28,7 @@ async def _manager(settings: Settings, db: Database, answers: list[str]) -> tupl
     asked: list[dict[str, Any]] = []
 
     async def small_model(prompt: str, preset: str, *, purpose: str, session_id: str | None = None, max_tokens: int = 200,
-                          temperature: float = 0.0, instructions: str = "") -> str:
+                          temperature: float = 0.0, instructions: str = "", effort: str = "") -> str:
         asked.append({"prompt": prompt, "instructions": instructions, "max_tokens": max_tokens})
         return answers.pop(0)
 

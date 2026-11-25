@@ -583,7 +583,7 @@ def usage_data() -> dict:
 SETTINGS = {
     # Settings → Chat → Translation: the operator writes Russian, the agent works in English by default,
     # and the translator is left to the host, which names the cheap model it picks.
-    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
+    "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "effort": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
     # Settings → Navigation: the layout the app ships with.
     "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
@@ -616,7 +616,7 @@ SETTINGS = {
         "qwen-local": {"provider": 65536, "catalog": None, "table": None, "error": None},
     },
     "providers": {}, "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
-    "orchestrator": {"preset": "", "strongest": "claude-opus-5"},
+    "orchestrator": {"preset": "", "effort": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},
     "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": ["duckduckgo"], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000, "background_after_seconds": 120}},
     # The backends the host offers: the pictures of WebSearch show a primary, a fallback and one waiting for its key.
@@ -1146,7 +1146,7 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     if rel == "/api/asr":
         return respond(route, {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False})
     if rel == "/api/heartbeat":
-        return respond(route, {"enabled": True, "armed": True, "interval_minutes": 60, "active_hours": "08:00-23:00", "preset": "", "max_runs_per_day": 24, "last_run": ago(minutes=35), "runs_today": 9, "session_id": None, "running": False, "file": "/srv/state/HEARTBEAT.md", "text": "Check the services and the board; write to the inbox only when something needs me."})
+        return respond(route, {"enabled": True, "armed": True, "interval_minutes": 60, "active_hours": "08:00-23:00", "preset": "", "effort": "", "max_runs_per_day": 24, "last_run": ago(minutes=35), "runs_today": 9, "session_id": None, "running": False, "file": "/srv/state/HEARTBEAT.md", "text": "Check the services and the board; write to the inbox only when something needs me."})
     if rel == "/api/capabilities":
         return respond(route, CAPABILITIES)
     if rel == "/api/status":

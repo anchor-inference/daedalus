@@ -4148,6 +4148,17 @@ async def _session_vision(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
 
+# 173 — how hard that vision model thinks. NULL follows ``[vision] effort``, as the preset's NULL follows
+# ``[vision] preset``; its own column for the same reason as the preset's.
+async def _session_vision_effort(conn: aiosqlite.Connection) -> None:
+    """Added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(live_control)")).fetchall()}
+    if "vision_effort" not in present:
+        await conn.execute("ALTER TABLE live_control ADD COLUMN vision_effort TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision_effort))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""

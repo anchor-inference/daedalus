@@ -16,6 +16,7 @@ import httpx
 import pytest
 from protocore.contracts.llm import LLMRequest
 from protocore.contracts.types import Message, MessageRole, TextBlock
+from protocore.runtime.query import build_llm_request
 
 from daedalus.config import keyproxy_base
 from daedalus.host import translation
@@ -42,9 +43,36 @@ async def _body(base_url: str, extra: dict[str, object]) -> dict[str, object]:
 
 async def test_the_host_asks_the_claude_route_for_no_thinking_only_when_told() -> None:
     assert (await _body(keyproxy_base() + "/claude/v1", {"enable_thinking": False, "thinking_off": True}))["reasoning_effort"] == "none"
-    assert "reasoning_effort" not in await _body(keyproxy_base() + "/claude/v1", {"enable_thinking": False})
+    # A call that states nothing about thinking leaves the route its own default.
+    assert "reasoning_effort" not in await _body(keyproxy_base() + "/claude/v1", {})
     # Another provider knows no "none" and is told nothing new.
     assert "reasoning_effort" not in await _body(keyproxy_base() + "/openrouter/v1", {"enable_thinking": False, "thinking_off": True})
+
+
+async def _run_body(base_url: str, *, thinking: bool, effort: str) -> dict[str, object]:
+    """The body of a run's call, its request built by the core as every run's is."""
+    provider = OpenAICompatibleProvider(
+        ProviderEndpoint(id="p", kind="openai_compat", base_url=base_url),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+    )
+    request = build_llm_request(model="claude-haiku-5-5", messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text="hi")])],
+                                max_tokens=100, thinking_enabled=thinking, reasoning_effort=effort)
+    return await provider._build_body(request, stream=False)
+
+
+async def test_a_run_set_to_no_thinking_says_none_to_the_claude_route() -> None:
+    """A run's "off" (an effort of "none", or the session chooser's off) is ``enable_thinking: False``; on the
+    key proxy's Claude routes that once went out as no effort at all, and Haiku 5.5 thought anyway."""
+    claude = keyproxy_base() + "/claude/v1"
+    assert (await _run_body(claude, thinking=False, effort="medium"))["reasoning_effort"] == "none"
+    assert (await _run_body(keyproxy_base() + "/anthropic/v1", thinking=False, effort="medium"))["reasoning_effort"] == "none"
+    assert (await _run_body(claude, thinking=True, effort="high"))["reasoning_effort"] == "high"
+
+
+async def test_a_run_set_to_no_thinking_elsewhere_is_sent_as_before() -> None:
+    for base in (keyproxy_base() + "/openrouter/v1", "http://127.0.0.1:9/v1"):
+        assert "reasoning_effort" not in await _run_body(base, thinking=False, effort="medium")
+        assert (await _run_body(base, thinking=True, effort="low"))["reasoning_effort"] == "low"
 
 
 @pytest.mark.parametrize(

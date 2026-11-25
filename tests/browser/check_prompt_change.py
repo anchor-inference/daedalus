@@ -58,7 +58,7 @@ def run() -> None:
             expect(page.locator(".prompt-change-status")).to_be_visible()
             if directory := os.environ.get("PROMPT_SCREENSHOTS"):
                 page.screenshot(path=f"{directory}/prompt-working-{width}-{language}.png")
-            assert posts[0] == ("request", {"instruction": "Ask before deleting files", "preset": "deepseek-flash"})
+            assert posts[0] == ("request", {"instruction": "Ask before deleting files", "preset": "deepseek-flash", "effort": ""})
 
             proposal = state["proposal"]
             proposal.update(state="ready", stage="ready", summary="Добавлено подтверждение удаления." if language == "ru" else "Added confirmation before deletion.", rules=revised, diff="--- Current working rules\n+++ Proposed working rules\n@@ -1,3 +1,4 @@\n Working rules:\n - Verify results.\n+- Ask before deleting files.\n - Keep changes focused.\n")

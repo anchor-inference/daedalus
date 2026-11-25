@@ -1771,6 +1771,19 @@ class LiveControlStore:
             (session_id, preset or None, _now()),
         )
 
+    async def set_vision_effort(self, session_id: str, effort: str) -> None:
+        """How hard this session's vision model thinks; "" returns it to ``[vision] effort``."""
+        await self._db.execute(
+            "INSERT INTO live_control(session_id, steer_queue, follow_up_queue, vision_effort, updated_at) VALUES (?, '[]', '[]', ?, ?)"
+            " ON CONFLICT(session_id) DO UPDATE SET vision_effort = excluded.vision_effort, updated_at = excluded.updated_at",
+            (session_id, effort or None, _now()),
+        )
+
+    async def vision_efforts(self) -> dict[str, str]:
+        """Every session's own vision effort, held by the manager beside :meth:`vision_choices`, for the same reason."""
+        rows = await self._db.fetchall("SELECT session_id, vision_effort FROM live_control WHERE vision_effort IS NOT NULL AND vision_effort != ''")
+        return {row["session_id"]: row["vision_effort"] for row in rows}
+
     async def vision_choices(self) -> dict[str, str]:
         """Every session's own vision model, for the manager to hold: it is read on a tool call, where the
         lookup has to be synchronous."""
