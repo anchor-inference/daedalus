@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { api, type MemoryRecord, type ProviderUsage, type SessionDetail } from "./api";
 import { useEvent, useStreamUp } from "./events";
 import { useQuery } from "./store";
+import type { BoardTask } from "./board/tasks";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
 import { bytes, shortDateTime } from "./format";
@@ -301,20 +302,28 @@ export function ToolEmpty({ children }: { children: ReactNode }) {
   return <div className="tool-empty">{children}</div>;
 }
 
-/** Re-reads a listing when a `task.` event names this chat's family: the Overview's board block. */
-export function useChatBoard(sessionId: string | null, family: readonly string[]): { tasks: BoardTask[] | undefined } {
+/** The chat's board: what it and its helpers created, read again when a `task.` event names one of
+ *  them and when the event stream comes back from a gap. A helper's own chat has no family of its
+ *  own to name (its leader's board is the one the host answers with, and its siblings are unknown
+ *  here), so an empty `family` takes every task event as its own. */
+export function useChatBoard(sessionId: string | null, family: readonly string[]): { tasks: BoardTask[] | undefined; refresh: () => Promise<void> } {
   const key = sessionId ? `/api/board?session=${encodeURIComponent(sessionId)}&include_done=1` : null;
   const query = useQuery<BoardTask[]>(key, { staleMs: 5000 });
   const { refresh } = query;
   const soon = useRef<number | null>(null);
   useEffect(() => () => { if (soon.current) window.clearTimeout(soon.current); }, [key]);
   const members = family.join(",");
-  const touched = useCallback((id: string | null) => !id || members.split(",").includes(id), [members]);
+  const touched = useCallback((id: string | null) => !id || members === "" || members.split(",").includes(id), [members]);
   useEvent(["task."], (event) => {
     if (!key || soon.current || !touched(event.session_id)) return;
     soon.current = window.setTimeout(() => { soon.current = null; void refresh(); }, 300);
   }, [key, touched, refresh]);
-  return { tasks: Array.isArray(query.data) ? query.data : undefined };
+  // The stream coming back may have missed a change while it was away.
+  const live = useStreamUp();
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (key && live && !wasLive.current) void refresh();
+    wasLive.current = live;
+  }, [live, key, refresh]);
+  return { tasks: Array.isArray(query.data) ? query.data : undefined, refresh };
 }
-
-export type BoardTask = { id: string; title: string; status: "todo" | "doing" | "review" | "blocked" | "done" | "dropped" | string; needs_you?: string | null; updated_at?: string };

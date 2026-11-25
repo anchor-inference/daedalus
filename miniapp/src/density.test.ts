@@ -187,6 +187,9 @@ const BOX_ALLOWED = [
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
   ".board-filters", ".task-pane-head", ".task-pane-foot",
+  // The field that adds a task to a chat's own board is the one wide control of its panel's tab, as
+  // tall as the field that adds a line to a list in the same place is drawn (52).
+  ".cb-add",
   // The start page's canvas holds the question, the composer and the list; the room under it is what
   // lifts the group above the middle of the window.
   ".start-hero",

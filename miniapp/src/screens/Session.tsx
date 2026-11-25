@@ -73,6 +73,7 @@ import { StaffHeader, StaffMessages, useMember } from "../project/staff";
 import { BriefPage, FoldersPage, WakeupsPage } from "../project/pages";
 import { worktreesKey, type Listing as WorktreeListing } from "../project/ProjectWorktrees";
 import { worktreeFolders } from "../project/worktreefolders";
+import { ChatBoard, boardNow, boardTally } from "../board/ChatBoard";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
@@ -110,7 +111,7 @@ import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/c
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
-import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatChanges } from "../panelpanes";
+import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
 import { Overview, type OverviewRow, type OverviewStatus } from "../paneloverview";
 import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
@@ -264,7 +265,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   }, [panel.open]);
   // The chat's working-tree changes: whether it has a Changes tool at all, and the Overview's row.
   const chatChanges = useChatChanges(id && !visit && !bare && !embedded ? id : null, detail?.status);
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { changes: !!chatChanges.data?.repository, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
+  // The chat's own board is a tab of an ordinary chat and the main chat; an orchestrator's and a member's
+  // Board tab is their project's. A guest's visit, a prompt coach's and a side question's chat have none.
+  const boardOffered = !visit && !bare && !embedded && panelContext !== "orchestrator" && panelContext !== "member";
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { board: boardOffered, changes: !!chatChanges.data?.repository, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
   // A conversation with another agent that starts, a reply that comes, a message that waits for the operator:
   // the Agents tab opens on that change, once. A phone opens no sheet over the chat for it, as it opens none
   // for a subagent; the approval sits over the composer there and the tab is a tile.
@@ -273,6 +277,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   useAgentsAutoOpen(id, agentTalks, talksLoaded, !phone && !embedded && !bare && pane !== "right", openAgents);
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
+  // What the chat and its helpers put on the board. A helper's own chat reads its leader's board (the
+  // host answers with it), and it cannot name the leader's other helpers, so it hears every task event.
+  const boardFamily = useMemo(() => (detail?.subagent_of ? [] : [id, ...(detail?.subagents ?? []).map((child) => child.session_id)]), [id, detail?.subagent_of, detail?.subagents]);
+  const chatBoard = useChatBoard(id && !visit && !bare && !embedded ? id : null, boardFamily);
+  const boardFigures = boardTally(chatBoard.tasks);
   // Every way the conversation names a helper — its SubAgent step, its report, the reminder about the
   // idle ones — opens it here, beside the leader, rather than taking the leader off the screen.
   const subagentsNow = useRef(detail?.subagents);
@@ -1891,9 +1900,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     {detail.branch && <span>{t("panel.ov.branch", { branch: detail.branch })}</span>}
   </> : null;
   const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
+  const boardTag = `${boardFigures.done}/${boardFigures.all}`;
   const overviewRows: OverviewRow[] = !detail ? [] : [
     ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
     ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
+    ...(boardOffered && boardFigures.all > 0 ? [{ tab: "board" as PanelTab, name: t("panel.tab.board"), text: boardNow(chatBoard.tasks), tag: boardTag }] : []),
     ...(panelTabs.includes("subagents") && detail.subagents?.length ? [{ tab: "subagents" as PanelTab, name: t("panel.tab.subagents"), text: (runningHelpers[0] ?? detail.subagents[0]).name ?? plural("panel.ov.helpers", detail.subagents.length), tag: runningHelpers.length ? t("panel.ov.running", { n: runningHelpers.length }) : String(detail.subagents.length), tone: runningHelpers.length ? "live" as const : undefined }] : []),
     ...(panelTabs.includes("browser") && browserShown ? [{ tab: "browser" as PanelTab, name: t("panel.tab.browser"), text: t(browserShown.needs_you ? "panel.ov.browser.you" : browserShown.acting ? "panel.ov.browser.acting" : "panel.ov.browser.idle"), tone: browserShown.needs_you ? "attn" as const : undefined }] : []),
     ...(panel.state.stack.length > 0 ? [{ tab: "preview" as PanelTab, name: t("panel.tab.preview"), text: panel.state.stack[panel.state.at]?.path ?? "" }] : []),
@@ -1907,6 +1918,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(changedFiles.length ? { changes: String(changedFiles.length) } : {}),
     ...(detail?.subagents?.length ? { subagents: String(runningHelpers.length || detail.subagents.length) } : {}),
     ...(contextPct !== null ? { context: `${contextPct}%` } : {}),
+    ...(boardOffered && boardFigures.all > 0 ? { board: boardTag } : {}),
     ...(notesCount ? { notes: String(notesCount) } : {}),
     ...(sessionCanvases?.length ? { canvas: String(sessionCanvases.length) } : {}),
     ...(questionsShown && waiting ? { questions: String(waiting) } : {}),
@@ -2241,11 +2253,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           onCloseEntry={panel.closeEntry}
           onCloseTool={panel.closeTool}
           attention={questionsShown && waiting > 0 ? ["questions"] : undefined}
+          alongside={boardOffered && boardFigures.open > 0 ? ["board"] : undefined}
           context={panelContext}
           figures={panelFigures}
           pages={{
-            overview: <Overview sessionId={id} family={[id, ...(detail.subagents ?? []).map((child) => child.session_id)]} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
-              onBoard={() => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
+            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
+              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
             ...(chatChanges.data?.repository ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
             context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
             usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,
@@ -2258,6 +2271,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               wakeups: <WakeupsPage projectId={focus.projectId} compact toast={toast} />,
               folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
             } : {}),
+            ...(boardOffered && !focus ? { board: <ChatBoard sessionId={id} tasks={chatBoard.tasks} projectId={detail.project?.id ?? ""} leaderTitle={detail.subagent_of ? detail.leader_title ?? "" : null}
+              taskId={panel.state.task} onTask={panel.openTask} onOpenSession={(chat) => navigate(sessionPath(chat))} toast={toast} /> } : {}),
             ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
             sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
             notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
@@ -2273,7 +2288,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             />,
           }}
           // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
-          badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
+          badges={{ ...(boardOffered && boardFigures.all > 0 ? { board: boardTag } : {}), ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
           marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
           details={hasDetails ? (ids) =>
             <SessionDetails

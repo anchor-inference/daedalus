@@ -107,9 +107,11 @@ export type PanelState = {
   expanded: boolean;
   /** The subagent whose conversation the Subagents tab shows, or null for the list of them. */
   sub: string | null;
+  /** The task the chat's Board tab has open in place of its list, or null for the list. */
+  task: string | null;
 };
 
-export const PANEL_CLOSED: PanelState = { tab: null, open: [], stack: [], at: -1, expanded: false, sub: null };
+export const PANEL_CLOSED: PanelState = { tab: null, open: [], stack: [], at: -1, expanded: false, sub: null, task: null };
 
 export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = ALL_TABS): v is PanelTab {
   return !!v && (tabs as readonly string[]).includes(v);
@@ -129,7 +131,7 @@ export function closeTool(s: PanelState, tab: PanelTab): PanelState {
   if (at < 0) return s;
   const open = s.open.filter((other) => other !== tab);
   const next = s.tab === tab ? (open[at - 1] ?? "overview") : s.tab;
-  return { ...s, open, tab: next, ...(tab === "preview" ? { stack: [], at: -1 } : {}), ...(tab === "subagents" ? { sub: null } : {}) };
+  return { ...s, open, tab: next, ...(tab === "preview" ? { stack: [], at: -1 } : {}), ...(tab === "subagents" ? { sub: null } : {}), ...(tab === "board" ? { task: null } : {}) };
 }
 
 export function closePanel(s: PanelState): PanelState {
@@ -144,6 +146,11 @@ export function togglePanel(s: PanelState, last: PanelTab | null = null, first: 
 /** A subagent opened beside its leader: the Subagents tab on its conversation; null goes back to the list. */
 export function openSubagent(s: PanelState, sub: string | null): PanelState {
   return s.tab === "subagents" && s.sub === sub ? s : { ...openTab(s, "subagents"), sub };
+}
+
+/** A task opened inside the Board tab, or the tab's list again with null. */
+export function openTask(s: PanelState, task: string | null): PanelState {
+  return s.tab === "board" && s.task === task ? s : { ...openTab(s, "board"), task };
 }
 
 export function toggleExpanded(s: PanelState): PanelState {
@@ -228,9 +235,10 @@ function sameEntry(a: PanelEntry, b: PanelEntry): boolean {
 
 // ── the route ────────────────────────────────────────────────────────────────────────────────
 
-export type PanelQuery = { tab: PanelTab; path: string | null; lines?: string; sub?: string | null };
+export type PanelQuery = { tab: PanelTab; path: string | null; lines?: string; sub?: string | null; task?: string | null };
 
-/** What a link carries: the open tab, the previewed file, the subagent the Subagents tab shows.
+/** What a link carries: the open tab, the previewed file, the subagent the Subagents tab shows, the
+ *  task the Board tab has open.
  *  `tab=` is read as the tab too, so a link written as `?panel=files&tab=preview&path=…` opens
  *  Preview on that path. */
 export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[] = ALL_TABS): PanelQuery | null {
@@ -241,20 +249,21 @@ export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[]
   const path = query.get("path");
   const lines = query.get("lines") ?? "";
   const sub = which === "subagents" ? query.get("sub") || null : null;
-  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}), ...(which === "subagents" ? { sub } : {}) };
+  const task = which === "board" ? query.get("task") || null : null;
+  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}), ...(which === "subagents" ? { sub } : {}), ...(which === "board" ? { task } : {}) };
 }
 
 /** The query parameters the state writes; null for the ones to drop. */
 export function panelQuery(s: PanelState): Record<string, string | null> {
   const current = currentEntry(s);
-  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, sub: s.tab === "subagents" ? s.sub : null, tab: null };
+  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, sub: s.tab === "subagents" ? s.sub : null, task: s.tab === "board" ? s.task : null, tab: null };
 }
 
 /** The state a route describes, over what the pane already holds: the tab from the link, the file
  *  on top of the history when the link names one the pane is not already showing. */
 export function applyPanelQuery(s: PanelState, q: PanelQuery | null, base: string): PanelState {
   if (!q) return closePanel(s);
-  let next = q.tab === "subagents" ? openSubagent(s, q.sub ?? null) : openTab(s, q.tab);
+  let next = q.tab === "subagents" ? openSubagent(s, q.sub ?? null) : q.tab === "board" ? openTask(s, q.task ?? null) : openTab(s, q.tab);
   if (q.path && (q.tab === "preview" || !currentEntry(next))) {
     const current = currentEntry(next);
     if (!current || current.path !== q.path || current.lines !== q.lines) next = openFile(next, { base, path: q.path, ...(q.lines ? { lines: q.lines } : {}) });
