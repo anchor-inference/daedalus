@@ -100,7 +100,7 @@ def check(page: Page, lang: str, width: int) -> None:
     expect(rows.filter(has_text="router").locator(".pg-state.attention")).to_have_count(1)
 
     # The doctor's list is still there, under the integrations.
-    doctor = page.locator(".health-row").filter(has_text="default model")
+    doctor = page.locator(".health-row").filter(has_text="default model").first
     expect(doctor).to_be_visible()
     last = rows.last.bounding_box()
     assert last and last["y"] < doctor.bounding_box()["y"], f"{where}: the integrations are not above the doctor's list"  # type: ignore[index]
