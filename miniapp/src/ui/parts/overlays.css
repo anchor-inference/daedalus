@@ -166,7 +166,7 @@ button.menu-row:hover { background:var(--hover); }
 /* ── toasts ───────────────────────────────────────────────────────────────────────────────── */
 /* At the top on a phone: at the foot it stood over the composer. Beside the chat it has the corner. */
 .toast-viewport { position: fixed; z-index: var(--z-toast); left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%); width: max-content; max-width: min(92vw, 460px); outline: 0; }
-.toast { display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 14px; border-radius: var(--radius-md); font-size: var(--fs-13); box-shadow: var(--shadow-lg); animation: layer-in var(--t-base) var(--ease-out); }
+.toast { display: flex; align-items: center; gap: 10px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); padding: 8px 10px 8px 14px; border-radius: var(--radius-lg); font-size: var(--fs-13); box-shadow: var(--shadow-md); animation: layer-in var(--t-base) var(--ease-out); }
 .toast .btn.small { min-height: 30px; padding: 4px 8px; }
 .toast > .ic { flex: none; color: var(--fg-2); }
 .toast.notice { align-items: flex-start; padding: 12px 10px 12px 14px; }
@@ -176,3 +176,43 @@ button.menu-row:hover { background:var(--hover); }
 .toast-title { font-size: var(--fs-14); font-weight: 500; }
 .toast-body { color: var(--fg-2); }
 @media (min-width: 1024px) { .toast-viewport { left: auto; right: 24px; top: auto; bottom: 24px; transform: none; } }
+
+/* ── notices: what happened while the operator was elsewhere ────────────────────────────────
+   The status line above says one thing at a time; these queue. A card like a popover (14 px corners,
+   the strong edge, the one floating shadow), three at most in a desktop's corner with the newest on
+   top, and on a phone one banner across the top, its answers 36 px tall with a 44 px reach. */
+.notice-toasts { position: fixed; z-index: var(--z-toast); display: flex; flex-direction: column; gap: 8px; pointer-events: none; outline: 0; }
+.notice-toasts > * { pointer-events: auto; }
+.notice-toasts.stack { right: 24px; bottom: 24px; width: 360px; }
+.notice-toast { display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 12px 14px; background: var(--surface-1); color: var(--fg); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); cursor: pointer; animation: layer-in var(--t-base) var(--ease-out); }
+.notice-toasts.stack .notice-toast { touch-action: pan-y; }
+.notice-toast[data-swiping] { transition: none; user-select: none; }
+.notice-toast-head { display: flex; align-items: flex-start; gap: 10px; }
+.notice-toast .kind { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 0; background: none; }
+.notice-toast-head .notice-title { padding-top: 0; }
+.notice-toast-head .iconbtn { flex: none; margin: -4px -4px 0 0; }
+.notice-toast .iconbtn.quiet { background: transparent; color: var(--fg-2); }
+.notice-toast .iconbtn.quiet:hover { background: var(--hover); color: var(--fg); }
+.notice-toast > .notice-body, .notice-toast > .notice-actions { padding-left: 26px; }
+.notice-toast .notice-actions { margin-top: 8px; gap: 8px; }
+.notice-toast .notice-actions .btn { min-height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-13); }
+.notice-foot { display: flex; align-items: center; gap: 4px; padding: 2px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
+.notice-foot .grow { flex: 1; }
+.notice-foot .btn.small { color: var(--fg-2); }
+.notice-more { padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--fg-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
+.notice-more:hover { color: var(--fg); }
+/* On a phone the banner and its foot are one floating surface at the top, the pop-up itself flat inside
+   it: as two cards the gap between them let the page show through, and the half of a heading was cut
+   across the foot's edge. Its Allow is no whiter than Deny, as on an Inbox row. */
+.notice-toasts.banner { top: 0; left: 0; right: 0; gap: 0; margin: calc(8px + env(safe-area-inset-top)) 12px 0; padding: 4px; background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); }
+.notice-toasts.banner .notice-toast { padding: 10px 10px 6px; border: 0; border-radius: var(--radius-md); background: none; box-shadow: none; touch-action: pan-x; }
+.notice-toasts.banner .notice-toast-head { align-items: center; }
+.notice-toasts.banner .notice-toast-head .iconbtn { position: relative; width: 32px; height: 32px; margin: 0; }
+.notice-toasts.banner .notice-toast-head .iconbtn::after, .notice-toasts.banner .notice-actions .btn::after { content: ""; position: absolute; inset: -6px; }
+.notice-toasts.banner .notice-actions .btn { position: relative; height: 36px; min-height: 36px; padding: 0 14px; font-size: var(--fs-14); font-weight: 500; }
+.notice-toasts.banner .notice-actions .btn::after { inset: -4px 0; }
+.notice-toasts.banner .notice-actions .btn:not(.primary) { background: var(--surface-3); border-color: transparent; box-shadow: none; }
+.notice-toasts.banner .notice-actions .btn.ghost { background: none; color: var(--fg-2); }
+.notice-toasts.banner .notice-actions .btn.danger { color: var(--bad); }
+.notice-toasts.banner .notice-foot { padding: 0 2px; border: 0; background: none; box-shadow: none; }
+.notice-toasts.banner .notice-foot .btn, .notice-toasts.banner .notice-more { min-height: var(--tap); padding: 0 8px; border: 0; background: none; box-shadow: none; color: var(--fg-3); font-size: var(--fs-13); }
