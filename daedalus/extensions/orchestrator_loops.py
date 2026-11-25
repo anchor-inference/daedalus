@@ -91,7 +91,7 @@ class OpenResults:
         """Open a result for each card that has sat in todo with nobody on it since before ``before``
         — a turn of the orchestrator's has passed over it — and has none open yet."""
         rows = await self.db.fetchall(
-            "SELECT t.id, t.title FROM board_tasks t WHERE t.project_id = ? AND t.status = 'todo' AND t.assignee_staff_id IS NULL AND t.created_at < ?"
+            "SELECT t.id, t.title FROM board_tasks t WHERE t.project_id = ? AND t.status = 'todo' AND t.assignee_staff_id IS NULL AND t.assignee_operator = 0 AND t.created_at < ?"
             " AND NOT EXISTS (SELECT 1 FROM open_loops l WHERE l.task_id = t.id AND l.cause = ? AND l.closed_at IS NULL)"
             # A card the orchestrator said waits (Decide) is not raised again every turn after.
             " AND NOT EXISTS (SELECT 1 FROM open_loops l WHERE l.task_id = t.id AND l.cause = ? AND l.decision LIKE ?)",

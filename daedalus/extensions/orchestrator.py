@@ -781,7 +781,7 @@ class Orchestrators:
         members = await self.manager.staff.list(project.id)
         live = await self.manager.staff.live_sessions(project.id)
         working = sum(1 for s in live.values() if s.status in ACTIVE_STATUSES)
-        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, branch FROM board_tasks WHERE project_id = ? AND removed_at IS NULL ORDER BY priority, updated_at DESC", (project.id,))}
+        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, assignee_operator, branch FROM board_tasks WHERE project_id = ? AND removed_at IS NULL ORDER BY priority, updated_at DESC", (project.id,))}
         by_id = {m.id: m for m in members}
 
         head = [f"Project: {project.name} · default env {project.settings.default_env or self.manager.projects.local_env} · autonomy {orchestrator.autonomy} · concurrency {orchestrator.concurrency} of cap {orchestrator.concurrency_cap} · {working} working"]
@@ -816,8 +816,8 @@ class Orchestrators:
         still_open = [t for t in tasks.values() if t["status"] not in ("done", "dropped")]
         before = await self._previous_owners([t["id"] for t in still_open if t["assignee_staff_id"] not in by_id])
         open_tasks = [
-            f"{t['id']} {_one_line(t['title'], 80)} ({by_id[t['assignee_staff_id']].name if t['assignee_staff_id'] in by_id else 'unassigned'}, {t['status']})"
-            + (f" — was {before[t['id']]}'s" if t["assignee_staff_id"] not in by_id and t["id"] in before else "")
+            f"{t['id']} {_one_line(t['title'], 80)} ({by_id[t['assignee_staff_id']].name if t['assignee_staff_id'] in by_id else "the operator's own" if t["assignee_operator"] else 'unassigned'}, {t['status']})"
+            + (f" — was {before[t['id']]}'s" if t["assignee_staff_id"] not in by_id and t["id"] in before and not t["assignee_operator"] else "")
             for t in still_open
         ]
         decisions = await self.loops.section(project.id)
@@ -1399,6 +1399,8 @@ class Orchestrators:
                 # Whole: the error says why the start was refused and what to do about it, and cut at
                 # 200 characters it lost the second half, the part the orchestrator acts on.
                 error = f" ({_one_line(str(p.get('error')), 500)})" if p.get("error") else ""
+                if p.get("assignee_operator"):
+                    return f"{title} is kept by the operator; it is theirs to do, not yours to assign"
                 return f"{title} assigned to {assignee.name}{error}" if assignee else f"{title} is unassigned{error}"
             if kind == "task.accepted":
                 return f"{actor} accepted {title}"

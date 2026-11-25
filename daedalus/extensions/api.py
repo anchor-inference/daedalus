@@ -5393,15 +5393,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter.
 
         ``due_at`` is the card's due instant (UTC) or ``null``, and ``overdue`` whether it has passed with
-        the work open."""
+        the work open. ``assignee`` is ``{kind: "staff", id, name, color}``, ``{kind: "operator"}`` for a card
+        the operator keeps for themselves (its ``needs_you`` is ``assigned``), or ``null``."""
         tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None, session_id=session or None)
         await _board().mark_needs_you(tasks)
         await _board().mark_chat_finishes(tasks)
         projects = {r["id"]: r["name"] for r in await manager.db.fetchall("SELECT id, name FROM projects")}
-        staff = {r["id"]: {"id": r["id"], "name": r["name"], "color": r["color"]} for r in await manager.db.fetchall("SELECT id, name, color FROM staff")}
+        staff = {r["id"]: {"kind": "staff", "id": r["id"], "name": r["name"], "color": r["color"]} for r in await manager.db.fetchall("SELECT id, name, color FROM staff")}
         for task in tasks:
             task["project_name"] = projects.get(task.get("project_id") or "")
-            task["assignee"] = staff.get(task.get("assignee_staff_id") or "")
+            task["assignee"] = {"kind": "operator"} if task.get("assignee_operator") else staff.get(task.get("assignee_staff_id") or "")
         return tasks
 
     @api.get("/api/projects/{project_id}/board")

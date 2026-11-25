@@ -472,10 +472,11 @@ BOARD = [
 ]
 
 for _card in BOARD:
-    # The host puts the date and whether it is late on every listing; the cards of
+    # The host puts the date, whether it is late and who keeps the card on every listing; the cards of
     # the pictures say nothing of them unless a picture needs it.
     _card.setdefault("due_at", None)
     _card.setdefault("overdue", False)
+    _card.setdefault("assignee_operator", False)
 BOARD[0]["due_at"] = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 BOARD[3]["due_at"] = (datetime.now(UTC) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
 BOARD[3]["overdue"] = True

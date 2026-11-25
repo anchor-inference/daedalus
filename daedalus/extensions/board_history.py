@@ -35,7 +35,9 @@ def _text(kind: str, payload: dict[str, Any], assignee: dict[str, Any] | None) -
     if kind == "task.moved":
         return f"{payload.get('from') or '?'} → {payload.get('to') or '?'}"
     if kind == "task.assigned":
-        return "Unassigned" if assignee is None else f"Assigned to {assignee.get('name') or 'a member'}"
+        if assignee is None:
+            return "Unassigned"
+        return "Kept by the operator" if assignee["kind"] == "operator" else f"Assigned to {assignee.get('name') or 'a member'}"
     if kind == "task.accepted":
         return "Result accepted"
     if kind == "task.merge_failed":
@@ -74,7 +76,9 @@ async def task_history(db: Database, task_id: str, *, limit: int = 200) -> list[
             continue
         assignee: dict[str, Any] | None = None
         if kind == "task.assigned":
-            if payload.get("assignee_staff_id"):
+            if payload.get("assignee_operator"):
+                assignee = {"kind": "operator"}
+            elif payload.get("assignee_staff_id"):
                 assignee = {"kind": "staff", "id": str(payload["assignee_staff_id"]),
                             "name": names.get(str(payload["assignee_staff_id"]))}
         item: dict[str, Any] = {"seq": seq, "type": kind, "at": at, "actor": _actor(payload, titles),

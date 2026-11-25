@@ -2832,7 +2832,7 @@ class BoardStub:
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
             "acceptance_state": "", "requirements": [], "entity_revision": 1,
-            "due_at": None, "overdue": False,
+            "due_at": None, "overdue": False, "assignee_operator": False,
         }
         row.update(fields)
         return row
@@ -2851,9 +2851,18 @@ class BoardStub:
         late = bool(row.get("due_at")) and row["status"] not in ("done", "dropped") and row["due_at"] < "2026-10-16T12:00:00Z"
         return {**row, "overdue": late}
 
+    def _own(self, row: dict, operator: bool) -> None:
+        """A card the operator keeps for themselves: ``assignee`` is ``{kind: operator}`` and no member holds it."""
+        row["assignee_operator"] = operator
+        if operator:
+            row["assignee_staff_id"] = None
+            row["assignee"] = {"kind": "operator"}
+        elif row.get("assignee") == {"kind": "operator"}:
+            row["assignee"] = None
+
     @staticmethod
     def assignee(id_: str, name: str, *, harness: str = "daedalus", color: str = "blue", status: str = "off", on_task: bool = False, **fields: object) -> dict:
-        row = {"id": id_, "name": name, "color": color, "harness": harness, "archived_at": None, "status": status, "on_task": on_task, "waiting_for": "", "status_at": "2026-09-24T09:40:00Z" if on_task else None, "session_id": f"sess-{id_}" if status != "off" else None}
+        row = {"kind": "staff", "id": id_, "name": name, "color": color, "harness": harness, "archived_at": None, "status": status, "on_task": on_task, "waiting_for": "", "status_at": "2026-09-24T09:40:00Z" if on_task else None, "session_id": f"sess-{id_}" if status != "off" else None}
         row.update(fields)
         return row
 
@@ -2897,6 +2906,7 @@ class BoardStub:
     def _assign(self, row: dict, staff_id: str | None) -> None:
         member = next((m for m in self.staff if m["id"] == staff_id), None)
         row["assignee_staff_id"] = member["id"] if member else None
+        row["assignee_operator"] = False
         row["assignee"] = self.assignee(member["id"], member["name"], harness=member["harness"], color=member["color"]) if member else None
 
     def _issues(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
@@ -3107,6 +3117,8 @@ class BoardStub:
             row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"), due_at=self.due(payload.get("due_at")))
             self._assign(row, payload.get("assignee_staff_id"))
+            if payload.get("assignee_operator"):
+                self._own(row, True)
             self.tasks.append(row)
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "POST":
@@ -3116,6 +3128,8 @@ class BoardStub:
                             session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
                             acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []],
                             due_at=self.due(payload.get("due_at")))
+            if payload.get("assignee_operator"):
+                self._own(row, True)
             self.tasks.append(row)
             return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "GET":
@@ -3136,8 +3150,11 @@ class BoardStub:
             for need in self.needs_you:
                 if need.get("task_id") and waiting.get(need["task_id"]) != "question":
                     waiting[need["task_id"]] = "question" if need.get("kind") == "question" else "approval"
-            return 200, [{**self.fresh(t), "project_name": self.project["name"] if t.get("project_id") else None,
-                          "needs_you": waiting.get(t["id"]) or ("review" if t["status"] == "review" else None)} for t in listed]
+            def why(t: dict) -> str | None:
+                mine = t.get("assignee_operator") and t["status"] in ("todo", "doing", "blocked")
+                return waiting.get(t["id"]) or ("review" if t["status"] == "review" else "assigned" if mine else None)
+
+            return 200, [{**self.fresh(t), "project_name": self.project["name"] if t.get("project_id") else None, "needs_you": why(t)} for t in listed]
         if path.startswith("/api/board/"):
             parts = path.split("/")
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
@@ -3329,6 +3346,8 @@ class BoardStub:
                 self.updated.append((row["id"], payload))
                 if "assignee_staff_id" in payload:
                     self._assign(row, payload["assignee_staff_id"] or None)
+                if payload.get("assignee_operator") is not None:
+                    self._own(row, bool(payload["assignee_operator"]))
                 if payload.get("due_at") is not None:
                     row["due_at"] = self.due(payload["due_at"])
                 if "brief" in payload:

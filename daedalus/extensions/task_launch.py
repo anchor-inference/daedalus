@@ -69,11 +69,15 @@ async def queue_launch(app: Application, task_id: str, principal: Principal, *, 
                        fallback_from_attempt_id: str | None = None,
                        fallback_preview_digest: str | None = None,
                        handoff_fingerprint: str | None = None) -> dict[str, Any]:
-    row = await app.db.fetchone("SELECT project_id FROM board_tasks WHERE id = ?", (task_id,))
+    row = await app.db.fetchone("SELECT project_id, assignee_operator FROM board_tasks WHERE id = ?", (task_id,))
     if row is None:
         raise KeyError(task_id)
     if not row["project_id"]:
         raise ControlConflict("a worker task needs a project")
+    if row["assignee_operator"]:
+        # Checked before the launch writes its member over the card; the table's own CHECK is the net
+        # for an edit that lands between this read and that write.
+        raise ControlConflict("this task is the operator's own; hand it to a member before launching it")
     scope = Scope("project", row["project_id"])
     # Every launch path, not only the orchestrator's commands: an operator's launch or an automatic
     # handoff of a card whose worker died with an earlier host process was refused "stop or

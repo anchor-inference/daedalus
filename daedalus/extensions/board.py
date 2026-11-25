@@ -280,6 +280,7 @@ class Board:
         row["checklist"] = json.loads(row.get("checklist") or "[]")
         row["depends_on"] = json.loads(row.get("depends_on") or "[]")
         row["brief"] = _brief(row.pop("brief_json", None))
+        row["assignee_operator"] = bool(row.get("assignee_operator"))
         row["overdue"] = _overdue(row.get("due_at"), row.get("status"))
         return row
 
@@ -358,6 +359,8 @@ class Board:
                 raise ValueError("a staff member does not reassign or rewrite tasks; ask the orchestrator")
         if who.kind == "agent" and assignee_staff_id:
             raise ValueError("only the operator or the project's orchestrator assigns tasks")
+        if assignee_staff_id and task.get("assignee_operator"):
+            raise ValueError("this task is the operator's; only the operator hands it to a member")
         if assignee_staff_id:
             await self._assignee(task.get("project_id"), assignee_staff_id)
         new_brief = self._merge_brief(task["brief"], brief) if brief is not None else None
@@ -508,8 +511,10 @@ class Board:
 
         ``question`` and ``approval`` are an open request routed to the operator and tied to the task
         (a permission or a folder is an approval); ``review`` is a card in review, which only the
-        operator takes out of it. Read from the requests every time, like :meth:`needs_you`, so an
-        answer given anywhere takes the card out of the filter on the next read."""
+        operator takes out of it; ``assigned`` is an open card the operator keeps for themselves, which
+        nobody else will do and which waits on them until they close it. Read from the requests every
+        time, like :meth:`needs_you`, so an answer given anywhere takes the card out of the filter on
+        the next read."""
         ids = [task["id"] for task in tasks]
         waiting: dict[str, str] = {}
         if ids:
@@ -522,7 +527,8 @@ class Board:
                 if waiting.get(row["task_id"]) != "question":
                     waiting[row["task_id"]] = reason
         for task in tasks:
-            task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else None)
+            own = bool(task.get("assignee_operator")) and task.get("status") in ("todo", "doing", "blocked")
+            task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else "assigned" if own else None)
 
     async def mark_chat_finishes(self, tasks: list[dict[str, Any]]) -> None:
         """Set ``finished_by`` on each card a chat finished itself: the chat, its title, its note and when.
@@ -556,12 +562,13 @@ class Board:
         for task in tasks:
             member = members.get(task.get("assignee_staff_id") or "")
             if member is None:
-                task["assignee"] = None
+                task["assignee"] = {"kind": "operator"} if task.get("assignee_operator") else None
                 continue
             session = live.get(member["id"])
             # The member's live status speaks for this task only while that session works on it.
             on_it = session is not None and session["task_id"] == task["id"]
             task["assignee"] = {
+                "kind": "staff",
                 **member,
                 "status": session["status"] if session is not None else "off",
                 "on_task": on_it,
@@ -731,8 +738,9 @@ class Board:
         cutoff = datetime.now(UTC) - timedelta(hours=hours)
         handed: list[str] = []
         # An assigned task is the staff runtime's to track: its member may be thinking for hours
-        # without touching the board, and handing it back would start a second worker on it.
-        for row in await self.app.db.fetchall("SELECT id, title, session_id, heartbeat_at, updated_at FROM board_tasks WHERE status = 'doing' AND assignee_staff_id IS NULL"):
+        # without touching the board, and handing it back would start a second worker on it. A card
+        # the operator keeps for themselves has no session to go quiet and is theirs to hand back.
+        for row in await self.app.db.fetchall("SELECT id, title, session_id, heartbeat_at, updated_at FROM board_tasks WHERE status = 'doing' AND assignee_staff_id IS NULL AND assignee_operator = 0"):
             last = row["heartbeat_at"] or row["updated_at"]
             try:
                 seen = datetime.fromisoformat(last)

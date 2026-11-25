@@ -434,7 +434,7 @@ async def team(orch: Orchestrators, project: Project, session_id: str, *, staff:
 
 
 def _task_line(task: dict[str, Any], names: dict[str, str]) -> str:
-    assignee = names.get(task.get("assignee_staff_id") or "", "unassigned")
+    assignee = names.get(task.get("assignee_staff_id") or "", "the operator's own" if task.get("assignee_operator") else "unassigned")
     return f"{task['id']} [{task['status']}] P{task['priority']} {task['title']} ({assignee})" + (f" after {', '.join(task['depends_on'])}" if task.get("depends_on") else "")
 
 

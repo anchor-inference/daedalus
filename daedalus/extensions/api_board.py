@@ -42,6 +42,7 @@ class CreateBody(BaseModel):
     brief: Brief = Field(default_factory=Brief)
     session_id: str | None = Field(default=None, max_length=200)
     assignee_staff_id: str | None = Field(default=None, max_length=200)
+    assignee_operator: bool = False
     due_at: str | None = Field(default=None, max_length=40)
     folder_id: str | None = Field(default=None, min_length=1, max_length=200)
 
@@ -59,6 +60,7 @@ class UpdateBody(BaseModel):
     note: str = Field(default="", max_length=1000)
     status: str | None = None
     assignee_staff_id: str | None = Field(default=None, max_length=200)
+    assignee_operator: bool | None = None
     due_at: str | None = Field(default=None, max_length=40)
     check_ids: list[str] | None = Field(default=None, max_length=12)
     uncheck_ids: list[str] | None = Field(default=None, max_length=12)

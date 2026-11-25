@@ -21,8 +21,10 @@ from daedalus.extensions import board as board_extension
 from daedalus.extensions.api import build_app
 from daedalus.extensions.board_commands import normalize_due
 from daedalus.extensions.coordinator_authority import install_authority
+from daedalus.extensions.orchestrator_loops import OpenResults
 from daedalus.host.session_runner import SessionManager
-from daedalus.stores.database import Database
+from daedalus.stores.control import ControlDenied, Principal
+from daedalus.stores.database import MIGRATIONS, Database
 from daedalus.stores.executions import ExecutionStore
 from tests.support.notifications import RecordingNotifications
 
@@ -156,6 +158,102 @@ async def test_the_agents_tools_carry_the_due_date(app: Any, tmp_path: Path) -> 
                    expected_entity_revision=task["entity_revision"], due_at="whenever")
 
 
+# -- the operator as an assignee -----------------------------------------------------------------
+
+
+async def test_a_card_the_operator_keeps_is_theirs_alone(client: httpx.AsyncClient) -> None:
+    task = await create(client, "Renew the domain", assignee_operator=True)
+    assert task["assignee_operator"] is True
+    mine = listed(await board(client), task["id"])
+    assert mine["assignee"] == {"kind": "operator"} and mine["needs_you"] == "assigned"
+
+    # One owner or none.
+    both = await client.post("/api/board", headers=HEADERS, json={
+        "title": "x", "client_operation_id": "both", "expected_collection_revision": 1,
+        "assignee_operator": True, "assignee_staff_id": "someone"})
+    assert both.status_code in (409, 422)
+
+    # The operator starts it themselves: no launch, no worker, so the plain move is theirs to make.
+    started = await edit(client, task, status="doing")
+    assert started.status_code == 200, started.text
+    assert started.json()["task"]["status"] == "doing"
+    assert listed(await board(client), task["id"])["needs_you"] == "assigned"
+
+    # Finishing is their Close; afterwards it waits on nobody.
+    revision = started.json()["task"]["entity_revision"]
+    closed = await client.post(f"/api/board/{task['id']}/close", headers=HEADERS, json={
+        "client_operation_id": "done-it", "expected_entity_revision": revision, "status": "done", "reason": "renewed"})
+    assert closed.status_code == 200, closed.text
+    finished = listed(await board(client), task["id"])
+    assert finished["status"] == "done" and finished["needs_you"] is None and finished["assignee"] == {"kind": "operator"}
+
+
+async def test_the_operator_hands_a_card_back_and_the_flag_goes(client: httpx.AsyncClient) -> None:
+    task = await create(client, "Sort the post")
+    assert task["assignee_operator"] is False and listed(await board(client), task["id"])["assignee"] is None
+    kept = (await edit(client, task, assignee_operator=True)).json()["task"]
+    assert kept["assignee_operator"] is True
+    freed = (await edit(client, task, assignee_operator=False)).json()["task"]
+    assert freed["assignee_operator"] is False and listed(await board(client), task["id"])["needs_you"] is None
+    again = (await edit(client, task, assignee_operator=True)).json()["task"]
+    cleared = (await edit(client, task, assignee_staff_id="")).json()["task"]  # "take it off whoever had it"
+    assert again["assignee_operator"] is True and cleared["assignee_operator"] is False
+
+
+async def test_no_agent_takes_a_card_from_the_operator_or_keeps_one_for_them(app: Any, client: httpx.AsyncClient, tmp_path: Path) -> None:
+    from daedalus.extensions.orchestrator_domain import DomainConflict
+
+    project, task = await project_card(app, client, tmp_path, assignee_operator=True)
+    chat = await app.manager.create_session("a chat in the project", project_id=project)
+    hook = app.manager.service_hooks["board_commands"]
+    revision = await hook("revision", session_id=chat.session.id)
+    with pytest.raises(ControlDenied, match="only the operator"):
+        await hook("add", session_id=chat.session.id, client_operation_id="agent-keeps",
+                   expected_collection_revision=revision, title="Mine now", assignee_operator=True)
+    # Not by editing the card either: handing it on, or claiming it into work as the chat's own.
+    await app.db.execute("UPDATE board_tasks SET origin_session_id = ? WHERE id = ?", (chat.session.id, task["id"]))
+    current = await app.db.fetchone("SELECT entity_revision FROM board_tasks WHERE id = ?", (task["id"],))
+    with pytest.raises(DomainConflict, match="the operator's"):
+        await hook("update", session_id=chat.session.id, task_id=task["id"], client_operation_id="agent-frees",
+                   expected_entity_revision=current["entity_revision"], assignee_operator=False)
+    with pytest.raises(DomainConflict, match="the operator's"):
+        await hook("update", session_id=chat.session.id, task_id=task["id"], client_operation_id="agent-claims",
+                   expected_entity_revision=current["entity_revision"], status="doing")
+    assert (await app.db.fetchone("SELECT assignee_operator FROM board_tasks WHERE id = ?", (task["id"],)))["assignee_operator"] == 1
+
+
+async def test_the_machinery_that_works_unassigned_cards_leaves_the_operators_alone(app: Any, client: httpx.AsyncClient, tmp_path: Path) -> None:
+    from daedalus.extensions.task_launch import queue_launch
+
+    project, task = await project_card(app, client, tmp_path, assignee_operator=True)
+    # A launch is refused outright, before it can write a worker over the operator's name.
+    with pytest.raises(Exception, match="operator's own"):
+        await queue_launch(app, task["id"], Principal("operator:1", "operator"), staff_id="nobody",
+                           client_operation_id="launch", expected_entity_revision=task["entity_revision"])
+    # The staleness sweep hands back a doing card nobody holds; the operator's is not nobody's.
+    started = (await edit(client, task, status="doing")).json()["task"]
+    await app.db.execute("UPDATE board_tasks SET heartbeat_at = '2020-01-01T00:00:00+00:00', updated_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (task["id"],))
+    assert await app.extensions["board"].recover_stale() == []
+    assert (await app.db.fetchone("SELECT status FROM board_tasks WHERE id = ?", (started["id"],)))["status"] == "doing"
+    # The coordinator's "nobody has this card" nudge does not count it as unowned.
+    await edit(client, task, status="todo")
+    loops = OpenResults(SimpleNamespace(manager=app.manager))  # type: ignore[arg-type]
+    assert await loops.unowned(project, "9999-12-31") == []
+    await edit(client, task, assignee_operator=False)
+    assert await loops.unowned(project, "9999-12-31") == [task["id"]]
+    # The database itself refuses a staff member beside the operator.
+    with pytest.raises(Exception, match="CHECK"):
+        await app.db.execute("UPDATE board_tasks SET assignee_operator = 1, assignee_staff_id = 'x' WHERE id = ?", (task["id"],))
+
+
+async def test_the_history_says_when_a_card_was_kept_for_the_operator(client: httpx.AsyncClient) -> None:
+    task = await create(client, "Sort the post")
+    await edit(client, task, assignee_operator=True)
+    events = (await client.get(f"/api/board/{task['id']}/events", headers=HEADERS)).json()
+    assert [e["type"] for e in events] == ["task.created", "task.assigned"]
+    assert events[1]["assignee"] == {"kind": "operator"} and events[1]["text"] == "Kept by the operator"
+
+
 # -- the history ---------------------------------------------------------------------------------
 
 
@@ -203,3 +301,37 @@ async def test_the_history_is_found_by_an_index_not_a_scan(app: Any) -> None:
         "EXPLAIN QUERY PLAN SELECT seq FROM app_events WHERE json_extract(payload_json, '$.task_id') = ? AND type LIKE 'task.%' ORDER BY seq DESC LIMIT 5",
         ("abc",)))
     assert "app_events_by_task" in plan and "SCAN" not in plan
+
+
+# -- the migration -------------------------------------------------------------------------------
+
+
+async def test_the_migration_adds_the_columns_and_the_index_and_keeps_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite"
+    db = Database(path, local_env="container")
+    await db.open()
+    for n in range(3):
+        await db.execute(
+            "INSERT INTO board_tasks(id, title, status, priority, created_at, updated_at) VALUES (?, ?, 'todo', 3, 't', 't')",
+            (f"t{n}", f"task {n}"))
+        await db.execute("INSERT INTO app_events(at, type, payload_json) VALUES ('2026-01-01T00:00:00.000Z', 'task.created', ?)",
+                         (f'{{"task_id": "t{n}", "title": "task {n}"}}',))
+    await db.execute("DROP INDEX app_events_by_task")
+    await db.execute("ALTER TABLE board_tasks DROP COLUMN assignee_operator")
+    await db.execute("ALTER TABLE board_tasks DROP COLUMN due_at")
+    await db.execute(f"UPDATE schema_version SET version = {len(MIGRATIONS) - 1}")
+    await db.close()
+
+    for _ in range(2):  # the second start runs nothing and breaks nothing
+        again = Database(path, local_env="container")
+        await again.open()
+        try:
+            assert int((await again.fetchone("SELECT version FROM schema_version"))["version"]) == len(MIGRATIONS)
+            rows = await again.fetchall("SELECT id, due_at, assignee_operator FROM board_tasks ORDER BY id")
+            assert [(r["id"], r["due_at"], r["assignee_operator"]) for r in rows] == [("t0", None, 0), ("t1", None, 0), ("t2", None, 0)]
+            assert (await again.fetchone("SELECT count(*) AS n FROM app_events"))["n"] == 3
+            assert [r[0] for r in await again.fetchall("PRAGMA integrity_check")] == ["ok"]
+            assert await again.fetchall("PRAGMA foreign_key_check") == []
+            assert len(await again.fetchall("SELECT 1 FROM sqlite_master WHERE name = 'app_events_by_task'")) == 1
+        finally:
+            await again.close()
