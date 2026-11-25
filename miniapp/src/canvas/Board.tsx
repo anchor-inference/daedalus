@@ -11,6 +11,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { Icon, type IconName } from "../icons";
+import { IconButton, Segmented, Tooltip } from "../ui/primitives";
 import { t } from "../i18n";
 import { renderMarkdown } from "../md";
 import { RawHtml } from "../rawhtml";
@@ -21,6 +22,7 @@ import {
 } from "./model";
 import type { Op } from "./ops";
 import { frameOf, type Mode } from "./frames";
+import "./plane.css";
 
 type View = { x: number; y: number; zoom: number };
 type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -60,8 +62,6 @@ export type BoardProps = {
   onModeChange?: (mode: Mode) => void;
   /** A card pointed at in comment mode. */
   onPoint?: (node: CanvasNode) => void;
-  /** Drawn in board coordinates over everything, such as the note beside a picked element. */
-  overlay?: ReactNode;
 };
 
 const ZOOM_MIN = 0.1;
@@ -81,7 +81,7 @@ function typing(target: EventTarget | null): boolean {
   return !!element && (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.isContentEditable);
 }
 
-export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, onRedo, canUndo, canRedo, marked, compact, onBusy, renderFrame, mode = "interact", onModeChange, onPoint, overlay }: BoardProps) {
+export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, onRedo, canUndo, canRedo, marked, compact, onBusy, renderFrame, mode = "interact", onModeChange, onPoint }: BoardProps) {
   const root = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const viewRef = useRef(view);
@@ -685,7 +685,6 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
         {others.map((node) => (
           <NodeFrame key={node.id} node={node} box={boxes.get(node.id)!} selected={selected.has(node.id)} single={single === node.id && !readOnly} marked={marked?.has(node.id)} editing={editing?.id === node.id ? editing.kind : null} onCommit={commitEdit} fileUrl={fileUrl} frame={frameBody(node)} />
         ))}
-        {overlay}
         {marquee && <div className="cv-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} />}
       </div>
       {!shown.nodes.length && !readOnly && (
@@ -695,10 +694,8 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
         <div className="cv-toolbar" data-ui role="toolbar" aria-label={t("canvas.tools")}>
           {onModeChange && (
             <>
-              <div className="cv-mode" role="group" aria-label={t("canvas.mode")}>
-                <button type="button" className={mode === "interact" ? "on" : ""} aria-pressed={mode === "interact"} onClick={() => onModeChange("interact")} title={t("canvas.mode.interact.hint")}>{t("canvas.mode.interact")}</button>
-                <button type="button" className={mode === "comment" ? "on" : ""} aria-pressed={mode === "comment"} onClick={() => onModeChange("comment")} title={t("canvas.mode.comment.hint")}>{t("canvas.mode.comment")}</button>
-              </div>
+              <Segmented<Mode> className="cv-mode" label={t("canvas.mode")} value={mode} onChange={onModeChange}
+                options={(["interact", "comment"] as const).map((id) => ({ id, label: <Tooltip label={t(`canvas.mode.${id}.hint`)}><span>{t(`canvas.mode.${id}`)}</span></Tooltip> }))} />
               <span className="cv-toolbar-sep" />
             </>
           )}
@@ -720,9 +717,9 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
           <ToolButton icon="undo" label={t("canvas.redo")} onClick={() => onRedo?.()} disabled={!canRedo} className="cv-redo" />
           {palette && (
             <div className="cv-palette" role="group" aria-label={t("canvas.color")}>
-              <button type="button" className="cv-swatch none" aria-label={t("canvas.color.none")} title={t("canvas.color.none")} onClick={() => paint("")} />
+              <Tooltip label={t("canvas.color.none")}><button type="button" className="cv-swatch none" aria-label={t("canvas.color.none")} onClick={() => paint("")} /></Tooltip>
               {PRESETS.map((preset) => (
-                <button key={preset} type="button" className="cv-swatch" style={{ background: colorValue(preset) }} aria-label={t(`canvas.color.${preset}`)} title={t(`canvas.color.${preset}`)} onClick={() => paint(preset)} />
+                <Tooltip key={preset} label={t(`canvas.color.${preset}`)}><button type="button" className="cv-swatch" style={{ background: colorValue(preset) }} aria-label={t(`canvas.color.${preset}`)} onClick={() => paint(preset)} /></Tooltip>
               ))}
             </div>
           )}
@@ -730,7 +727,7 @@ export function Board({ doc, label, readOnly = false, fileUrl, onOps, onUndo, on
       )}
       <div className="cv-zoom" data-ui role="group" aria-label={t("canvas.zoom")}>
         <ToolButton icon="minus" label={t("canvas.zoom.out")} onClick={() => zoomAt(1 / 1.25)} />
-        <button type="button" className="cv-zoom-level" onClick={() => setView((current) => ({ ...current, zoom: 1 }))} aria-label={t("canvas.zoom.reset")} title={t("canvas.zoom.reset")}>{Math.round(view.zoom * 100)}%</button>
+        <Tooltip label={t("canvas.zoom.reset")}><button type="button" className="cv-zoom-level" onClick={() => setView((current) => ({ ...current, zoom: 1 }))} aria-label={t("canvas.zoom.reset")}>{Math.round(view.zoom * 100)}%</button></Tooltip>
         <ToolButton icon="plus" label={t("canvas.zoom.in")} onClick={() => zoomAt(1.25)} />
         <ToolButton icon="expand" label={t("canvas.fit")} onClick={() => fit()} />
       </div>
@@ -790,11 +787,7 @@ function resized(origin: Box, handle: Handle, dx: number, dy: number): Box {
 }
 
 function ToolButton({ icon, label, onClick, disabled, pressed, className }: { icon: IconName; label: string; onClick: () => void; disabled?: boolean; pressed?: boolean; className?: string }) {
-  return (
-    <button type="button" className={`cv-tool ${className ?? ""} ${pressed ? "on" : ""}`} onClick={onClick} disabled={disabled} aria-label={label} title={label} aria-pressed={pressed === undefined ? undefined : pressed}>
-      <Icon name={icon} size={16} />
-    </button>
-  );
+  return <IconButton icon={icon} label={label} onClick={onClick} disabled={disabled} pressed={pressed} className={className} />;
 }
 
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];

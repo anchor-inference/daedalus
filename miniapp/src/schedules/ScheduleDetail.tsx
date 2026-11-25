@@ -11,29 +11,42 @@ import { renderMarkdown } from "../md";
 import { RawHtml } from "../rawhtml";
 import { useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
+import { Button, IconButton, OverflowMenu, Switch, useLayer, type MenuItem } from "../ui/primitives";
 import type { ScheduleActions } from "./actions";
 import { type Cycle, type CycleHistory, conversationOf, cycleState, type Item, lastRun, scheduleFiles, type ScheduleRow } from "./model";
 import { ScheduleFormBody } from "./ScheduleForm";
 
-/** The pill a schedule's state is said with, and its tone. */
-function statusOf(item: Item): { word: string; tone: string } {
-  if (item.source === "proposal") return { word: t("sched.status.waiting"), tone: "pending" };
-  if (item.group === "approval") return { word: t("sched.approval.needed"), tone: "pending" };
-  if (item.group === "active") return { word: t("sched.status.active"), tone: "done" };
-  if (item.group === "paused") return { word: t("sched.status.paused"), tone: "closed" };
-  return { word: t("sched.status.done"), tone: "closed" };
+/** The state a schedule is in, said in a word, and the tone it is said in. */
+function statusOf(item: Item): { word: string; tone: "attention" | "plain" | "quiet" } {
+  if (item.source === "proposal") return { word: t("sched.status.waiting"), tone: "attention" };
+  if (item.group === "approval") return { word: t("sched.approval.needed"), tone: "attention" };
+  if (item.group === "active") return { word: t("sched.status.active"), tone: "plain" };
+  if (item.group === "paused") return { word: t("sched.status.paused"), tone: "quiet" };
+  return { word: t("sched.status.done"), tone: "quiet" };
 }
 
-export function ScheduleDetail({ item, actions, titles, toast, onOpenSession, onRemoved, onBack }: {
+/**
+ * One schedule, opened: what it does and when, in the reader's own words, its switch and commands, its
+ * full instruction, its files and its recent runs. A 420 px pane beside the list on the Schedules
+ * page, as a card's pane is beside the board, and the same contents in a sheet on a phone or over a
+ * chat (`layout="sheet"`, where the sheet carries the closing and the foot stays under the last line).
+ */
+export function ScheduleDetail({ item, actions, titles, toast, onOpenSession, onRemoved, onClose, onBack, layout = "pane" }: {
   item: Item;
   actions: ScheduleActions;
   titles: Record<string, string>;
   toast: (text: string) => void;
   onOpenSession: (id: string) => void;
   onRemoved: () => void;
+  /** The pane's own close; a sheet is closed from its own head. */
+  onClose?: () => void;
+  /** The way back to the list, in a sheet that took the list's place. */
   onBack?: () => void;
+  layout?: "pane" | "sheet";
 }) {
   const [editing, setEditing] = useState(false);
+  // Escape closes the pane (or leaves the form first), unless a list or a menu opened from it is on top.
+  useLayer(() => (editing ? setEditing(false) : onClose?.()), layout === "pane" && !!onClose);
   const s = item.source === "schedule" ? item.schedule : null;
   const p = item.source === "proposal" ? item.proposal : null;
   const rule = s ?? p!;
@@ -51,103 +64,117 @@ export function ScheduleDetail({ item, actions, titles, toast, onOpenSession, on
     if (await actions.remove(s)) onRemoved();
   }
 
+  const menu: MenuItem[] = s ? [
+    { label: t("common.edit"), icon: "pen", disabled: busy, onSelect: () => setEditing(true) },
+    "-",
+    { label: t("common.delete"), icon: "trash", danger: true, disabled: busy, onSelect: () => void remove() },
+  ] : [];
+  const head = (title: string) => (
+    <div className="sched-pane-head">
+      {onBack && <IconButton icon="back" label={t("shell.back")} onClick={editing ? () => setEditing(false) : onBack} />}
+      <span className="sched-pane-kind">{title}</span>
+      <span className="grow" />
+      {!editing && s && (
+        <span className="sched-enabled">
+          <span className="sched-enabled-word" aria-hidden="true">{t("sched.enabled")}</span>
+          <Switch label={t("sched.enabled")} checked={!!s.enabled} disabled={busy || item.group === "done" || (!s.enabled && !resumable)} onChange={(on) => void actions.setEnabled(s, on)} />
+        </span>
+      )}
+      {!editing && s && <OverflowMenu label={t("sched.actions")} items={menu} />}
+      {onClose && <IconButton icon="close" label={t("common.close")} onClick={editing ? () => setEditing(false) : onClose} />}
+    </div>
+  );
+
   if (editing && s) {
     return (
-      <article className="scheddetail editing" aria-label={t("sched.edit")}>
-        <header className="scheddetail-head">
-          {onBack && <button type="button" className="iconbtn small scheddetail-back" onClick={() => setEditing(false)} aria-label={t("shell.back")} title={t("shell.back")}><Icon name="back" size={16} /></button>}
-          <h2 className="scheddetail-name">{t("sched.edit")}</h2>
-        </header>
-        <ScheduleFormBody existing={s} onCancel={() => setEditing(false)} onSave={(edit) => actions.save(s, edit)} toast={toast} approvalDays={actions.approvalDays} />
+      <article className={`sched-pane editing ${layout === "sheet" ? "in-sheet" : ""}`} aria-label={t("sched.edit")} data-schedule={item.key}>
+        {head(t("sched.edit"))}
+        <div className="sched-pane-body">
+          <ScheduleFormBody existing={s} onCancel={() => setEditing(false)} onSave={(edit) => actions.save(s, edit)} toast={toast} approvalDays={actions.approvalDays} />
+        </div>
       </article>
     );
   }
 
   return (
-    <article className="scheddetail" aria-label={rule.name} data-schedule={item.key}>
-      <header className="scheddetail-head">
-        {onBack && <button type="button" className="iconbtn small scheddetail-back" onClick={onBack} aria-label={t("shell.back")} title={t("shell.back")}><Icon name="back" size={16} /></button>}
-        <div className="scheddetail-title">
-          <h2 className="scheddetail-name">{rule.name}</h2>
-          <div className="scheddetail-when">
-            <span>{describeSchedule(rule)}</span>
-            {next && <span className="scheddetail-next" title={absTime(next)}>{t("sched.next.short", { rel: untilShort(next), at: absTime(next) })}</span>}
-          </div>
-        </div>
-        <span className={`pill ${status.tone}`}>{status.word}</span>
-      </header>
+    <article className={`sched-pane ${layout === "sheet" ? "in-sheet" : ""}`} aria-label={rule.name} data-schedule={item.key}>
+      {head(t("sched.pane"))}
+      <div className="sched-pane-body">
+        <h2 className="sched-pane-title">{rule.name}</h2>
+        {(item.group === "approval") && (
+          <div className="sched-pane-need" role="status"><span className="dot attention" aria-hidden="true" />{p ? t("sched.proposal.from.agent") : t("sched.approval.needed")}</div>
+        )}
+        {p?.legacy_file_review_required && <div className="result-warning">{t("sched.proposal.legacyfiles")}</div>}
 
-      <div className="scheddetail-actions" role="toolbar" aria-label={t("sched.actions")}>
+        <dl className="sched-kv">
+          <div className="sched-kv-row"><dt>{t("sched.when")}</dt><dd>{describeSchedule(rule)}</dd></div>
+          {next && <div className="sched-kv-row"><dt>{t("sched.nextrun")}</dt><dd title={absTime(next)}>{untilShort(next)} <span className="faint">{absTime(next)}</span></dd></div>}
+          <div className="sched-kv-row"><dt>{t("sched.state")}</dt><dd><span className={`sched-state ${status.tone}`}><span className="dot" aria-hidden="true" />{status.word}</span></dd></div>
+          <div className="sched-kv-row"><dt>{t("sched.kind")}</dt><dd>{t(`sched.kind.${rule.kind}`)}{s?.run_in === "self" ? t("sched.runs.here") : rule.kind === "agent" ? t("sched.runs.fresh") : ""}</dd></div>
+          <div className="sched-kv-row">
+            <dt>{t("sched.chat")}</dt>
+            <dd>{chat ? <button type="button" className="linkbtn" onClick={() => onOpenSession(chat)}>{titles[chat] ?? t("sched.chat.untitled")}</button> : <span className="faint">{t("sched.chat.none")}</span>}</dd>
+          </div>
+          <div className="sched-kv-row">
+            <dt>{t("sched.lastrun")}</dt>
+            <dd>
+              {last ? (
+                <span className={`sched-last ${last.status}`}>
+                  <span className="dot" aria-hidden="true" />
+                  {last.status === "running" ? t("sched.running") : t(last.status === "failed" ? "sched.last.failed" : "sched.last.ok", { t: relTimeLong(last.at) })}
+                  {last.sessionId && <> <button type="button" className="linkbtn" onClick={() => onOpenSession(last.sessionId!)}>{t("sched.run.open")}</button></>}
+                </span>
+              ) : <span className="faint">{t("sched.lastrun.never")}</span>}
+            </dd>
+          </div>
+          <div className="sched-kv-row"><dt>{t("sched.setby")}</dt><dd>{p || s?.created_by_session || s?.source_session_id ? t("sched.setby.agent") : t("sched.setby.you")}</dd></div>
+          {/* Said only while the operator reviews the agent's schedules: with the standing approval the
+              date is ten years out, and a line about renewing it was noise that read as a warning. */}
+          {s?.grant_expires_at && actions.requireApproval && (
+            <div className="sched-kv-row"><dt>{t("sched.approval.until")}</dt><dd>{absTime(s.grant_expires_at)}</dd></div>
+          )}
+        </dl>
+
+        {s?.last_error && <div className="sched-error"><b>{t("sched.lasterror")}</b> {s.last_error}</div>}
+
+        <Prompt key={item.key} text={rule.prompt} title={t(rule.kind === "agent" ? "sched.instruction" : "sched.text")} />
+
+        <Files item={item} />
+
+        {s?.last_summary && (
+          <section className="sched-block">
+            <h3>{t("sched.lastresult")}</h3>
+            <div className="sched-summary">{s.last_summary}</div>
+          </section>
+        )}
+
+        {s && <History schedule={s} onOpenSession={onOpenSession} toast={toast} />}
+
+        <details className="sched-tech">
+          <summary>{t("common.details")}</summary>
+          <div className="sub mono">{s ? s.id : p!.id}{rule.cron ? ` · cron ${rule.cron} (UTC)` : ""}</div>
+          {p && <div className="sub mono">{t("sched.proposal.revision", { n: p.proposal_revision })}</div>}
+          {p?.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · SHA-256 {file.digest}</div>)}
+        </details>
+      </div>
+      {/* In a sheet the foot is the sheet's own: it stays under the last line, and the sheet's "more below" button gives way to it. */}
+      <footer className={`sched-pane-foot ${layout === "sheet" ? "sheet-foot" : ""}`} role="toolbar" aria-label={t("sched.actions")}>
         {p ? (
           <>
-            {p.legacy_file_review_required && <button type="button" className="btn small" disabled={busy} onClick={() => void actions.decide(p, "review-files")}>{t("sched.proposal.reviewfiles")}</button>}
-            <button type="button" className="btn small" disabled={busy} onClick={() => void actions.decide(p, "withdraw")}>{t("sched.proposal.withdraw")}</button>
-            <button type="button" className="btn small primary" disabled={busy || p.legacy_file_review_required} onClick={() => void actions.decide(p, "accept")}><Icon name="check" size={14} /> {t("sched.proposal.accept")}</button>
+            {p.legacy_file_review_required && <Button disabled={busy} onClick={() => void actions.decide(p, "review-files")}>{t("sched.proposal.reviewfiles")}</Button>}
+            <Button variant="quiet" disabled={busy} onClick={() => void actions.decide(p, "withdraw")}>{t("sched.proposal.withdraw")}</Button>
+            <Button variant="primary" icon="check" disabled={busy || p.legacy_file_review_required} onClick={() => void actions.decide(p, "accept")}>{t("sched.proposal.accept")}</Button>
           </>
         ) : s && (
           <>
             {s.authority_state === "needs_approval" && item.group === "approval" && (
-              <button type="button" className="btn small primary" disabled={busy} onClick={() => void actions.approve(s)}><Icon name="check" size={14} /> {t("sched.approval.action")}</button>
+              <Button variant="primary" icon="check" disabled={busy} onClick={() => void actions.approve(s)}>{t("sched.approval.action")}</Button>
             )}
-            <button type="button" className="btn small" disabled={busy || item.group === "approval" || !!s.active_session_id} onClick={() => void actions.runNow(s)}><Icon name="play" size={14} /> {t("common.runnow")}</button>
-            {s.enabled
-              ? <button type="button" className="btn small" disabled={busy} onClick={() => void actions.setEnabled(s, false)}><Icon name="pause" size={14} /> {t("common.pause")}</button>
-              : <button type="button" className="btn small" disabled={busy || !resumable} onClick={() => void actions.setEnabled(s, true)}><Icon name="play" size={14} /> {t("common.resume")}</button>}
-            <button type="button" className="btn small" disabled={busy} onClick={() => setEditing(true)}><Icon name="pen" size={14} /> {t("common.edit")}</button>
-            <button type="button" className="btn small danger-ghost" disabled={busy} onClick={() => void remove()}><Icon name="trash" size={14} /> {t("common.delete")}</button>
+            <Button icon="play" disabled={busy || item.group === "approval" || !!s.active_session_id} onClick={() => void actions.runNow(s)}>{t("common.runnow")}</Button>
+            <Button variant="quiet" icon="pen" disabled={busy} onClick={() => setEditing(true)}>{t("common.edit")}</Button>
           </>
         )}
-      </div>
-      {p?.legacy_file_review_required && <div className="result-warning">{t("sched.proposal.legacyfiles")}</div>}
-
-      <dl className="scheddetail-facts">
-        <div><dt>{t("sched.kind")}</dt><dd>{t(`sched.kind.${rule.kind}`)}{s?.run_in === "self" ? t("sched.runs.here") : rule.kind === "agent" ? t("sched.runs.fresh") : ""}</dd></div>
-        <div>
-          <dt>{t("sched.chat")}</dt>
-          <dd>{chat ? <button type="button" className="linkbtn" onClick={() => onOpenSession(chat)}>{titles[chat] ?? t("sched.chat.untitled")}</button> : <span className="faint">{t("sched.chat.none")}</span>}</dd>
-        </div>
-        <div>
-          <dt>{t("sched.lastrun")}</dt>
-          <dd>
-            {last ? (
-              <span className={`scheddetail-last ${last.status}`}>
-                <span className="dot" aria-hidden />
-                {last.status === "running" ? t("sched.running") : t(last.status === "failed" ? "sched.last.failed" : "sched.last.ok", { t: relTimeLong(last.at) })}
-                {last.at && <span className="faint"> {absTime(last.at)}</span>}
-                {last.sessionId && <> <button type="button" className="linkbtn" onClick={() => onOpenSession(last.sessionId!)}>{t("sched.run.open")}</button></>}
-              </span>
-            ) : <span className="faint">{t("sched.lastrun.never")}</span>}
-          </dd>
-        </div>
-        <div><dt>{t("sched.setby")}</dt><dd>{p || s?.created_by_session || s?.source_session_id ? t("sched.setby.agent") : t("sched.setby.you")}</dd></div>
-        {/* Said only while the operator reviews the agent's schedules: with the standing approval the
-            date is ten years out, and a line about renewing it was noise that read as a warning. */}
-        {s?.grant_expires_at && actions.requireApproval && (
-          <div><dt>{t("sched.approval.until")}</dt><dd>{absTime(s.grant_expires_at)}</dd></div>
-        )}
-      </dl>
-
-      {s?.last_error && <div className="scheddetail-error"><b>{t("sched.lasterror")}</b> {s.last_error}</div>}
-
-      <Prompt key={item.key} text={rule.prompt} title={t(rule.kind === "agent" ? "sched.instruction" : "sched.text")} />
-
-      <Files item={item} />
-
-      {s?.last_summary && (
-        <section className="scheddetail-section">
-          <h3>{t("sched.lastresult")}</h3>
-          <div className="scheddetail-summary">{s.last_summary}</div>
-        </section>
-      )}
-
-      {s && <History schedule={s} onOpenSession={onOpenSession} toast={toast} />}
-
-      <details className="scheddetail-tech">
-        <summary>{t("common.details")}</summary>
-        <div className="sub mono">{s ? s.id : p!.id}{rule.cron ? ` · cron ${rule.cron} (UTC)` : ""}</div>
-        {p && <div className="sub mono">{t("sched.proposal.revision", { n: p.proposal_revision })}</div>}
-        {p?.files.map((file) => <div className="sub mono" key={`${file.name}:${file.digest}`}>{file.name} · SHA-256 {file.digest}</div>)}
-      </details>
+      </footer>
     </article>
   );
 }
@@ -162,13 +189,13 @@ function Prompt({ text, title }: { text: string; title: string }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
   const long = text.length > 280 || text.split("\n").length > 5;
   return (
-    <section className="scheddetail-section">
+    <section className="sched-block">
       <h3>{title}</h3>
-      <div className={`scheddetail-prompt ${long && !open ? "folded" : ""} ${open ? "open" : ""}`}>
+      <div className={`sched-prompt ${long && !open ? "folded" : ""} ${open ? "open" : ""}`}>
         <RawHtml className="answer" html={html} />
       </div>
       {long && (
-        <button type="button" className="linkbtn scheddetail-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button type="button" className="linkbtn sched-more" aria-expanded={open} onClick={() => setOpen(!open)}>
           {t(open ? "sched.prompt.less" : "sched.prompt.more")}
         </button>
       )}
@@ -180,9 +207,9 @@ function Files({ item }: { item: Item }) {
   const files = item.source === "proposal" ? item.proposal.files : scheduleFiles(item.schedule);
   if (!files.length) return null;
   return (
-    <section className="scheddetail-section">
+    <section className="sched-block">
       <h3>{t("sched.files")}</h3>
-      <ul className="scheddetail-files">
+      <ul className="sched-files">
         {files.map((file, index) => (
           <li key={`${file.name}:${index}`}><Icon name="file" size={14} /><span className="truncate">{file.name}</span>{file.size != null && <span className="faint num">{bytes(file.size)}</span>}</li>
         ))}
@@ -202,7 +229,7 @@ function History({ schedule, onOpenSession, toast }: { schedule: ScheduleRow; on
   const path = `/api/recurring/${encodeURIComponent(schedule.id)}/cycles`;
   const { data, error, refresh } = useQuery<CycleHistory>(path, { pollMs: 30000, staleMs: 5000 });
   return (
-    <section className="scheddetail-section">
+    <section className="sched-block">
       <h3>{t("sched.cycle.title")}</h3>
       {error && <div className="sub">{t("sched.approval.readfailed")}</div>}
       {data && data.cycles.length === 0 && <div className="sub faint">{t("sched.cycle.empty")}</div>}

@@ -39,16 +39,21 @@ import terminalSide from "./terminal/sidepanel.css?raw";
 import terminalCompose from "./terminal/compose.css?raw";
 import agentFeed from "./staff/agentfeed.css?raw";
 import app from "./App.tsx?raw";
+import canvasList from "./canvas/CanvasList.tsx?raw";
+import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
+import schedulesBrowser from "./schedules/SchedulesBrowser.tsx?raw";
 // Every stylesheet of the app, found rather than listed: a hand list was a line to add for each new
 // sheet, and a sheet left off it answered to nothing. The tokens come first, since the claims read
 // the first :root block as the scale; the Chrome side panel redefines the scale for its own subtree
 // and is held to that below, not to the desktop's. The shared stylesheet is a list of imports, which
 // are dropped; the guard reads rules one at a time, so the order they are joined in does not matter.
 const sheets = import.meta.glob(["./**/*.css", "!./ui/tokens.css", "!./sidepanel/sidepanel.css"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-// The sheets that were written before they were read here and break its claims (the
-// canvas, the agent link's cards, the rules editor and a few strips): each comes off this list when
-// the screen it draws is redrawn on the new scale, and nothing is ever added to it.
-const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./canvas/canvas.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
+// The sheets that were written before they were read here and break its claims (the canvas's plane, the
+// agent link's cards, the rules editor and a few strips): each comes off this list when the screen it draws
+// is redrawn on the new scale, and nothing is ever added to it. The plane stays on it for what it is: a
+// drawing, whose words and frames are sized in the board's own units and scaled with its zoom; the
+// interface around the board (canvas.css) is held.
+const NOT_YET_HELD = ["./actionrules.css", "./agenttalk.css", "./canvas/plane.css", "./contacts.css", "./maintenance.css", "./screens/dependencies.css", "./screens/promptchange.css"];
 const css = tokens + "\n" + Object.keys(sheets).filter((name) => !NOT_YET_HELD.includes(name)).sort().map((name) => sheets[name].replace(/@import[^;]+;/g, "")).join("\n");
 
 type Rule = { selector: string; media: string; body: string };
@@ -162,6 +167,8 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".task-pane-title", ".task-prose",
   // A Memory entry's pane opens on its title, a pane's heading (18/500).
   ".memory-pane-title",
+  // A schedule's pane opens on its name as the pane's heading, the same 18.
+  ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
   ".ov-title",
   // The calendar: an open event's title is a pane's heading (a sheet's, 16 on a phone), the number of a
@@ -196,6 +203,9 @@ const BOX_ALLOWED = [
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
   ".board-filters", ".task-pane-head", ".task-pane-foot",
+  // The schedule pane is the same pane: its head is level with the page header beside it (52), its foot
+  // holds the schedule's buttons with the room a dialog's foot has (64).
+  ".sched-pane-head", ".sched-pane-foot",
   // The open event's pane is a page of its own beside the grid, and its head is level with the page header.
   ".cal-pane-head",
   // The field that adds a task to a chat's own board is the one wide control of its panel's tab, as
@@ -275,6 +285,12 @@ const CONTENT_BOXES = [
   { selector: ".resume-card", property: "height", max: 56 },
   { selector: ".start-import .si-row", property: "height", max: 56 },
   { selector: ".projects-row", property: "height", max: 56 },
+  // A canvas is a row of the same size: a sketch of the board, its name over who touched it last.
+  { selector: ".cv-row", property: "height", max: 56 },
+  // A schedule is a row of the same size: what it is over when and where, its state, how it last went. In
+  // the sheet over a chat a row that carries its decision below it grows from this height.
+  { selector: ".schedrow", property: "height", max: 56 },
+  { selector: ".schedbrowser .schedrow", property: "min-height", max: 56 },
   { selector: ".tp-row-open", property: "height", max: 56 },
   { selector: ".tp-mem", property: "height", max: 56 },
   { selector: ".tp-pane-head", property: "height", max: 40 },
@@ -532,6 +548,56 @@ describe("the inbox", () => {
     expect(rule(".inbox-row-mark.attention")).toContain("var(--attention)");
     expect(rule(".inbox-row-mark.live")).toContain("var(--live)");
     expect(rule(".inbox-group-head.waiting")).toContain("var(--attention)");
+  });
+});
+
+describe("the canvas", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists its boards as 56 px rows in the 880 column, under scope heads 36 px tall", () => {
+    expect(canvasList).toContain('<Page width="list"');
+    expect(rule(".cv-row")).toContain("height: 56px");
+    expect(rule(".cv-section-head")).toContain("height: 36px");
+    expect(rule(".cv-row .cv-thumb")).toContain("height: 36px");
+  });
+
+  it("shows a row's commands on hover or focus, so the keyboard still reaches them", () => {
+    expect(rule(".cv-row-acts")).toContain("opacity: 0");
+    expect(all.some((r) => !r.media && selectors(r).includes(".cv-row:focus-within .cv-row-acts") && r.body.includes("opacity: 1"))).toBe(true);
+  });
+
+  it("draws the bar of an open canvas at the page header's height, and moves it over for the unfold button", () => {
+    expect(rule(".cv-bar")).toContain("min-height: var(--head-h)");
+    expect(rule(".app.sidebar-folded .cv-bar")).toContain("padding-left: calc(var(--space-3) + var(--ctl-h) + var(--space-3))");
+  });
+
+  it("draws the board's tools, the history and the sharing panel on the primitives, with no hand-made overlay", () => {
+    expect(canvasEditor).toContain("<Popover");
+    expect(canvasEditor).not.toContain("cv-pick-note");
+    expect(all.some((r) => selectors(r).some((sel) => sel.includes(".cv-pick-note") || sel === ".cv-tool" || sel.startsWith(".cv-tool-btn")))).toBe(false);
+  });
+});
+
+describe("the schedules", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists its schedules as 56 px rows in the 880 column, under group heads 36 px tall", () => {
+    expect(schedulesBrowser).toContain('<Page width="list"');
+    expect(rule(".schedrow")).toContain("height: 56px");
+    expect(rule(".schedlist-title")).toContain("height: 36px");
+  });
+
+  it("opens a schedule in a 420 px pane with a 52 px head and a 64 px foot, as a card is opened beside the board", () => {
+    expect(rule(".sched-pane")).toContain("width: 420px");
+    expect(rule(".sched-pane-head")).toContain("height: 52px");
+    expect(rule(".sched-pane-foot")).toContain("height: 64px");
+    expect(rule(".sched-pane-title")).toContain("font-size: var(--fs-18)");
+  });
+
+  it("says what waits for the operator in orange, a failed run in orange and one that is running in cyan", () => {
+    expect(rule(".schedrow-state.attention")).toContain("var(--attention)");
+    expect(rule(".schedrow-last.failed")).toContain("var(--attention)");
+    expect(rule(".schedrow-last.running .dot")).toContain("var(--live)");
   });
 });
 

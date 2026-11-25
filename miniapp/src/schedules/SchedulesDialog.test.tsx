@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// The schedules dialog a chat's schedule card opens: that chat's schedules with the clicked one open,
-// a switch to everyone's, a filter, Escape to close, and the commands answering the host's routes
-// with the revision shown and an approval as long as the host names.
+// The schedules sheet a chat's schedule card opens: that chat's schedules, the one the card named open
+// with a way back to the list, a switch to everyone's, a filter, Escape to close, and the commands
+// answering the host's routes with the revision shown and an approval as long as the host names.
 
 import { act } from "react";
 import { createRoot, Root } from "react-dom/client";
@@ -41,7 +41,7 @@ function answer(path: string): unknown {
   throw new Error(`unexpected ${path}`);
 }
 
-describe("the schedules dialog over a chat", () => {
+describe("the schedules sheet over a chat", () => {
   let host: HTMLDivElement;
   let root: Root;
   let closed: number;
@@ -49,7 +49,7 @@ describe("the schedules dialog over a chat", () => {
     setLang("en");
     closed = 0;
     for (const key of ["/api/schedules", "/api/recurring", "/api/sessions"]) invalidate(key);
-    // A desktop window: the list and the schedule side by side.
+    // A desktop window.
     window.matchMedia = ((query: string) => ({ matches: query.includes("min-width: 1024px"), addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
     vi.spyOn(api, "get").mockImplementation(async (path: string) => answer(path) as never);
     host = document.createElement("div");
@@ -64,22 +64,17 @@ describe("the schedules dialog over a chat", () => {
 
   const dialog = () => document.querySelector<HTMLElement>(".schedules-dialog")!;
   const rows = () => [...document.querySelectorAll<HTMLElement>(".schedrow")].map((el) => el.dataset.schedule);
-  const button = (name: string) => [...dialog().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name || b.getAttribute("aria-label") === name)!;
+  const button = (name: string) => [...dialog().querySelectorAll<HTMLButtonElement>("button, [role=radio]")].find((b) => b.textContent?.trim() === name || b.getAttribute("aria-label") === name)!;
 
   async function open(selected: string | null) {
     await act(async () => root.render(<SchedulesDialog sessionId="chat-a" selected={selected} onClose={() => (closed += 1)} onOpenSession={() => undefined} />));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   }
 
-  it("opens on this chat's schedules with the clicked one open, and the switch shows everyone's", async () => {
-    await open("s-mine");
+  it("opens on this chat's schedules, and the switch shows everyone's", async () => {
+    await open(null);
     expect(dialog().getAttribute("role")).toBe("dialog");
     expect(rows()).toEqual(["p-reset", "s-mine"]);
-    const detail = dialog().querySelector(".scheddetail")!;
-    expect(detail.getAttribute("data-schedule")).toBe("s-mine");
-    expect(detail.textContent).toContain("Every hour at :");
-    // The long instruction is folded with a way to read it whole.
-    expect(detail.querySelector(".scheddetail-prompt.folded")).not.toBeNull();
     await act(async () => button("All").click());
     expect(rows()).toEqual(["p-reset", "s-mine", "s-backup"]);
     const search = dialog().querySelector<HTMLInputElement>("input[type=search]")!;
@@ -88,6 +83,18 @@ describe("the schedules dialog over a chat", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(rows()).toEqual(["s-backup"]);
+  });
+
+  it("opens straight on the schedule the card named, with a way back to the list", async () => {
+    await open("s-mine");
+    const detail = dialog().querySelector(".sched-pane")!;
+    expect(detail.getAttribute("data-schedule")).toBe("s-mine");
+    expect(detail.textContent).toContain("Every hour at :");
+    // The long instruction is folded with a way to read it whole.
+    expect(detail.querySelector(".sched-prompt.folded")).not.toBeNull();
+    expect(rows()).toEqual([]);
+    await act(async () => button("Back").click());
+    expect(rows()).toEqual(["p-reset", "s-mine"]);
   });
 
   it("closes on Escape", async () => {
@@ -100,12 +107,15 @@ describe("the schedules dialog over a chat", () => {
     const patch = vi.spyOn(api, "patch").mockResolvedValue({ schedule_revision: 5, entity_revision: 10 } as never);
     const post = vi.spyOn(api, "post").mockResolvedValue({ id: "s-reset" } as never);
     await open("s-mine");
-    await act(async () => button("Pause").click());
+    const toggle = dialog().querySelector<HTMLElement>("[role=switch]")!;
+    expect(toggle.getAttribute("aria-label")).toBe("Enabled");
+    await act(async () => toggle.click());
     const [path, body] = patch.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe("/api/recurring/s-mine");
     expect(body).toMatchObject({ enabled: false, expected_schedule_revision: 4, expected_collection_revision: 9 });
     expect(post).not.toHaveBeenCalled();
 
+    await act(async () => button("Back").click());
     const row = document.querySelector<HTMLElement>('.schedrow[data-schedule="p-reset"]')!;
     const accept = [...row.querySelectorAll("button")].find((b) => b.textContent === "Approve schedule")!;
     await act(async () => accept.click());
@@ -121,7 +131,7 @@ describe("the schedules dialog over a chat", () => {
     const post = vi.spyOn(api, "post").mockResolvedValue({} as never);
     try {
       await open("s-mine");
-      await act(async () => button("Resume").click());
+      await act(async () => dialog().querySelector<HTMLElement>("[role=switch]")!.click());
       expect((patch.mock.calls[0][1] as Record<string, unknown>).enabled).toBe(true);
       const [path, body] = post.mock.calls[0] as [string, Record<string, unknown>];
       expect(path).toBe("/api/recurring/s-mine/approve");

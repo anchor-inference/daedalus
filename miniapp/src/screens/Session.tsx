@@ -28,6 +28,7 @@ import { lineChange, placeOf, sumLines, turnFiles, turnPages } from "../turnfile
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
 import { openSchedules } from "../schedules/host";
+import type { CanvasItem } from "../canvas/model";
 import { useScheduleActions } from "../schedules/actions";
 import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
@@ -207,7 +208,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const sessionCanvases = useQuery<{ items: { id: string; title?: string; updated_at?: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
+  const sessionCanvases = useQuery<{ items: CanvasItem[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
   // `translating` is the agent's language while the words are with the translator, "" once they are not;
   // `acked` once the host said it has them, after which only its own list keeps them "translating".
   const [sendingMessages, setSendingMessages] = useState<SendingMessage[]>([]);

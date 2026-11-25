@@ -2871,7 +2871,7 @@ def run_canvas() -> int:
             page = desk.new_page()
             page.route("**/api/**", answer)
             open_board(page)
-            page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+            page.get_by_role("radio", name="Комментарий" if ru else "Comment").click()
             frame = page.locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             inner = page.frame_locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
@@ -2879,7 +2879,7 @@ def run_canvas() -> int:
             assert box is not None
             scale = box["width"] / frame.evaluate("(node) => node.offsetWidth")
             page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
-            note = page.locator(".cv-pick-note")
+            note = page.locator(".cv-pick")
             note.wait_for(timeout=5000)
             note.locator("textarea").fill("Крупнее и теплее" if ru else "Larger, and a warmer brown")
             note.get_by_role("button", name="Добавить" if ru else "Add").click()

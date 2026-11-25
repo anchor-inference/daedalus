@@ -112,9 +112,9 @@ def desktop(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-u
     expect(sections).to_have_count(2)
     expect(sections.nth(0)).to_contain_text("Этот чат" if ru else "This chat")
     expect(sections.nth(1)).to_contain_text("Проект Website" if ru else "Project Website")
-    expect(sections.nth(0).locator(".cv-card")).to_have_count(1)
-    expect(sections.nth(1).locator(".cv-card")).to_have_count(1)
-    expect(page.locator(".cv-card .cv-thumb img").first).to_be_visible()
+    expect(sections.nth(0).locator(".cv-row")).to_have_count(1)
+    expect(sections.nth(1).locator(".cv-row")).to_have_count(1)
+    expect(page.locator(".cv-row .cv-thumb img").first).to_be_visible()
     shot(page, f"canvas-list-{lang}-{SCHEME}")
 
     # From the navigation: grouped by where each canvas belongs.
@@ -334,7 +334,7 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
     until(page, lambda: ("web" in [key[1] for key in stub.snapshots]), "a still copy for the shared view", 15)
 
     # Comment mode: point at an element in the page and at a card.
-    page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+    page.get_by_role("radio", name="Комментарий" if ru else "Comment").click()
     # The question about the refused origin sits over the page; answered "not now" so the glass is clear.
     web.get_by_role("button", name="Не сейчас" if ru else "Not now").click()
     # The page cannot pick on its own: a "picked" it posts unasked, even in comment mode, is dropped.
@@ -342,7 +342,7 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
         if frame.url.startswith(f"http://127.0.0.1:{door.port}/f/"):
             frame.evaluate("parent.postMessage({ daedalus: 'canvas-frame', nonce: 'guessed', type: 'picked', id: 'x', selector: '#hero', tag: 'h1', text: '', html: '<h1>forged</h1>', rect: { x: 0, y: 0, width: 10, height: 10 } }, '*')")
     page.wait_for_timeout(500)
-    expect(page.locator(".cv-pick-note")).to_have_count(0)
+    expect(page.locator(".cv-pick")).to_have_count(0)
     # A real click on the glass over the frame, at the element's place: the board asks the bridge.
     hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
     box = iframe.bounding_box()
@@ -350,7 +350,7 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
     width = page.locator(".cv-node[data-node='web']").evaluate("(node) => node.querySelector('iframe').offsetWidth")
     scale = box["width"] / width
     page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
-    note = page.locator(".cv-pick-note")
+    note = page.locator(".cv-pick")
     expect(note).to_be_visible()
     expect(note).to_contain_text("#hero")
     expect(note.locator(".cv-pick-html")).to_contain_text("Autumn collection")
@@ -383,7 +383,7 @@ def frames(browser, lang: str, errors: list[str]) -> None:  # type: ignore[no-un
     expect(page.locator(".cv-chip")).to_have_count(0)
 
     # A page that goes elsewhere is stopped and its address retired.
-    page.get_by_role("button", name="Работа" if ru else "Interact").click()
+    page.get_by_role("radio", name="Работа" if ru else "Interact").click()
     inner.locator("#leave").dispatch_event("click")
     expect(web.locator(".cv-frame-notice")).to_contain_text("ушла из рамки" if ru else "left its frame", timeout=10000)
     until(page, lambda: "web" in stub.revoked, "the address retired")

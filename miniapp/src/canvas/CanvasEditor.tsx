@@ -18,7 +18,9 @@ import { back, navigate, pathFor } from "../router";
 import { invalidate } from "../store";
 import { errorText } from "../ui";
 import { OverflowMenu, Popover, Sheet, useMedia } from "../ui/index";
+import { Button, IconButton } from "../ui/primitives";
 import type { MenuItem } from "../ui/dialogs";
+import type { VirtualAnchor } from "../ui/primitives";
 import { copyText, useCopied } from "../ui/components";
 import { relTimeLong } from "../format";
 import { Board } from "./Board";
@@ -59,7 +61,7 @@ export function CanvasEditor({ id, listPath, toast }: { id: string; listPath: st
   if (!canvas) {
     return (
       <div className="cv-editor">
-        <div className="cv-bar"><button className="iconbtn" onClick={() => back(listPath)} aria-label={t("canvas.back")} title={t("canvas.back")}><Icon name="back" size={18} /></button></div>
+        <div className="cv-bar"><IconButton icon="back" label={t("canvas.back")} onClick={() => back(listPath)} /></div>
         <div className="cv-loading">{failure || t("common.loading")}</div>
       </div>
     );
@@ -69,7 +71,7 @@ export function CanvasEditor({ id, listPath, toast }: { id: string; listPath: st
 
 function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: string; toast: (message: string) => void }) {
   const id = initial.id;
-  const phone = useMedia("(max-width: 680px)");
+  const phone = useMedia("(max-width: 1023px)");
   const [meta, setMeta] = useState(initial);
   const [doc, setDoc] = useState<CanvasDoc>(initial.doc);
   const [title, setTitle] = useState(initial.title);
@@ -412,7 +414,7 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
     setHighlight(null);
   }, []);
   const pendingNode = picking ? doc.nodes.find((node) => node.id === picking.frameId) : undefined;
-  const overlay = picking && pendingNode ? (
+  const pickNote = picking && pendingNode ? (
     <PickNote
       key={picking.picked.id}
       node={pendingNode}
@@ -439,29 +441,29 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
   return (
     <div className={`cv-editor ${historyOpen ? "history-open" : ""}`}>
       <header className="cv-bar">
-        <button className="iconbtn" onClick={() => { void flush(); back(listPath); }} aria-label={t("canvas.back")} title={t("canvas.back")}><Icon name="back" size={18} /></button>
+        <IconButton icon="back" label={t("canvas.back")} onClick={() => { void flush(); back(listPath); }} />
         <input className="cv-title" aria-label={t("canvas.title")} value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} onBlur={(event) => void rename(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); if (event.key === "Escape") { setTitle(meta.title); (event.target as HTMLInputElement).blur(); } }} />
         <span className="cv-scope-chip" title={meta.scope_name}><Icon name={meta.scope === "project" ? "folder" : "chat"} size={12} />{meta.scope_name}</span>
         <span className={`cv-status ${status}`} role="status" aria-label={t(`canvas.status.${status}`)} title={status === "saved" ? t("canvas.status.saved.version", { n: meta.version }) : t(`canvas.status.${status}`)}>
           <Icon name={statusIcon} size={14} /><span className="cv-status-word">{t(`canvas.status.${status}`)}</span>
         </span>
-        <button className={`btn cv-tool-btn ${historyOpen ? "on" : ""}`} onClick={() => { setHistoryOpen((open) => !open); setSelected(null); }} aria-pressed={historyOpen} aria-label={t("canvas.history")} title={t("canvas.history")}>
-          <Icon name="clock" size={16} /><span className="cv-tool-word">{t("canvas.history")}</span>
-        </button>
+        <Button variant="quiet" icon="clock" aria-pressed={historyOpen} aria-label={t("canvas.history")} onClick={() => { setHistoryOpen((open) => !open); setSelected(null); }}>
+          <span className="cv-tool-word">{t("canvas.history")}</span>
+        </Button>
         {!phone && (
-          <button ref={shareButton} className={`btn cv-tool-btn ${shareOpen ? "on" : ""}`} onClick={() => setShareOpen((open) => !open)} aria-haspopup="dialog" aria-expanded={shareOpen} aria-label={t("canvas.share")}>
+          <button ref={shareButton} type="button" className={`btn ghost ${shareOpen ? "on" : ""}`} onClick={() => setShareOpen((open) => !open)} aria-haspopup="dialog" aria-expanded={shareOpen} aria-label={t("canvas.share")}>
             <Icon name={meta.share_token ? "link" : "share"} size={16} /><span className="cv-tool-word">{t("canvas.share")}</span>
           </button>
         )}
-        {!phone && <OverflowMenu className="btn cv-tool-btn" label={t("canvas.file")} items={fileItems} trigger={<><Icon name="download" size={16} /><span className="cv-tool-word">{t("canvas.file")}</span><Icon name="down" size={14} /></>} />}
+        {!phone && <OverflowMenu className="btn ghost" label={t("canvas.file")} items={fileItems} trigger={<><Icon name="download" size={16} /><span className="cv-tool-word">{t("canvas.file")}</span><Icon name="down" size={14} /></>} />}
         {phone && <OverflowMenu label={t("canvas.more")} items={[{ label: t("canvas.share"), icon: "share", onSelect: () => setShareOpen(true) }, "-", ...fileItems]} />}
       </header>
       {conflict && (
         <div className="cv-banner conflict" role="alert">
           <Icon name="alert" size={16} />
           <span>{t(conflict.current.updated_by === "agent" ? "canvas.conflict.agent" : "canvas.conflict.other", { items: conflictNames })}</span>
-          <button className="btn small" onClick={takeTheirs}>{t("canvas.conflict.theirs")}</button>
-          <button className="btn small primary" onClick={keepMine}>{t("canvas.conflict.mine")}</button>
+          <Button size="sm" onClick={takeTheirs}>{t("canvas.conflict.theirs")}</Button>
+          <Button size="sm" variant="primary" onClick={keepMine}>{t("canvas.conflict.mine")}</Button>
         </div>
       )}
       <div className="cv-stage">
@@ -469,7 +471,7 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
             beside it, whose rows choose what it shows. */}
         <div className="cv-board-wrap">
           <FrameContext.Provider value={frameHost}>
-            <Board doc={doc} label={meta.title} fileUrl={fileUrl} onOps={onOps} onUndo={onUndo} onRedo={onRedo} canUndo={undoState.undo} canRedo={undoState.redo} marked={marked} compact={phone} onBusy={onBusy} renderFrame={renderFrame} mode={mode} onModeChange={changeMode} onPoint={onPoint} overlay={overlay} />
+            <Board doc={doc} label={meta.title} fileUrl={fileUrl} onOps={onOps} onUndo={onUndo} onRedo={onRedo} canUndo={undoState.undo} canRedo={undoState.redo} marked={marked} compact={phone} onBusy={onBusy} renderFrame={renderFrame} mode={mode} onModeChange={changeMode} onPoint={onPoint} />
           </FrameContext.Provider>
           {selected !== null && <RevisionPreview id={id} version={selected} current={selected === meta.version} onRestore={() => void restore(selected)} onClose={() => setSelected(null)} />}
         </div>
@@ -500,7 +502,8 @@ function Editor({ initial, listPath, toast }: { initial: Canvas; listPath: strin
           <AllowedSites canvasId={id} version={originsVersion} onChanged={() => setOriginsVersion((n) => n + 1)} toast={toast} />
         </Sheet>
       )}
-      {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="end" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
+      {pickNote}
+      {shareOpen && !phone && <Popover anchor={shareButton.current} onClose={() => setShareOpen(false)} align="end" role="dialog" className="cv-share-pop" label={t("canvas.share")}>{sharePanel}</Popover>}
       {shareOpen && phone && <Sheet title={t("canvas.share")} onClose={() => setShareOpen(false)} size="sm">{sharePanel}</Sheet>}
     </div>
   );
@@ -538,13 +541,13 @@ function SharePanel({ id, title, token, onToken, toast }: { id: string; title: s
         <>
           <input className="field" aria-label={t("canvas.share.link")} readOnly value={url} onFocus={(event) => event.target.select()} />
           <div className="cv-share-actions">
-            <button className="btn primary" onClick={() => void copy(url).then((ok) => { if (!ok) toast(t("canvas.link.copy.failed")); })}><Icon name={copied ? "check" : "copy"} size={15} />{t("canvas.share.copy")}</button>
-            {typeof navigator.share === "function" && <button className="btn" onClick={() => void navigator.share({ title, url }).catch(() => undefined)}><Icon name="share" size={15} />{t("canvas.share.send")}</button>}
-            <button className="btn danger" disabled={busy} onClick={() => void revoke()}><Icon name="unlink" size={15} />{t("canvas.share.revoke")}</button>
+            <Button variant="primary" icon={copied ? "check" : "copy"} onClick={() => void copy(url).then((ok) => { if (!ok) toast(t("canvas.link.copy.failed")); })}>{t("canvas.share.copy")}</Button>
+            {typeof navigator.share === "function" && <Button icon="share" onClick={() => void navigator.share({ title, url }).catch(() => undefined)}>{t("canvas.share.send")}</Button>}
+            <Button variant="danger" icon="unlink" disabled={busy} onClick={() => void revoke()}>{t("canvas.share.revoke")}</Button>
           </div>
         </>
       ) : (
-        <div className="cv-share-actions"><button className="btn primary" disabled={busy} onClick={() => void create()}><Icon name="link" size={15} />{t("canvas.share.create")}</button></div>
+        <div className="cv-share-actions"><Button variant="primary" icon="link" disabled={busy} onClick={() => void create()}>{t("canvas.share.create")}</Button></div>
       )}
     </div>
   );
@@ -593,7 +596,7 @@ function HistoryPanel({ id, current, selected, phone, hidden, onSelect, onClose,
     <aside className="cv-history" aria-label={t("canvas.history")}>
       <div className="cv-history-head">
         <strong>{t("canvas.history")}</strong>
-        <button className="iconbtn small" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}><Icon name="close" size={16} /></button>
+        <IconButton icon="close" label={t("common.close")} onClick={onClose} />
       </div>
       <div className="cv-history-body">{body}</div>
     </aside>
@@ -613,27 +616,39 @@ function RevisionPreview({ id, version, current, onRestore, onClose }: { id: str
       <div className="cv-banner preview" role="status">
         <Icon name="eye" size={16} />
         <span>{revision ? t("canvas.preview.at", { time: relTimeLong(revision.saved_at) }) : t("common.loading")}</span>
-        <button className="btn small" onClick={onClose}>{t("canvas.return")}</button>
-        {!current && <button className="btn small primary" disabled={!revision} onClick={onRestore}><Icon name="undo" size={14} />{t("canvas.restore")}</button>}
+        <Button size="sm" onClick={onClose}>{t("canvas.return")}</Button>
+        {!current && <Button size="sm" variant="primary" icon="undo" disabled={!revision} onClick={onRestore}>{t("canvas.restore")}</Button>}
       </div>
       {revision && <Board key={version} doc={revision.doc} label={revision.title} readOnly fileUrl={(fileId) => attachmentUrl(id, fileId)} renderFrame={(node) => <StillFrame node={node} />} />}
     </div>
   );
 }
 
-/** The note beside an element picked in a frame, drawn in board coordinates next to the element and
- *  kept at its own size on screen whatever the zoom. */
+/** The note beside an element picked in a frame, a popover hung from the element's place on the
+ *  screen. The element's box is in the page's own pixels, which are the card's units, so the card's
+ *  box on screen gives the scale; a sheet on a phone, where there is no room beside it. */
 function PickNote({ node, picked, onAdd, onCancel }: { node: CanvasNode; picked: Picked; onAdd: (note: string) => void; onCancel: () => void }) {
   const [note, setNote] = useState("");
-  const x = node.x + Math.max(0, Math.min(node.width, picked.rect.x + picked.rect.width)) + 12;
-  const y = node.y + Math.max(0, Math.min(node.height, picked.rect.y));
+  const anchor = useMemo<VirtualAnchor | null>(() => {
+    const card = document.querySelector<HTMLElement>(`.cv-board [data-node="${CSS.escape(node.id)}"]`);
+    if (!card) return null;
+    return {
+      contextElement: card,
+      getBoundingClientRect: () => {
+        const box = card.getBoundingClientRect();
+        const scale = node.width ? box.width / node.width : 1;
+        const x = box.left + Math.max(0, Math.min(node.width, picked.rect.x + picked.rect.width)) * scale;
+        const y = box.top + Math.max(0, Math.min(node.height, picked.rect.y)) * scale;
+        return { x, y, left: x, top: y, right: x, bottom: y, width: 0, height: 0 };
+      },
+    };
+  }, [node, picked]);
   return (
-    <div className="cv-pick-note" data-ui role="dialog" aria-label={t("canvas.pick.title")} style={{ left: x, top: y }} onPointerDown={(event) => event.stopPropagation()}>
+    <Popover anchor={anchor} onClose={onCancel} label={t("canvas.pick.title")} role="dialog" side="right" align="start" offset={12} className="cv-pick">
       <div className="cv-pick-what"><code>{picked.selector || picked.tag}</code>{picked.text && <span>{picked.text}</span>}</div>
       {/* The page's markup goes to the agent with the note, so the operator sees all of it here. */}
       <pre className="cv-pick-html" aria-label={t("canvas.pick.sent")}>{picked.html}</pre>
       <textarea
-        ref={(element) => { if (element && document.activeElement !== element && !element.dataset.focused) { element.dataset.focused = "1"; element.focus({ preventScroll: true }); } }}
         rows={3}
         value={note}
         placeholder={t("canvas.pick.placeholder")}
@@ -646,9 +661,9 @@ function PickNote({ node, picked, onAdd, onCancel }: { node: CanvasNode; picked:
         }}
       />
       <div className="cv-pick-actions">
-        <button type="button" className="btn small" onClick={onCancel}>{t("common.cancel")}</button>
-        <button type="button" className="btn small primary" onClick={() => onAdd(note)}>{t("canvas.pick.add")}</button>
+        <Button size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button size="sm" variant="primary" onClick={() => onAdd(note)}>{t("canvas.pick.add")}</Button>
       </div>
-    </div>
+    </Popover>
   );
 }
