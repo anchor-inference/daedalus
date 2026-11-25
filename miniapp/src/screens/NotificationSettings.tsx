@@ -286,7 +286,7 @@ function MutedProjects({ prefs, change }: { prefs: NotificationPreferences; chan
               options={[
                 state.muted ? { id: "muted" as const, label: muted, disabled: true } : { id: "on" as const, label: muted },
                 ...(state.muted ? [{ id: "on" as const, label: t("nset.mute.unmute") }] : []),
-                ...MUTE_ENDS.map((end) => ({ id: end, label: t(`nset.mute.set.${end}`) })),
+                ...MUTE_ENDS.map((end) => ({ id: end, label: t(`nset.mute.${end}`) })),
               ]}
             />
           </Row>
