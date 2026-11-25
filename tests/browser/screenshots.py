@@ -679,7 +679,7 @@ SETTINGS = {
     # and the translator is left to the host, which names the cheap model it picks.
     "translation": {"operator_language": "ru", "agent_language": "en", "preset": "", "timeout_seconds": 120, "suggested": "deepseek-flash"},
     # Settings → Navigation: the layout the app ships with.
-    "navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},

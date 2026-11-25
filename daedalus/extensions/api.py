@@ -290,7 +290,7 @@ LOGIN_WIDGET_MAX_AGE = 24 * 3600
 SESSION_COOKIE = "daedalus_session"
 SESSION_TTL = 30 * 24 * 3600
 SESSION_PAGE = 200
-"""How many sessions the listing's first page carries. The sidebar and the phone's drawer draw what
+"""How many sessions the listing's first page carries. The sidebar (a phone's drawer too) draws what
 it holds, and at thirty most titles sat behind "More": a title costs a row, the column scrolls and
 is windowed, so two hundred are shown at once and the cursor walks on past them."""
 VOICE_AUDIO_MAX = 25 << 20
@@ -887,7 +887,7 @@ class SettingsBody(BaseModel):
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
     navigation: dict[str, Any] | None = None
-    """The sidebar's pinned rows, its More launcher and the phone drawer. Each field sent replaces that field whole, so
+    """The sidebar's pinned rows and its More launcher. Each field sent replaces that field whole, so
     an icon override or a hidden item can be taken away; a field left out is kept."""
     pages: dict[str, Any] | None = None
     """The caps of custom pages: bytes and files per page, versions kept, the largest stored value."""
@@ -7057,7 +7057,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/navigation")
     async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The sidebar and drawer layout alone. The shell reads it on every load, and the whole settings
+        """The sidebar's layout alone. The shell reads it on every load, and the whole settings
         view asks the key proxy about every provider on the way, which a menu has no need to wait for."""
         return app.config.navigation.model_dump(mode="json")
 

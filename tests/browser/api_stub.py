@@ -694,9 +694,9 @@ GATES: dict[str, object] = {
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
     # The subscriptions' accounts on the same tab; check_accounts.py adds and removes one of its own.
     "/api/subscription-accounts": SUBSCRIPTION_ACCOUNTS,
-    # Where the sidebar's pinned rows, its More launcher and the phone drawer put each destination: nothing configured, the
+    # Where the sidebar's pinned rows and its More launcher put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
-    "/api/navigation": {"pinned": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "/api/navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # The pages the agent published: one, so the menus show where a page goes until it is placed.
     "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.

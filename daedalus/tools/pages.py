@@ -176,7 +176,7 @@ def _join(dest: str, rel: str) -> str:
     name="PageCreate",
     description=(
         "Create a custom page: a screen of the operator's own inside the Daedalus app, at /app/p/<slug>, which can sit "
-        "pinned in the sidebar and in the phone drawer. Anything goes inside it — any framework, CDN, WebAssembly, WebSockets, the "
+        "pinned in the sidebar (a phone's drawer is the same sidebar). Anything goes inside it — any framework, CDN, WebAssembly, WebSockets, the "
         "whole /api — and nothing restarts. slug: 1-63 lower-case letters (any script), digits, hyphens. title: a string or one per "
         "language ({\"en\": …, \"ru\": …}). kind: 'static' (files you write or import), 'service' (a web app you run, "
         "proxied; target = a port of the services range or the name of a service from ServiceStart), 'link' (another "
@@ -642,7 +642,7 @@ async def page_publish(context: ToolContext, slug: str, note: str = "") -> ToolR
     lines = [
         f"Published {slug!r} as version {version}. It is live at {_addresses(slug)} and in the app's list of pages.",
         f"To pin it in the sidebar: SettingsGet('navigation'), then SettingsChange({{\"navigation\": {{\"pinned\": [<the current items>, \"page:{slug}\"]}}}}) — "
-        "keep the items already there; 'drawer' is the phone's list, the same way.",
+        "keep the items already there. A phone's drawer is the same sidebar, so it follows.",
         f"Show it to the operator with PageShow({slug!r}), or link it in your answer as [{title}](/app/p/{slug}).",
     ]
     return ok(context, "\n".join(lines), slug=slug, version=version)

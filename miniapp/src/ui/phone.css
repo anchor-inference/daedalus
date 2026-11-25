@@ -1018,6 +1018,6 @@
   /* Settings → Navigation: a phone's browser has no drag and drop, so the grip goes and its width is
      the name's; the arrows and the place selector do the moving. */
   .nav-cfg-grip { display: none; }
-  .nav-cfg-row { gap: var(--space-1); padding: 0; }
+  .nav-cfg-row { gap: var(--space-1); padding: 0 var(--space-1) 0 var(--space-3); }
   .nav-cfg-place { width: 96px; }
 }

@@ -21,7 +21,7 @@
     {
       "id": "navigation", "group": "general", "icon": "sliders",
       "title": { "en": "Navigation", "ru": "Навигация" },
-      "about": { "en": "The rail, the More launcher and the phone drawer: which screens they list and in what order.", "ru": "Боковая панель, «Ещё» и меню телефона: какие экраны в них и в каком порядке." },
+      "about": { "en": "The sidebar and the More launcher (a phone's drawer is the same sidebar): which screens they list and in what order.", "ru": "Боковая панель (на телефоне это то же меню) и «Ещё»: какие экраны в них и в каком порядке." },
       "synonyms": ["rail", "sidebar", "menu", "drawer", "боковая панель", "меню", "панель навигации"]
     },
     {
@@ -263,8 +263,8 @@
     {
       "section": "appearance", "anchor": "appearance.colors", "config": null,
       "title": { "en": "Colours", "ru": "Цвета" },
-      "about": { "en": "Override the theme's background, surface, text, accent and send button colours; a change stays until you reset.", "ru": "Заменить цвета темы: фон, поверхность, текст, акцент и кнопку отправки; правка держится до сброса." },
-      "synonyms": ["colours", "colors", "accent colour", "accent color", "background colour", "text colour", "цвета", "акцент", "цвет фона", "цвет текста", "палитра"]
+      "about": { "en": "Override the theme's background, surface and text colours; a change stays until you reset.", "ru": "Заменить цвета темы: фон, поверхность и текст; правка держится до сброса." },
+      "synonyms": ["colours", "colors", "background colour", "text colour", "цвета", "цвет фона", "цвет текста", "палитра"]
     },
     {
       "section": "appearance", "anchor": "appearance.wash", "config": null,
@@ -352,20 +352,14 @@
     },
     {
       "section": "navigation", "anchor": "navigation.pinned", "config": "navigation.pinned",
-      "title": { "en": "Desktop navigation", "ru": "Навигация на компьютере" },
+      "title": { "en": "Pinned screens", "ru": "Закреплённые экраны" },
       "about": { "en": "Which screens are pinned at the top of the sidebar, which wait in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны закреплены вверху боковой панели, какие ждут в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
       "synonyms": ["pinned", "pin a screen", "rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
     },
     {
-      "section": "navigation", "anchor": "navigation.drawer", "config": "navigation.drawer",
-      "title": { "en": "Phone menu", "ru": "Меню телефона" },
-      "about": { "en": "The screens in the phone's drawer and their order; the rest wait under More.", "ru": "Экраны в меню телефона и их порядок; остальные ждут в «Ещё»." },
-      "synonyms": ["drawer", "phone menu", "mobile menu", "hamburger", "меню телефона", "мобильное меню", "выдвижное меню", "гамбургер"]
-    },
-    {
       "section": "navigation", "anchor": "navigation.reset", "config": null,
       "title": { "en": "Reset to default", "ru": "Сбросить по умолчанию" },
-      "about": { "en": "Put the rail, the More launcher and the phone drawer back the way they came.", "ru": "Вернуть боковую панель, «Ещё» и меню телефона к исходному виду." },
+      "about": { "en": "Put the sidebar's pinned rows and the More launcher back the way they came.", "ru": "Вернуть закреплённые строки боковой панели и «Ещё» к исходному виду." },
       "synonyms": ["reset navigation", "default menu", "restore menu", "сбросить навигацию", "вернуть меню", "по умолчанию"]
     },
     {

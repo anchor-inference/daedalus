@@ -1,7 +1,7 @@
-// Settings → Navigation: where each destination sits. The desktop half is three lists — pinned at the
-// top of the sidebar, the More launcher, hidden — that an item is dragged between or sent to with its
-// selector; the phone half is the drawer's order and which items are in it at all. Every change is saved
-// at once through the same PUT the other sections use, and the sidebar redraws from the answer.
+// Settings → Navigation: where each destination sits. Three lists — pinned at the top of the sidebar,
+// the More launcher, hidden — that an item is dragged between or sent to with its selector. A phone's
+// drawer is the sidebar, so these lists are the phone's too. Every change is saved at once through
+// the same PUT the other sections use, and the sidebar redraws from the answer.
 //
 // Dragging is the quick way and the arrows are the way that always works: a keyboard, a screen reader
 // and a phone's browser (which has no HTML drag and drop) move an item one place at a time.
@@ -11,22 +11,23 @@ import type { Settings } from "../api";
 import type { SelfDevMode } from "../capabilities";
 import { t } from "../i18n";
 import { ICON_NAMES, Icon, type IconName } from "../icons";
-import { type NavConfig, type NavItem, type PageInfo, desktopLayout, drawerLayout, moveItem, resolveNav } from "../navconfig";
+import { type NavConfig, type NavItem, type PageInfo, desktopLayout, moveItem, resolveNav } from "../navconfig";
 import { prime, useQuery } from "../store";
 import { Sheet } from "../ui/dialogs";
-import { Select, Switch } from "../ui/primitives";
+import { Button, Select } from "../ui/primitives";
+import { SetBlock, SetGroup } from "../settingsrow";
 import { NAV_KEY, PAGES_KEY } from "../usenav";
 
 type Place = "pinned" | "more" | "hidden";
 const PLACES: Place[] = ["pinned", "more", "hidden"];
-const EMPTY: Required<NavConfig> = { pinned: [], more: [], drawer: [], hidden: [], icons: {} };
+const EMPTY: Required<NavConfig> = { pinned: [], more: [], hidden: [], icons: {} };
 
 export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (patch: Partial<Settings>) => Promise<void>; selfdev: SelfDevMode }) {
   const pages = useQuery<{ pages?: PageInfo[] }>(PAGES_KEY, { staleMs: 30000 });
   // What was just asked for, shown until the answer replaces it, so a dragged row does not jump back
   // for the length of a round trip.
   const [draft, setDraft] = useState<NavConfig | null>(null);
-  const [dragging, setDragging] = useState<{ list: "desktop" | "phone"; id: string } | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
   const [picking, setPicking] = useState<NavItem | null>(null);
   const saved = s.navigation ?? EMPTY;
   const config: NavConfig = draft ?? saved;
@@ -44,8 +45,6 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
     hidden: nav.catalogue.filter((it) => nav.hidden.has(it.id)),
   };
   const placeOf = (id: string): Place => PLACES.find((p) => sections[p].some((it) => it.id === id)) ?? "more";
-  const drawerOn = nav.drawer.agents;
-  const drawerOff = nav.phoneMore;
 
   async function write(next: NavConfig) {
     setDraft(next);
@@ -86,10 +85,6 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
     void write({ ...config, ...desktopLayout(config, order, placement, known) });
   }
 
-  function setDrawer(on: string[]) {
-    void write({ ...config, drawer: drawerLayout(config, on, known) });
-  }
-
   function setIcon(item: NavItem, name: IconName | null) {
     const icons = { ...(config.icons ?? {}) };
     if (name) icons[item.id] = name;
@@ -98,16 +93,16 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
     void write({ ...config, icons });
   }
 
-  const drop = (e: DragEvent, list: "desktop" | "phone", run: (id: string) => void) => {
-    if (!dragging || dragging.list !== list) return;
+  const drop = (e: DragEvent, run: (id: string) => void) => {
+    if (!dragging) return;
     e.preventDefault();
     e.stopPropagation();
-    const id = dragging.id;
+    const id = dragging;
     setDragging(null);
     run(id);
   };
-  const allowDrop = (e: DragEvent, list: "desktop" | "phone") => {
-    if (dragging?.list === list) e.preventDefault();
+  const allowDrop = (e: DragEvent) => {
+    if (dragging) e.preventDefault();
   };
 
   const glyph = (it: NavItem) => (
@@ -122,89 +117,41 @@ export function NavigationSettings({ s, save, selfdev }: { s: Settings; save: (p
     </span>
   );
 
-  const desktopRow = (it: NavItem, p: Place) => (
+  const row = (it: NavItem, p: Place) => (
     <div
       key={it.id}
-      className={`nav-cfg-row ${dragging?.id === it.id ? "dragging" : ""}`}
+      className={`nav-cfg-row ${dragging === it.id ? "dragging" : ""}`}
       data-nav-row={it.id}
       data-place={p}
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", it.id); setDragging({ list: "desktop", id: it.id }); }}
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", it.id); setDragging(it.id); }}
       onDragEnd={() => setDragging(null)}
-      onDragOver={(e) => allowDrop(e, "desktop")}
-      onDrop={(e) => drop(e, "desktop", (id) => id !== it.id && place(id, p, it.id))}
+      onDragOver={allowDrop}
+      onDrop={(e) => drop(e, (id) => id !== it.id && place(id, p, it.id))}
     >
       <span className="nav-cfg-grip" aria-hidden><Icon name="vdots" size={16} /></span>
       {glyph(it)}
       <span className="nav-cfg-title truncate">{it.title}</span>
       {arrows(it, () => step(it.id, -1), () => step(it.id, 1))}
-      <Select className="nav-cfg-place" value={p} label={t("nav.cfg.place", { name: it.title })} onChange={(q) => place(it.id, q)} options={PLACES.map((q) => ({ id: q, label: t(`nav.cfg.place.${q}`) }))} />
-    </div>
-  );
-
-  const phoneRow = (it: NavItem, on: boolean) => (
-    <div
-      key={it.id}
-      className={`nav-cfg-row ${on ? "" : "off"} ${dragging?.id === it.id ? "dragging" : ""}`}
-      data-drawer-row={it.id}
-      data-on={on ? "1" : "0"}
-      draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", it.id); setDragging({ list: "phone", id: it.id }); }}
-      onDragEnd={() => setDragging(null)}
-      onDragOver={(e) => allowDrop(e, "phone")}
-      onDrop={(e) => drop(e, "phone", (id) => {
-        if (id === it.id) return;
-        const ids = drawerOn.map((x) => x.id).filter((x) => x !== id);
-        // Dropped on an item outside the drawer: it goes in at the end.
-        const at = on ? ids.indexOf(it.id) : ids.length;
-        ids.splice(at, 0, id);
-        setDrawer(ids);
-      })}
-    >
-      <span className="nav-cfg-grip" aria-hidden><Icon name="vdots" size={16} /></span>
-      <span className="nav-cfg-glyph"><Icon name={it.icon} size={18} path={it.iconPath} /></span>
-      <span className="nav-cfg-title truncate">{it.title}</span>
-      {on && arrows(it, () => {
-        const ids = drawerOn.map((x) => x.id);
-        const i = ids.indexOf(it.id);
-        if (i > 0) setDrawer(moveItem(ids, i, i - 1));
-      }, () => {
-        const ids = drawerOn.map((x) => x.id);
-        const i = ids.indexOf(it.id);
-        if (i < ids.length - 1) setDrawer(moveItem(ids, i, i + 1));
-      })}
-      <Switch checked={on} label={t("nav.cfg.indrawer", { name: it.title })} onChange={(next) => setDrawer(next ? [...drawerOn.map((x) => x.id), it.id] : drawerOn.map((x) => x.id).filter((x) => x !== it.id))} />
+      <Select className="nav-cfg-place set-value" value={p} label={t("nav.cfg.place", { name: it.title })} onChange={(q) => place(it.id, q)} options={PLACES.map((q) => ({ id: q, label: t(`nav.cfg.place.${q}`) }))} />
     </div>
   );
 
   return (
     <>
-      <div className="card nav-cfg" data-setting="navigation.pinned">
-        <div className="section-title">{t("nav.cfg.desktop")}</div>
-        <div className="sub">{t("nav.cfg.desktop.sub")}</div>
+      <div className="nav-cfg" data-setting="navigation.pinned">
+        <p className="set-help">{t("nav.cfg.desktop.sub")}</p>
         {PLACES.map((p) => (
-          <div key={p} className="nav-cfg-list" data-nav-list={p} onDragOver={(e) => allowDrop(e, "desktop")} onDrop={(e) => drop(e, "desktop", (id) => place(id, p))}>
-            <div className="nav-cfg-head">{t(`nav.cfg.list.${p}`)}</div>
-            {sections[p].map((it) => desktopRow(it, p))}
-            {sections[p].length === 0 && <div className="nav-cfg-empty sub">{t("nav.cfg.empty")}</div>}
+          <div key={p} className="nav-cfg-list" data-nav-list={p} onDragOver={allowDrop} onDrop={(e) => drop(e, (id) => place(id, p))}>
+            <SetGroup title={t(`nav.cfg.list.${p}`)}>
+              {sections[p].map((it) => row(it, p))}
+              {sections[p].length === 0 && <SetBlock className="nav-cfg-empty"><span className="set-hint">{t("nav.cfg.empty")}</span></SetBlock>}
+            </SetGroup>
           </div>
         ))}
       </div>
-      <div className="card nav-cfg" data-setting="navigation.drawer">
-        <div className="section-title">{t("nav.cfg.phone")}</div>
-        <div className="sub">{t("nav.cfg.phone.sub")}</div>
-        <div className="nav-cfg-list" data-drawer-list="on" onDragOver={(e) => allowDrop(e, "phone")} onDrop={(e) => drop(e, "phone", (id) => setDrawer([...drawerOn.map((x) => x.id).filter((x) => x !== id), id]))}>
-          <div className="nav-cfg-head">{t("nav.cfg.list.drawer")}</div>
-          {drawerOn.map((it) => phoneRow(it, true))}
-          {drawerOn.length === 0 && <div className="nav-cfg-empty sub">{t("nav.cfg.empty")}</div>}
-        </div>
-        <div className="nav-cfg-list" data-drawer-list="off">
-          <div className="nav-cfg-head">{t("nav.cfg.list.phonemore")}</div>
-          {drawerOff.map((it) => phoneRow(it, false))}
-        </div>
-      </div>
-      <div className="btnrow">
-        <button type="button" className="btn" data-nav="reset" data-setting="navigation.reset" onClick={() => void write({ ...EMPTY })}>{t("nav.cfg.reset")}</button>
+      <div className="btnrow set-actions">
+        <Button data-nav="reset" data-setting="navigation.reset" onClick={() => void write({ ...EMPTY })}>{t("nav.cfg.reset")}</Button>
       </div>
       {picking && (
         <Sheet title={t("nav.cfg.icon", { name: picking.title })} onClose={() => setPicking(null)} size="sm">

@@ -26,7 +26,7 @@ const CHIPS = 4;
 
 export type LauncherProps = {
   nav: ResolvedNav;
-  /** What the surface beside the launcher already shows: the sidebar's pinned rows, or the phone drawer's list. */
+  /** What the sidebar beside the launcher already shows: its pinned rows. */
   placed: NavItem[];
   /** The id of the item the route stands on (navconfig's `currentId`). */
   current: string;
