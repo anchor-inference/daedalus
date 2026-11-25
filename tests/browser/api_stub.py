@@ -199,6 +199,16 @@ PROJECT_APPROVAL_RULES: list[dict[str, object]] = [
 """What every stub project has been allowed for all its chats. ``DELETE`` takes one out for the rest of the run."""
 
 
+def provider_test_result(provider_id: str) -> dict[str, object]:
+    """``POST /api/providers/<id>/test``: the stub's providers answer, except one that is named as down.
+
+    ``broken`` answers as an endpoint that refuses its key does, as data and not as an error, so Settings
+    draws a failed row without a check having to stub a 4xx."""
+    if provider_id == "broken":
+        return {"ok": False, "latency_ms": 212, "status": 401, "detail": "the endpoint refused the key (HTTP 401)"}
+    return {"ok": True, "latency_ms": 184, "status": 200, "detail": "", "models": 12}
+
+
 def session_tool_groups() -> dict[str, object]:
     """``GET /api/sessions/<id>/tool-groups`` for a session that loaded the browser, cannot sign in to MCP
     servers and chose its own mode for the board. Every other group is where its mode puts it, as the
@@ -2210,6 +2220,8 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "DELETE" and len(parts) == 6 and parts[2] == "projects" and parts[4] == "approval-rules":
         PROJECT_APPROVAL_RULES[:] = [rule for rule in PROJECT_APPROVAL_RULES if rule["id"] != parts[5]]
         return 200, "application/json", json.dumps({"rules": PROJECT_APPROVAL_RULES})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "providers" and parts[4] == "test":
+        return 200, "application/json", json.dumps(provider_test_result(parts[3]))
     if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-similar"]:
         return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
     if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-server"]:

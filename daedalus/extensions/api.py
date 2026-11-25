@@ -205,7 +205,7 @@ from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.memory import privacy
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
-from daedalus.providers import openrouter_routes
+from daedalus.providers import connection_probe, openrouter_routes
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
@@ -7201,6 +7201,29 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if passed:
             free_catalog.mark_probed(body.provider, body.model)
         return {"agent_ready": passed}
+
+    @api.post("/api/providers/{provider_id}/test")
+    async def test_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Whether a configured endpoint answers: ``{"ok", "latency_ms", "status", "detail", "models"?}``.
+
+        Reads the endpoint's model list through the adapter real requests use, within a few seconds. A
+        failure of any kind, an endpoint that is down or refuses the key included, is the answer with
+        ``ok`` false and a sentence, not an error; only an id that names nothing is a 404."""
+        if provider_id not in app.config.providers:
+            raise HTTPException(404, "no such provider")
+        try:
+            provider = manager.providers.get(provider_id)
+        except KeyError:
+            return {"ok": False, "latency_ms": None, "status": None, "detail": "the endpoint has no address, or is a hosted vendor with no key set; fill them in first"}
+        problem = ""
+        if is_keyproxy_url(provider.endpoint.base_url):
+            # The proxy knows whether anything behind it can sign the request; asking it first gives the
+            # sentence that names what is missing, where the request would only come back as a 401.
+            keys = await keyproxy_keys()
+            row = (keys or {}).get(keyproxy_upstream(provider.endpoint.base_url))
+            if keys is not None and not (row and row["configured"]):
+                problem = no_credential(str(row["kind"]) if row else "api_key", provider_id)
+        return await connection_probe.probe(provider, redact=manager.redactor.redact, problem=problem)
 
     @api.post("/api/providers/lookup-models")
     async def lookup_provider_models(body: ModelsLookupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

@@ -123,7 +123,10 @@ request. `GET /api/projects/{id}/approval-rules` lists a project's rules (`{"rul
 "rule", "kind", "value", "hosts", "label", "created_at", "session_id", "via"}]}`) and `DELETE
 …/approval-rules/{rule_id}` takes one back for every chat; `GET …/policy/standing` lists them too, as
 `project`. Granting announces `permission.resolved` with `scope: "project"` and `rule_id`, and a change of the
-list `project.changed` with `change: "approvals"`. An action the
+list `project.changed` with `change: "approvals"`. `POST /api/providers/{id}/test` reads the endpoint's
+model list through the adapter requests use and answers `{"ok", "latency_ms", "status", "detail",
+"models"?}` within eight seconds; an endpoint that is down or refuses the key is the answer with `ok` false,
+and only an id that names nothing is a 404. An action the
 operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
 `kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
 granted. A call the auto-review blocked arrives as `permission.pending` with `blocked: {"reason",
