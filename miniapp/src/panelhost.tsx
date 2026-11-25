@@ -42,6 +42,7 @@ import {
   goForward,
   openFile,
   openSubagent,
+  openTask,
   openTab,
   panelQuery,
   readPanelPx,
@@ -82,6 +83,11 @@ export type PanelHostProps = {
   /** Tools drawn as tabs whether or not they were opened, while they want the operator (questions
    *  waiting): a tab that needs an answer is not one the operator has to go and find. */
   attention?: PanelTab[];
+  /** Tools drawn as tabs after the opened ones while they hold something, though nobody opened them
+   *  and nothing waits on an answer: the chat's own board while it has open tasks. They never take
+   *  the active tab and never open a closed panel, which is why a tool that wants an answer is not
+   *  one of them. */
+  alongside?: PanelTab[];
   /** The Details, Files and Terminal tabs, rendered by the screen that owns their data. */
   details?: (ids: string) => ReactNode;
   files?: ReactNode;
@@ -89,8 +95,9 @@ export type PanelHostProps = {
   /** Every other tool's body: the Overview, the chat's changes, its context and spend, what it kept and
    *  was given, and a project's board, brief, wake-ups and folders in its focus mode. */
   pages?: Partial<Record<PanelTab, ReactNode>>;
-  /** A number on a tab: helpers working, jobs running, notes kept. */
-  badges?: Partial<Record<PanelTab, number>>;
+  /** A number on a tab: helpers working, jobs running, notes kept; or a short figure of its own,
+   *  the board's "3/5". */
+  badges?: Partial<Record<PanelTab, number | string>>;
   /** A dot on a tab instead of a number: the agent busy in its browser, or waiting for the operator. */
   marks?: Partial<Record<PanelTab, "busy" | "attn">>;
   /** What the "+" menu says beside a tool that is not open: its count or its share ("3/5", "21%"). */
@@ -183,11 +190,12 @@ export const TAB_ICON: Record<PanelTab, IconName> = {
   questions: "ask", browser: "globe", sources: "link", agents: "bots", changes: "changes", context: "gauge", usage: "coin", memory: "brain", canvas: "pen", attachments: "attach",
 };
 
-/** The tabs drawn: the Overview, the tools that want the operator, then the ones opened, each once and
- *  only while the chat still offers it (a kept Changes tab in a chat that is not a repository is not drawn). */
-export function shownTabs(state: Pick<PanelState, "open" | "tab">, offered: readonly PanelTab[], attention: readonly PanelTab[] = []): PanelTab[] {
+/** The tabs drawn: the Overview, the tools that want the operator, then the ones opened and the ones
+ *  that hold something, each once and only while the chat still offers it (a kept Changes tab in a chat
+ *  that is not a repository is not drawn). */
+export function shownTabs(state: Pick<PanelState, "open" | "tab">, offered: readonly PanelTab[], attention: readonly PanelTab[] = [], alongside: readonly PanelTab[] = []): PanelTab[] {
   const out: PanelTab[] = ["overview"];
-  for (const tab of [...attention, ...state.open, ...(state.tab ? [state.tab] : [])]) {
+  for (const tab of [...attention, ...state.open, ...alongside, ...(state.tab ? [state.tab] : [])]) {
     if (!out.includes(tab) && offered.includes(tab)) out.push(tab);
   }
   // A tab on screen that the chat does not list (a link naming it before the listing arrived) is
@@ -251,9 +259,9 @@ function useTabFit(strip: RefObject<HTMLDivElement | null>, content: string): Ta
 }
 
 function Tabs(props: HostProps & { inSheet?: boolean }) {
-  const { state, onTab, onCloseTool, onClose, onExpand, badges, marks, inSheet, local, pinned, onPin, tabs = PANEL_TABS, attention } = props;
+  const { state, onTab, onCloseTool, onClose, onExpand, badges, marks, inSheet, local, pinned, onPin, tabs = PANEL_TABS, attention, alongside } = props;
   const strip = useRef<HTMLDivElement>(null);
-  const shown = shownTabs(state, tabs, attention);
+  const shown = shownTabs(state, tabs, attention, alongside);
   // What the strip holds and how long its words are: a new tab, a badge, the open tab, the language.
   const fit = useTabFit(strip, `${shown.join()}|${state.tab}|${JSON.stringify(badges ?? {})}|${shown.map((tab) => t(`panel.tab.${tab}`)).join()}`);
   useEdgeFade(strip, state.tab);
@@ -295,7 +303,7 @@ function Tabs(props: HostProps & { inSheet?: boolean }) {
                 onAuxClick={(e) => { if (e.button === 1 && closable(tab)) { e.preventDefault(); onCloseTool!(tab); } }}>
                 <Icon name={TAB_ICON[tab]} size={16} />
                 <span className="panel-tab-word">{label}</span>
-                {n > 0 && <span className={`count ${tab === "questions" ? "attn" : ""}`}>{n}</span>}
+                {n !== 0 && <span className={`count ${tab === "questions" ? "attn" : ""}`}>{n}</span>}
                 {marks?.[tab] && <span className={`tab-mark ${marks[tab]}`} aria-hidden="true" />}
               </button>
               {closable(tab) && on && <button type="button" className="panel-tab-close" tabIndex={-1} aria-label={t("panel.tab.close", { name: label })} title={t("panel.tab.close", { name: label })} onClick={() => onCloseTool!(tab)}><Icon name="close" size={12} /></button>}
@@ -519,6 +527,8 @@ export type PanelControls = {
   openFile: (entry: PanelEntry) => void;
   /** The Subagents tab on one helper's conversation, or on the list with null. */
   openSubagent: (sub: string | null) => void;
+  /** The Board tab on one task, or on its list with null. */
+  openTask: (task: string | null) => void;
   /** A file opened beside the one on screen, as a tab of its own. */
   openBeside: (entry: PanelEntry) => void;
   showEntry: (entry: PanelEntry) => void;
@@ -660,6 +670,16 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
       if (!was && stateRef.current.tab) rememberPanel(stateRef.current, undefined, context);
       return !was;
     }), [context]),
+    openTask: useCallback(
+      (task: string | null) => {
+        const s = stateRef.current;
+        if (s.tab === null) announce();
+        // A card opened is a step the browser's Back can undo; leaving it for the list replaces that
+        // entry rather than stacking a second list on top of the first.
+        commit(openTask(s, task), s.tab === null || (task !== null && s.task !== task));
+      },
+      [commit, announce],
+    ),
     openSubagent: useCallback(
       (sub: string | null) => {
         const s = stateRef.current;

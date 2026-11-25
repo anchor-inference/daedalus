@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, Project, SessionList, SessionSummary } from "../api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { Project, SessionSummary } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { Chip, ChipBar, EmptyState, TopBar } from "../ui/phone";
 import { Button, Combobox, Field, IconButton, Menu, MenuRow, Popover, Row, Segmented, Select, Sheet, type MenuItem } from "../ui/primitives";
@@ -17,6 +17,8 @@ import { plural, t } from "../i18n";
 import { closeItems } from "../board/operatorClose";
 import { BoardColumns, type BoardColumn, type ChatInfo } from "../board/BoardColumns";
 import { TaskPane, TaskSheet } from "../board/TaskPane";
+import { useChats } from "../board/useChats";
+import { useCreateTask } from "../board/useCreateTask";
 import { useTaskWrites, type TaskWrites } from "../board/useTaskWrites";
 import { assigneeName, byUrgency, columnLabel, FINISHED, isFinished, movesFor, OPEN_COLUMNS, type BoardTask, type Status } from "../board/tasks";
 import { byProject, filtered, scopeFrom, scopeKey, scopeQuery, searched, storedGrouping, type Grouping, type Scope } from "./boardview";
@@ -31,23 +33,6 @@ function useGrouping(key: string, fallback: Grouping): [Grouping, (value: Groupi
     try { localStorage.setItem(key, value); } catch { /* the choice lasts this load */ }
   };
   return [grouping, choose];
-}
-
-/** The chats the board can name and narrow to: the operator's own, not a helper of one. */
-function useChats(): { list: SessionSummary[]; info: ChatInfo } {
-  const { data } = useQuery<SessionList>("/api/sessions", { staleMs: 15000 });
-  return useMemo(() => {
-    const sessions = data?.sessions ?? [];
-    const byId = new Map(sessions.map((s) => [s.id, s]));
-    return {
-      list: sessions.filter((s) => !s.metadata?.subagent_of && !s.archived).sort((a, b) => Date.parse(b.last_message_at) - Date.parse(a.last_message_at)),
-      info: {
-        title: (id) => byId.get(id)?.title,
-        running: (id) => byId.get(id)?.status === "running",
-        waiting: (id) => { const s = byId.get(id); return Boolean(s && (s.needs_attention || s.status === "waiting")); },
-      },
-    };
-  }, [data]);
 }
 
 export function BoardScreen({ toast, onOpen, selected, project, projects = [], query }: {
@@ -363,8 +348,7 @@ function PhoneBoardView({ tasks, error, loading, refresh, showDone, setShowDone,
  */
 function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scope; chats: SessionSummary[]; onClose: () => void; onCreated: () => void; toast: (t: string) => void }) {
   const offline = useOffline();
-  const operation = useRef<{ fingerprint: string; id: string } | null>(null);
-  const collectionRevision = useRef<{ key: string; value: number } | null>(null);
+  const createTask = useCreateTask();
   const [form, setForm] = useState({ title: "", description: "", acceptance: "", checklist: "", priority: 3, due: "", you: false, session_id: scope.kind === "chat" ? scope.id : "" });
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -375,13 +359,7 @@ function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scop
     if (offline) { setRefused(t("result.block.unconfirmed")); return; }
     setBusy(true);
     try {
-      const revisionsPath = projectId ? `/api/control/revisions?project=${encodeURIComponent(projectId)}` : "/api/control/revisions";
-      if (collectionRevision.current?.key !== revisionsPath) {
-        const revisions = await api.get<{ collection_revision: number }>(revisionsPath);
-        if (!Number.isInteger(revisions.collection_revision)) { setRefused(t("result.block.unconfirmed")); return; }
-        collectionRevision.current = { key: revisionsPath, value: revisions.collection_revision };
-      }
-      const body = {
+      await createTask(projectId, {
         title: form.title.trim(),
         acceptance: form.acceptance.trim(),
         priority: form.priority,
@@ -390,16 +368,9 @@ function NewTaskSheet({ scope, chats, onClose, onCreated, toast }: { scope: Scop
         ...(form.due ? { due_at: form.due } : {}),
         ...(form.you ? { assignee_operator: true } : {}),
         session_id: form.session_id || null,
-        expected_collection_revision: collectionRevision.current.value,
-      };
-      const fingerprint = JSON.stringify(body);
-      if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
-      await api.post(projectId ? `/api/projects/${encodeURIComponent(projectId)}/board` : "/api/board", { ...body, client_operation_id: operation.current.id });
-      operation.current = null;
-      collectionRevision.current = null;
+      });
       onCreated();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) { operation.current = null; collectionRevision.current = null; }
       setRefused(errorText(e));
       toast(errorText(e));
     } finally {

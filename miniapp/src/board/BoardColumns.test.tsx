@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n";
+import type { MenuItem } from "../ui/primitives";
 import { BoardColumns, stackedColumns, type ChatInfo } from "./BoardColumns";
 import type { BoardTask } from "./tasks";
 
@@ -31,6 +32,16 @@ afterEach(() => {
 });
 
 describe("a chat's board, stacked", () => {
+  it("gives a card with commands a button beside it, and leaves the card without any as it was", () => {
+    const columns = stackedColumns([task("a"), task("b", { status: "review" })]);
+    const picked = vi.fn();
+    const cardMenu = (t: BoardTask): MenuItem[] => (t.id === "a" ? [{ label: "Move to Blocked", onSelect: picked }] : []);
+    act(() => root.render(<BoardColumns columns={columns} scope="chat" layout="stacked" onOpen={() => undefined} chats={chats} cardMenu={cardMenu} />));
+    expect(host.querySelectorAll(".task-card-more")).toHaveLength(1);
+    expect(host.querySelector("[data-task='a']")!.closest(".task-card-wrap")!.querySelector(".task-card-more")!.getAttribute("aria-label")).toBe("Actions for Card a");
+    expect(host.querySelector("[data-task='b']")!.closest(".task-card-wrap")).toBeNull();
+  });
+
   it("reads doing, to do, review, blocked, then the finished folded", () => {
     const tasks = [task("a", { status: "doing", checklist: [{ text: "x", done: true }, { text: "y", done: false }] }), task("b"), task("c", { status: "done" }), task("d", { status: "blocked" })];
     const columns = stackedColumns(tasks);

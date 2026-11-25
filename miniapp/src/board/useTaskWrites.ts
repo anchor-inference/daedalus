@@ -19,6 +19,9 @@ export type TaskWrites = {
   blocked: (task: BoardTask) => boolean;
   refusal: Refusal | null;
   clear: () => void;
+  /** A refusal that did not come through an edit here (a close, which asks its own route), kept by the
+   *  control that asked so it is read where the operator looked. */
+  refuse: (task: BoardTask, where: string, text: string) => void;
   busy: string | null;
   edit: (task: BoardTask, fields: TaskEdit, where: string) => Promise<boolean>;
   move: (task: BoardTask, status: Status, where: string) => Promise<boolean>;
@@ -76,6 +79,7 @@ export function useTaskWrites(onChanged: () => void): TaskWrites {
   return {
     blocked, refusal, busy, check, edit,
     clear: () => setRefusal(null),
+    refuse: (task, where, text) => setRefusal({ taskId: task.id, where, text }),
     move: (task, status, where) => edit(task, { status }, where),
   };
 }
