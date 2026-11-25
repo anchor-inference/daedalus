@@ -21,7 +21,7 @@ import { filesKey, keptBase, type KeptFile } from "../keptfiles";
 import { downloadHref } from "../preview";
 import { Icon } from "../icons";
 import { EmptyState } from "../ui/phone";
-import { Segmented, Sheet } from "../ui/primitives";
+import { Segmented, Select, Sheet } from "../ui/primitives";
 import { DecisionSlot } from "./slot";
 
 export type ResultReceipt = {
@@ -436,9 +436,8 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
       {compared && <details className="result-details">
         <summary>{t("result.previous", { count: earlier.length })}</summary>
         <label htmlFor={`result-compare-${task.id}`}>{t("result.compareWith")}</label>
-        <select id={`result-compare-${task.id}`} className="field" value={compared.result_id} onChange={(event) => setComparedId(event.target.value)}>
-          {earlier.map((item) => <option key={item.result_id} value={item.result_id}>{absTime(item.created_at)} · {t(`result.outcome.${item.outcome}`)}</option>)}
-        </select>
+        <Select id={`result-compare-${task.id}`} label={t("result.compareWith")} size="md" className="wide" value={compared.result_id} onChange={setComparedId}
+          options={earlier.map((item) => ({ id: item.result_id, label: `${absTime(item.created_at)} · ${t(`result.outcome.${item.outcome}`)}` }))} />
         {compared.contract_revision !== result.contract_revision && <p className="result-warning" role="status">{t("result.compareChangedCriteria")}</p>}
         <div className="result-compare">
           {[result, compared].map((item, index) => <section key={item.result_id}>
@@ -463,10 +462,8 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
           <b>{t(`result.priority.${comment.priority}`)}</b> · {comment.body} {comment.path && <span className="mono">{comment.path}{comment.line_start ? `:${comment.line_start}` : ""}</span>} {comment.head && comment.head !== (review.data?.merge_receipt?.head_sha ?? review.data?.head_sha) && <span className="chip tiny warn">{t("result.commentLocationStale")}</span>} · {t(`result.commentState.${comment.state}`)}
           {(comment.state === "open" || comment.state === "reopened") && <button type="button" className="linkbtn" disabled={offline} onClick={() => setResolving(resolving === comment.comment_id ? null : comment.comment_id)}>{t("result.resolve")}</button>}
           {resolving === comment.comment_id && <div className="result-comment-form">
-            <select className="field" aria-label={t("result.resolution")} value={resolution} onChange={(event) => setResolution(event.target.value as "resolved" | "waived")}>
-              <option value="resolved">{t("result.commentState.resolved")}</option>
-              <option value="waived">{t("result.commentState.waived")}</option>
-            </select>
+            <Select label={t("result.resolution")} size="md" value={resolution} onChange={setResolution}
+              options={[{ id: "resolved" as const, label: t("result.commentState.resolved") }, { id: "waived" as const, label: t("result.commentState.waived") }]} />
             <input className="field" aria-label={t("result.resolutionReason")} value={resolutionReason} onChange={(event) => setResolutionReason(event.target.value)} />
             <button type="button" className="btn small" disabled={busy || offline || !resolutionReason.trim()} onClick={() => void resolveComment(comment.comment_id)}>{t("common.save")}</button>
           </div>}
@@ -474,13 +471,10 @@ export function ResultFlow({ task, onAccepted, toast }: { task: ProjectTask; onA
         <div className="result-comment-form">
           <label htmlFor={`comment-${task.id}`}>{t("result.comment")}</label>
           <textarea id={`comment-${task.id}`} ref={commentBox} className="field" rows={3} value={commentText} onChange={(event) => setCommentText(event.target.value)} />
-          <select className="field" aria-label={t("result.commentPriority")} value={commentPriority} onChange={(event) => setCommentPriority(event.target.value as Comment["priority"])}>
-            {(["suggestion", "important", "blocking"] as const).map((priority) => <option key={priority} value={priority}>{t(`result.priority.${priority}`)}</option>)}
-          </select>
-          {(result.artifacts ?? []).length > 0 && <select className="field" aria-label={t("result.commentArtifact")} value={commentArtifact} onChange={(event) => setCommentArtifact(event.target.value)}>
-            <option value="">{t("result.wholeResult")}</option>
-            {result.artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.artifact_key}</option>)}
-          </select>}
+          <Select label={t("result.commentPriority")} size="md" value={commentPriority} onChange={setCommentPriority}
+            options={(["suggestion", "important", "blocking"] as const).map((priority) => ({ id: priority, label: t(`result.priority.${priority}`) }))} />
+          {(result.artifacts ?? []).length > 0 && <Select label={t("result.commentArtifact")} size="md" className="wide" value={commentArtifact} onChange={setCommentArtifact}
+            options={[{ id: "", label: t("result.wholeResult") }, ...result.artifacts.map((artifact) => ({ id: artifact.id, label: artifact.artifact_key }))]} />}
           {/* A button that shows the line fields, not a fold: the note form already sits inside the
               annotations fold, and a fold inside it was the nesting the task dialog got rid of. */}
           {task.branch && <div className="result-comment-location">

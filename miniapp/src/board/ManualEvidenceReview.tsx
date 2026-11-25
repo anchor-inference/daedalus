@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { errorText } from "../ui";
 import type { ProjectTask } from "./board";
@@ -110,13 +111,11 @@ export function ManualEvidenceReview({ task, result, contract, blockingComments,
     {evidence.error && <div className="result-warning" role="status">{t("manual.evidenceUnavailable")} <button type="button" className="linkbtn" onClick={() => void evidence.refresh()}>{t("common.retry")}</button></div>}
     {!evidence.data && !evidence.error && <p className="sub">{t("common.loading")}</p>}
     <ul>{criteria.map((item) => <li key={item.id}>{item.text} · {t(covered(item, evidence.data ?? [], result.artifacts ?? []) ? "manual.covered" : item.file_id ? "manual.fileNeeded" : "manual.statementNeeded")}</li>)}</ul>
-    <label className="field">{t("result.criterion")}<select className="field" value={selected.id} disabled={!!pending || busy} onChange={(event) => { setCriterion(event.target.value); setArtifact(""); }}>
-      {criteria.map((item) => <option key={item.id} value={item.id}>{item.text}</option>)}
-    </select></label>
+    <label className="field">{t("result.criterion")}<Select label={t("result.criterion")} size="md" className="wide" value={selected.id} disabled={!!pending || busy}
+      onChange={(id) => { setCriterion(id); setArtifact(""); }} options={criteria.map((item) => ({ id: item.id, label: item.text }))} /></label>
     {selected.file_id && <><p className="result-warning">{t("manual.fileProof")}</p>
-      {matching.length > 0 && <label className="field">{t("manual.attachedFile")}<select className="field" value={selectedArtifact?.id ?? ""} disabled={!!pending || busy} onChange={(event) => setArtifact(event.target.value)}>
-        {matching.map((item) => <option key={item.id} value={item.id}>{item.artifact_key}</option>)}
-      </select></label>}
+      {matching.length > 0 && <label className="field">{t("manual.attachedFile")}<Select label={t("manual.attachedFile")} size="md" className="wide" value={selectedArtifact?.id ?? ""}
+        disabled={!!pending || busy} onChange={setArtifact} options={matching.map((item) => ({ id: item.id, label: item.artifact_key }))} /></label>}
       {!matching.length && <p className="result-warning" role="status">{t("manual.missingFile")}</p>}
     </>}
     <label className="field">{t("result.observation")}<textarea className="field" rows={3} maxLength={1000} value={observation} disabled={!!pending || busy} onChange={(event) => setObservation(event.target.value)} /></label>

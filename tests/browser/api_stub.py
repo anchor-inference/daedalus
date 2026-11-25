@@ -2859,6 +2859,14 @@ def open_task_tool(page, title: str, lang: str = "en"):  # type: ignore[no-untyp
     return tool
 
 
+def choose_option(page, trigger, value: str) -> None:  # type: ignore[no-untyped-def]
+    """Choose `value` in one of the app's choosers (the Select primitive): its button opens a list in
+    a layer of its own, outside the dialog that holds the button, and the option is clicked there."""
+    trigger.click()
+    page.locator(f".dropdown-list [role=option][data-value='{value}']").click()
+    page.locator(".dropdown-list").wait_for(state="detached")
+
+
 class BoardStub:
     """A project's board, answered the way the host answers it, and kept between requests.
 

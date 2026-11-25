@@ -804,7 +804,7 @@
   .pboard-sheet.new .pboard-create { margin-left: auto; }
   .pboard-sheet.new .sheet-head h3 { flex: 1; }
   .pboard-sheet.new label.field { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .pboard-sheet.new input.field, .pboard-sheet.new select.field { height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+  .pboard-sheet.new input.field { height: var(--tap); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
   .pboard-sheet.new .pboard-brief { display: flex; flex-direction: column; gap: 0; margin: var(--space-4) 0 0; padding: 0; border: 0; }
   .pboard-sheet.new .pboard-brief legend { padding: 0 4px var(--space-2); font-size: var(--fs-13); text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--fg-3); }
   .pboard-sheet.new .pboard-brief > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: start; gap: var(--space-2); padding: 4px 4px 4px 14px; border-radius: 0; background: var(--surface-2); }

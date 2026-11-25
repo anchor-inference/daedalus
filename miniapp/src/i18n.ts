@@ -2292,7 +2292,6 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "board.open.owner": { en: "Open {name}", ru: "Открыть «{name}»" },
   "board.open.session": { en: "Open session", ru: "Открыть сессию" },
   "board.copyid": { en: "Copy task id", ru: "Копировать идентификатор" },
-  "board.updated": { en: "updated {t}", ru: "изменена {t}" },
   "board.of.gone": { en: "a removed agent", ru: "удалённый агент" },
   "board.acceptance": { en: "Acceptance", ru: "Приёмка" },
   "board.depends": { en: "Depends on", ru: "Зависит от" },

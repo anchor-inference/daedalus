@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import type { ProjectTask } from "./board";
@@ -132,9 +133,8 @@ function WorkflowContent({ projectId, task, tasks, offline }: { projectId: strin
     {list.data && <>
       {runId && <RunView key={runId} runId={runId} tasks={tasks} revision={list.data.task_entity_revision} offline={offline} onChange={list.refresh} />}
       {runs.length > 1 && <label className="field">{t("taskWorkflow.previous")}
-        <select className="field" value={runId ?? ""} onChange={(event) => setSelected(event.target.value)}>
-          {runs.map((item) => <option key={item.run_id} value={item.run_id}>{t(statusKey(item.status))} · {new Date(item.created_at).toLocaleString()}</option>)}
-        </select>
+        <Select label={t("taskWorkflow.previous")} size="md" className="wide" value={runId ?? ""} onChange={setSelected}
+          options={runs.map((item) => ({ id: item.run_id, label: `${t(statusKey(item.status))} · ${new Date(item.created_at).toLocaleString()}` }))} />
       </label>}
       {nextBefore && <button type="button" className="linkbtn" disabled={busy || offline} onClick={() => void loadOlder()}>{t("taskWorkflow.older")}</button>}
       {canCreate && <div className="task-workflow-create">
@@ -144,15 +144,13 @@ function WorkflowContent({ projectId, task, tasks, offline }: { projectId: strin
           <p className="sub">{t("taskWorkflow.sequence")}</p>
           {steps.map((step, index) => <div className="task-workflow-step" key={index}>
             <span className="sub">{index + 1}</span>
-            <select className="field" aria-label={t("taskWorkflow.kind")} value={step.kind} disabled={!!pending} onChange={(event) => changeStep(index, { kind: event.target.value as Kind })}>
-              {(["task", "review", "check", "approval"] as Kind[]).map((kind) => <option key={kind} value={kind}>{t(`taskWorkflow.kind.${kind}`)}</option>)}
-            </select>
-            <select className="field" aria-label={t("taskWorkflow.sourceTask")} value={step.task_id} disabled={!!pending} onChange={(event) => changeStep(index, { task_id: event.target.value })}>
-              {availableTasks.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}</option>)}
-            </select>
-            {step.kind === "check" && <select className="field" aria-label={t("taskWorkflow.receiptStatus")} value={step.receipt_status} disabled={!!pending} onChange={(event) => changeStep(index, { receipt_status: event.target.value as StepDraft["receipt_status"] })}>
-              <option value="accepted">{t("taskWorkflow.receipt.accepted")}</option><option value="rejected">{t("taskWorkflow.receipt.rejected")}</option>
-            </select>}
+            <Select label={t("taskWorkflow.kind")} size="md" value={step.kind} disabled={!!pending} onChange={(kind) => changeStep(index, { kind })}
+              options={(["task", "review", "check", "approval"] as Kind[]).map((kind) => ({ id: kind, label: t(`taskWorkflow.kind.${kind}`) }))} />
+            <Select label={t("taskWorkflow.sourceTask")} size="md" value={step.task_id} disabled={!!pending} onChange={(task_id) => changeStep(index, { task_id })}
+              options={availableTasks.map((candidate) => ({ id: candidate.id, label: candidate.title }))} />
+            {step.kind === "check" && <Select label={t("taskWorkflow.receiptStatus")} size="md" className="task-workflow-receipt" value={step.receipt_status} disabled={!!pending}
+              onChange={(receipt_status) => changeStep(index, { receipt_status })}
+              options={[{ id: "accepted" as const, label: t("taskWorkflow.receipt.accepted") }, { id: "rejected" as const, label: t("taskWorkflow.receipt.rejected") }]} />}
             <button className="btn small ghost" type="button" disabled={!!pending || steps.length === 1} onClick={() => { setSteps(steps.filter((_, at) => at !== index)); intent.current = null; setPending(null); remember(createKey(task.id), null); }}>{t("taskWorkflow.removeStep")}</button>
           </div>)}
           {steps.length < 8 && <button className="btn small" type="button" disabled={!!pending} onClick={() => { setSteps([...steps, { kind: "approval", task_id: task.id, receipt_status: "accepted" }]); intent.current = null; setPending(null); remember(createKey(task.id), null); }}>{t("taskWorkflow.addStep")}</button>}

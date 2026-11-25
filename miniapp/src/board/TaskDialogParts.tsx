@@ -51,21 +51,22 @@ export function BriefBlock({ field, label, value, editing, placeholder, onEdit, 
       </div>
       {editing
         ? <AutoTextarea id={`ptask-${field}`} autoFocus maxLength={4000} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
-        : <div className="ptask-brief-text">{value}</div>}
+        : <div className="ptask-brief-text task-prose">{value}</div>}
     </section>
   );
 }
 
-/** A property of the task in the side column: its name with the button that changes it, if the
- *  value is not a control already, and the value under them. */
+/** A property of the task in the side column, as the task pane draws one: its name in a 96 px column and
+ *  the value beside it, with the button that changes it at the value's end when the value is not a
+ *  control already. */
 export function Prop({ label, htmlFor, action, children }: { label: string; htmlFor?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="ptask-prop">
-      <div className="ptask-prop-head">
-        {htmlFor ? <label className="ptask-label" htmlFor={htmlFor}>{label}</label> : <span className="ptask-label">{label}</span>}
-        {action}
+    <div className="ptask-prop task-kv-row">
+      {htmlFor ? <label className="ptask-label task-kv-key" htmlFor={htmlFor}>{label}</label> : <span className="ptask-label task-kv-key">{label}</span>}
+      <div className="ptask-prop-value task-kv-value">
+        {children}
+        {action && <span className="ptask-prop-action">{action}</span>}
       </div>
-      <div className="ptask-prop-value">{children}</div>
     </div>
   );
 }
