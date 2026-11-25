@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type BriefSection, type JournalEntry, type Project } from "../api";
 import { Skeleton } from "../ui/components";
 import { SelectionSingle } from "../ui/selection";
+import { WithEffort } from "../taskeffort";
 import { Sheet } from "../ui/dialogs";
 import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
@@ -375,6 +376,7 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
   const { data: team } = useQuery<Team>(staffKey(project.id), { staleMs: 5000 });
   const settings = project.settings.orchestrator;
   const [model, setModel] = useState(settings?.model ?? "");
+  const [effort, setEffort] = useState(settings?.effort ?? "");
   const [autonomy, setAutonomy] = useState<Autonomy>(settings?.autonomy ?? "normal");
   const [cap, setCap] = useState(settings?.concurrency_cap ?? 10);
   const [busy, setBusy] = useState(false);
@@ -429,7 +431,7 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
     setBusy(true);
     setError("");
     try {
-      await api.post(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, { model, autonomy, concurrency_cap: cap });
+      await api.post(`/api/projects/${encodeURIComponent(project.id)}/orchestrator`, { model, effort, autonomy, concurrency_cap: cap });
       invalidate("/api/projects");
       invalidate("/api/sessions");
       onClose();
@@ -459,9 +461,11 @@ function EnableSheet({ project, onClose }: { project: Project; onClose: () => vo
       <details className="focus-enable-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
       <summary>{t("focus.enable.advanced")}</summary>
       <span className="field">{t("focus.enable.model")}</span>
-      <SelectionSingle id="orch-model" label={t("focus.enable.model")} value={model} onChange={(next) => { setModel(next); setError(""); }}
-        defaultOption={{ label: fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short") }}
-        items={presets.map((p) => ({ id: p.id, label: p.label }))} />
+      <WithEffort id="orch-effort" value={effort} onChange={setEffort} fallback="model">
+        <SelectionSingle id="orch-model" label={t("focus.enable.model")} value={model} onChange={(next) => { setModel(next); setError(""); }}
+          defaultOption={{ label: fallback ? t("focus.enable.model.default", { name: fallback }) : t("team.model.default.short") }}
+          items={presets.map((p) => ({ id: p.id, label: p.label }))} />
+      </WithEffort>
       <div className="sub form-hint">{t("focus.enable.model.hint")}</div>
       <fieldset className="autonomy-choice">
         <legend className="field">{t("focus.enable.autonomy")}</legend>

@@ -60,6 +60,7 @@ from daedalus.config import (
     NotificationsConfig,
     ProviderConfig,
     ReasoningEffort,
+    TaskEffort,
     is_keyproxy_url,
     keyproxy_base,
     keyproxy_unresolved,
@@ -179,9 +180,11 @@ from daedalus.host import (
     component_install,
     git_branch,
     launcher_bridge,
+    model_health,
     quick_agent,
     session_attachments,
     subagent_models,
+    task_effort,
     translation,
 )
 from daedalus.host import components as component_list
@@ -437,6 +440,9 @@ class CompanionModelBody(BaseModel):
 
     preset: str | None = None
     background_preset: str | None = None
+    effort: TaskEffort | None = None
+    """How hard the voice model thinks; empty is its preset's own."""
+    background_effort: TaskEffort | None = None
 
 
 class CompanionProfileBody(BaseModel):
@@ -783,6 +789,7 @@ class HeartbeatBody(BaseModel):
     interval_minutes: int | None = Field(default=None, ge=5)
     active_hours: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}-\d{2}:\d{2}$")
     preset: str | None = None
+    effort: TaskEffort | None = None
     max_runs_per_day: int | None = Field(default=None, ge=1)
 
 
@@ -2521,7 +2528,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         A live override wins; otherwise the preset the session is on (or the global default).
         The composer draws these so a pick stays on this session and nowhere else.
         """
-        overrides = await manager.live.load(state.session.id)
+        # What the next run thinks with, the task's Settings over the session's own choice included: the
+        # main orchestrator's chip read the session alone and named an effort its runs did not use.
+        overrides = manager.task_overrides(state, await manager.live.load(state.session.id))
         if overrides.get("preset") and overrides["preset"] in app.config.presets:
             preset = app.config.presets[overrides["preset"]]
         else:
@@ -3612,6 +3621,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "enabled": False,
                 "session_id": "",
                 "preset": preset,
+                "effort": app.config.companion.effort,
+                "background_effort": app.config.companion.background_effort,
                 "using": "",
                 "model": "",
                 "background_preset": background,
@@ -3827,6 +3838,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             if chosen and chosen not in app.config.presets:
                 raise HTTPException(400, f"no such model preset {chosen!r}")
             raw["companion"][field] = chosen
+        for field, effort in (("effort", body.effort), ("background_effort", body.background_effort)):
+            if effort is not None:
+                raw["companion"][field] = effort
         try:
             new_config = type(app.config).model_validate(raw)
         except Exception as exc:  # noqa: BLE001
@@ -4351,7 +4365,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/dependencies/request")
     async def dependencies_request(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await dependency_planner.start(str(body.get("request", "")), str(body.get("preset", "")))
+            return await dependency_planner.start(str(body.get("request", "")), str(body.get("preset", "")), effort=task_effort.check(str(body.get("effort") or "")))
         except (ValueError, RuntimeError, OSError) as exc:
             raise HTTPException(409, str(exc)) from None
 
@@ -4379,7 +4393,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/prompt-change/request")
     async def prompt_change_request(body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await prompt_change_planner.start(str(body.get("instruction", "")), str(body.get("preset", "")))
+            return await prompt_change_planner.start(str(body.get("instruction", "")), str(body.get("preset", "")), effort=task_effort.check(str(body.get("effort") or "")))
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 
@@ -5778,21 +5792,40 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if dispatcher is not None and (body.get("preset") or body.get("clear")):
             # The chip on the main chat chooses the main orchestrator's model in Settings.
             await dispatcher.model_chosen(session_id, body.get("preset") or None, clear=bool(body.get("clear")))
+        if body.get("thinking") is False or body.get("reasoning_effort"):
+            # The effort on the orchestrators' chats is their Settings' too; written only on the session,
+            # the effort hook those runs are built from would overrule it at the next turn.
+            effort = "none" if body.get("thinking") is False else str(body["reasoning_effort"])
+            if orchestrators is not None:
+                await orchestrators.effort_chosen(session_id, effort)
+            if dispatcher is not None:
+                await dispatcher.effort_chosen(session_id, effort)
         return {"ok": True, "model": await session_model_label(state), **(await session_thinking(state))}
 
     @api.post("/api/sessions/{session_id}/vision")
     async def set_session_vision(session_id: str, body: dict[str, Any], _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         """``{"preset": id}`` makes an image-capable preset the vision model of this session alone;
-        ``""`` returns it to the global one. Its own endpoint rather than a field of ``/model``: that
+        ``""`` returns it to the global one. ``{"effort": …}`` is how hard it thinks, ``""`` the global
+        effort; either may come alone. Its own endpoint rather than a field of ``/model``: that
         one's ``clear`` and preset choice reach the orchestrators' models, and a vision model is none of
         their business. Answers with what Details draws."""
         if await manager.get_state(session_id) is None:
             raise HTTPException(404, "no such session")
         preset = body.get("preset")
-        if not isinstance(preset, str):
+        effort = body.get("effort")
+        if preset is None and effort is None:
+            raise HTTPException(400, "preset or effort is required")
+        if preset is not None and not isinstance(preset, str):
             raise HTTPException(400, "preset must be a string")
+        if effort is not None and not isinstance(effort, str):
+            raise HTTPException(400, "effort must be a string")
         try:
-            await manager.set_vision(session_id, preset)
+            if effort is not None:
+                task_effort.check(effort)
+            if preset is not None:
+                await manager.set_vision(session_id, preset)
+            if effort is not None:
+                await manager.set_vision_effort(session_id, effort)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"ok": True, **manager.vision_view(session_id)}
@@ -6754,6 +6787,11 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         data["dispatcher"]["middle"] = app.config.middle_preset() or ""
         # What an empty translator preset means: the helpers' cheap one.
         data["translation"]["suggested"] = translation.translator_preset(app.config)
+        # And what an empty fallback translator means for it: another route serving the same model, if any.
+        data["translation"]["fallback_suggested"] = translation.automatic_fallback(
+            app.config, data["translation"]["suggested"], ready=manager.providers.available(), health=manager.model_health)
+        # Which models are broken or slow, so Settings → Models and every model picker can mark them.
+        data["model_health"] = await manager.model_health.view(app.config)
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
         # What each preset costs and where that comes from, so its settings can say which source wins.
@@ -7054,6 +7092,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 # Why it is unknown, so the screen can say "refused" rather than "not reachable".
                 entry["proxy"] = upstreams_cache["state"]
         return view
+
+    @api.post("/api/models/check")
+    async def check_models(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """One tiny request to every preset, sent only when the operator presses Check models: each probe
+        is spent from someone's plan, so nothing here runs on a timer. Answers with each result and the
+        marks as Settings draws them."""
+        health = manager.model_health
+
+        async def call(preset_id: str) -> str:
+            return await manager.small_model(model_health.CHECK_PROMPT, preset_id, purpose=model_health.CHECK_PURPOSE, max_tokens=16, exact=True)
+
+        result = await health.check(app.config, call)
+        return {**result, "health": await health.view(app.config)}
 
     @api.get("/api/navigation")
     async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:

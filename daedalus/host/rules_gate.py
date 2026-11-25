@@ -33,7 +33,7 @@ from daedalus.browser.monitor import PROMPT as INJECTION_PROMPT
 from daedalus.browser.monitor import SAMPLE_CHARS as INJECTION_SAMPLE_CHARS
 from daedalus.browser.monitor import TIMEOUT_SECONDS as INJECTION_TIMEOUT_SECONDS
 from daedalus.host import action_rules as rules
-from daedalus.host import agent_talk, guest_turns, prompts
+from daedalus.host import agent_talk, guest_turns, prompts, task_effort
 from daedalus.host.engine_factory import TENANT, refusal_text
 from daedalus.host.policy import (
     ALLOW,
@@ -242,7 +242,8 @@ class RulesGate:
             request=rules.operator_request(text for _, text in operator_passages(history)),
             category=ruled.category, level=ruled.level, action=summary.text, redact=self.manager.redactor.redact,
         )
-        return await rules.review(self._ask_model, prompt, preset=self.config.review_preset, timeout=float(self.config.review_timeout_seconds), cut=summary.cut)
+        effort = self.config.review_effort
+        return await rules.review(lambda text, preset, timeout: self._ask_model(text, preset, timeout, effort=effort), prompt, preset=self.config.review_preset, timeout=float(self.config.review_timeout_seconds), cut=summary.cut)
 
     async def injection_check(self, origin: str, text: str) -> list[str]:
         """A small model's look at a fetched page, when the operator switched it on: the warning's
@@ -254,7 +255,8 @@ class RulesGate:
             return []
         try:
             answer, _ = await asyncio.wait_for(
-                self._ask_model(INJECTION_PROMPT.format(origin=origin) + text[:INJECTION_SAMPLE_CHARS], self.config.injection_preset, INJECTION_TIMEOUT_SECONDS),
+                self._ask_model(INJECTION_PROMPT.format(origin=origin) + text[:INJECTION_SAMPLE_CHARS], self.config.injection_preset, INJECTION_TIMEOUT_SECONDS,
+                                effort=self.config.injection_effort),
                 timeout=INJECTION_TIMEOUT_SECONDS,
             )
         except Exception as exc:  # noqa: BLE001
@@ -263,8 +265,8 @@ class RulesGate:
         words = answer.strip().split(None, 1)
         return ["a small model judged that it addresses the agent"] if words and words[0].strip(".:,*").upper() == "INJECTION" else []
 
-    async def _ask_model(self, prompt: str, preset: str, timeout: float) -> tuple[str, str]:
-        """One request to the review's preset, else a middle one of the table."""
+    async def _ask_model(self, prompt: str, preset: str, timeout: float, *, effort: str = "") -> tuple[str, str]:
+        """One request to the review's preset, else a middle one of the table, thinking as ``effort`` says."""
         config = self.manager.config
         if preset not in config.presets:
             preset = config.middle_preset() or ""
@@ -272,9 +274,9 @@ class RulesGate:
         request = LLMRequest(
             model=model,
             messages=[Message(role=MessageRole.user, content_blocks=[TextBlock(text=prompt)])],
-            max_tokens=160,
+            max_tokens=task_effort.helper_tokens(160, effort),
             temperature=0.0,
-            extra={"enable_thinking": False},
+            extra=task_effort.helper_extra(effort),
             observability=LLMObservabilityContext(tenant_id=TENANT, call_purpose="action_review", call_category="session"),
         )
         response = await provider.complete_text(request)

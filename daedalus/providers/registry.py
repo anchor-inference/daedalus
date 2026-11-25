@@ -103,6 +103,8 @@ class ProviderRegistry:
         """Told of every refusal that states a model's real window; set by the context-window service."""
         self.on_route_refusal: Callable[[str, str], None] | None = None
         """Told when none of a model's chosen OpenRouter providers could serve it; set by the routes service."""
+        self.on_model_refusal: Callable[[str, str, int, str], None] | None = None
+        """Told of every refusal but a routing one, with its status and body; set by the model health marks."""
         self.on_unreachable: UnreachableNotice | None = None
         """Told of every pause a request spends waiting for an endpoint that refused the connection, and of
         its end; set by the session runner, which shows the wait on the run's screen."""
@@ -139,6 +141,10 @@ class ProviderRegistry:
         if self.on_route_refusal is not None:
             self.on_route_refusal(provider_id, model)
 
+    def _model_refusal(self, provider_id: str, model: str, status: int, text: str) -> None:
+        if self.on_model_refusal is not None:
+            self.on_model_refusal(provider_id, model, status, text)
+
     async def _unreachable(self, provider_id: str, request: LLMRequest, retry_in: float | None) -> None:
         # Late as well: the runner that listens is built around this registry.
         if self.on_unreachable is not None:
@@ -171,6 +177,7 @@ class ProviderRegistry:
                 context_refusal=self._context_refusal,
                 fitted_images=self._fitted_images,
                 accounts=self.accounts,
+                model_refusal=self._model_refusal,
             )
         self._config = config
         self._retired.extend(p for pid, p in self._providers.items() if pid not in fresh)

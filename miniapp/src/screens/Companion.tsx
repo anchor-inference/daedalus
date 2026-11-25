@@ -37,6 +37,7 @@ import { useVoiceMascot, type VoiceMascot } from "../ui/pet";
 import type { PetPose } from "../petstage";
 import { CompanionAvatar, avatarOf } from "../companionavatar";
 import { CompanionEditor, CompanionSheet, CompanionTab, TABS, type CompanionProfile, type CompanionTabId } from "./CompanionTabs";
+import { WithEffort } from "../taskeffort";
 
 // The session view is most of the app's weight — the timeline, the markdown, the windowing, the
 // composer — and a call has to be on the screen before the first sentence of an answer arrives.
@@ -56,6 +57,9 @@ type VoiceState = {
   /** The model for typed messages, reports and goal checks; "" is the default preset. */
   background_preset?: string;
   background_model?: string;
+  /** How hard each of the two models thinks: "" its preset's own, "none", or an effort. */
+  effort?: string;
+  background_effort?: string;
   presets?: VoicePreset[];
   tts?: {
     configured: boolean;
@@ -772,7 +776,7 @@ export function VoiceSettings() {
   // The model is chosen here because this is where the operator came looking for it. It is the one
   // thing on this card that is written rather than reported, and the reading that follows the write
   // is the server's, not the app's guess at what it did.
-  const pick = async (choice: { preset?: string; background_preset?: string }) => {
+  const pick = async (choice: { preset?: string; background_preset?: string; effort?: string; background_effort?: string }) => {
     setSaving(true);
     setProblem("");
     try {
@@ -818,28 +822,32 @@ export function VoiceSettings() {
         }
         stack
       >
-        <Select
-          label={t("voice.card.model")}
-          value={row.value}
-          disabled={saving}
-          onChange={(preset) => void pick({ preset })}
-          options={[
-            { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
-            ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
-          ]}
-        />
+        <WithEffort id="companion-effort" value={data.effort} disabled={saving} onChange={(effort) => void pick({ effort })} fallback="model">
+          <Select
+            label={t("voice.card.model")}
+            value={row.value}
+            disabled={saving}
+            onChange={(preset) => void pick({ preset })}
+            options={[
+              { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
+              ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
+            ]}
+          />
+        </WithEffort>
       </Row>
       <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
-        <Select
-          label={t("voice.card.background")}
-          value={data.background_preset ?? ""}
-          disabled={saving}
-          onChange={(background_preset) => void pick({ background_preset })}
-          options={[
-            { id: "", label: t("voice.card.model.default") },
-            ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
-          ]}
-        />
+        <WithEffort id="companion-background-effort" value={data.background_effort} disabled={saving} onChange={(background_effort) => void pick({ background_effort })} fallback="model">
+          <Select
+            label={t("voice.card.background")}
+            value={data.background_preset ?? ""}
+            disabled={saving}
+            onChange={(background_preset) => void pick({ background_preset })}
+            options={[
+              { id: "", label: t("voice.card.model.default") },
+              ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
+            ]}
+          />
+        </WithEffort>
       </Row>
       <Row title={t("voice.card.out")} stack>
         <span className="settings-value">{spokenLine(data)}</span>

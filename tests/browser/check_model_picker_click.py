@@ -125,6 +125,8 @@ def settings_single(browser, width: int, failures: list[str]) -> None:  # type: 
     row = page.locator("[data-setting='action_rules.review_preset']")
     row.wait_for()
     row.scroll_into_view_if_needed()
+    # The row holds the model's picker and, under it, its effort's; the model's is the one under test.
+    row = row.locator("#models-review-preset")
     row.locator(".sel-current button").click()
     search = row.locator(".sel-search-field")
     search.wait_for()
@@ -196,7 +198,8 @@ def settings_multi(browser, width: int, failures: list[str]) -> None:  # type: i
         page.screenshot(path=f"{SHOTS}/quick-{width}-page.png")
     # The list sits under the words across the row: its box starts where the words start.
     text = row.locator(".settings-row-text").bounding_box()
-    box = row.locator(".sel").bounding_box()
+    # The row holds the model list and, under it, its effort's; the list is the one measured.
+    box = row.locator("#quick-models").bounding_box()
     if not text or not box or abs(box["x"] - text["x"]) > 1 or box["y"] < text["y"] + text["height"] - 1:
         failures.append(f"{where}: the list is not under the row's words: words {text}, list {box}")
     inside(page, f"{setting}", f"{setting} *", where, failures)

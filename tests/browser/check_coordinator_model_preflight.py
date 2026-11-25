@@ -58,7 +58,7 @@ def main() -> int:
             expect(sheet.locator("details")).to_have_attribute("open", "")
             sheet.get_by_role("button", name=WORDS[lang]["on"], exact=True).click()
             expect(page.locator(".chat.in-project.orchestrator .composer-field")).to_be_visible()
-            assert focus.enabled == [(GARDEN, {"model": "fast", "autonomy": "normal", "concurrency_cap": 10})]
+            assert focus.enabled == [(GARDEN, {"model": "fast", "effort": "", "autonomy": "normal", "concurrency_cap": 10})]
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             context.close()
         browser.close()

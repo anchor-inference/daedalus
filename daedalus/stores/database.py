@@ -4149,7 +4149,18 @@ async def _session_vision(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
 
-# 173 — the board filtered by the chat that created a task. ``origin_session_id`` has had no index
+# How hard the session's vision model thinks. NULL follows ``[vision] effort``, as the preset's NULL follows
+# ``[vision] preset``; its own column for the same reason as the preset's.
+async def _session_vision_effort(conn: aiosqlite.Connection) -> None:
+    """Added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(live_control)")).fetchall()}
+    if "vision_effort" not in present:
+        await conn.execute("ALTER TABLE live_control ADD COLUMN vision_effort TEXT")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision_effort))
+
+# The board filtered by the chat that created a task. ``origin_session_id`` has had no index
 # since it was added: the only board index is by project. A chat's own board, and the plan the
 # board exports for a chat's family, read every task of the installation to find a handful. The
 # column is NULL for a task the operator posted outside any chat, which the index simply holds.

@@ -365,6 +365,7 @@ class Autopilot:
                 manager.small_model(
                     judge.request(lines, style=style, used=used, allowed=self.config.max_continuations), preset,
                     purpose=judge.PURPOSE, session_id=session_id, max_tokens=judge.MAX_TOKENS, temperature=0.0, instructions=judge.INSTRUCTIONS,
+                    effort=self.config.effort,
                 ),
                 timeout=JUDGE_TIMEOUT_SECONDS,
             )

@@ -19,6 +19,7 @@ from protocore.contracts.types import (
 )
 
 from daedalus import supervisor_client
+from daedalus.host import task_effort
 from daedalus.host.proposals import new_proposal, same_generation, with_activity
 from daedalus.security.redact import redact
 
@@ -103,7 +104,8 @@ class DependencyPlanner:
             await self.app.db.kv_set(KEY, proposal)
         return {**self.inventory_cache[1], **status, "proposal": proposal, "models": [{"id": key, "label": preset.display(key)} for key, preset in self.app.config.presets.items()]}
 
-    async def start(self, text: str, preset: str) -> dict[str, Any]:
+    async def start(self, text: str, preset: str, *, effort: str = "") -> dict[str, Any]:
+        """``effort`` is how hard the model thinks (:mod:`daedalus.host.task_effort`); empty does not think."""
         async with self.lock:
             if self.task and not self.task.done():
                 raise ValueError("dependency planning is already running")
@@ -116,7 +118,7 @@ class DependencyPlanner:
                 raise ValueError("dependency installation is running")
             if not status["capability"]["python"]:
                 raise ValueError(status["capability"]["reason"])
-            value = new_proposal("dependencies", request=text.strip(), preset=preset)
+            value = new_proposal("dependencies", request=text.strip(), preset=preset, effort=effort)
             await self.app.db.kv_set(KEY, value)
             self.task = asyncio.create_task(self._plan(value))
             return value
@@ -201,7 +203,8 @@ class DependencyPlanner:
             await self._progress(value, "model")
             if manager.budget_exceeded() and not manager.provider_costs_nothing(preset.provider, model):
                 raise ValueError("daily inference budget exceeded")
-            request = LLMRequest(model=model, messages=messages, tools=TOOLS, max_tokens=2500, temperature=0.2, extra={"enable_thinking": False}, observability=LLMObservabilityContext(run_id=value["id"], call_category="dependency_planning", call_purpose="dependency_proposal"))
+            effort = str(value.get("effort") or "")
+            request = LLMRequest(model=model, messages=messages, tools=TOOLS, max_tokens=task_effort.helper_tokens(2500, effort, int(getattr(preset, "max_output_tokens", 0) or 0)), temperature=0.2, extra=task_effort.helper_extra(effort), observability=LLMObservabilityContext(run_id=value["id"], call_category="dependency_planning", call_purpose="dependency_proposal"))
             names: dict[str, str] = {}
             calls: list[tuple[str, str, dict[str, Any]]] = []
             thinking = ""

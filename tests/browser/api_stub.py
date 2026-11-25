@@ -951,6 +951,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
     # The key proxy card's client versions: look again, update Claude Code, put it back.
+    # Settings → Models' Check models: nothing configured in the shared host answers it with nothing to report.
+    ("POST", "/api/models/check"): (200, "application/json", json.dumps({"checked_at": "", "results": {}, "health": {}})),
     ("POST", "/api/keyproxy/clients/check"): (200, "application/json", json.dumps(KEYPROXY_CLIENTS)),
     ("POST", "/api/keyproxy/clients/claude/update"): (200, "application/json", json.dumps(KEYPROXY_CLIENT_UPDATED)),
     ("POST", "/api/keyproxy/clients/claude/revert"): (200, "application/json", json.dumps({"client": keyproxy_client("claude", "Claude Code", "2.1.296", "2.1.310", kept=CLAUDE_KEPT, labels=CLAUDE_LABELS), "reverted": {"from": "2.1.310", "to": "2.1.296", "automatic": False}})),
@@ -2258,9 +2260,11 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "vision":
-        # A session's own vision model, from its Details: the answer names the choice back, "" for the global one.
+        # A session's own vision model and how hard it thinks, from its Details: the answer names the choice
+        # back, "" for the global one. Either comes alone, as on the host.
         preset = str((body or {}).get("preset") or "") if isinstance(body, dict) else ""
-        return 200, "application/json", json.dumps({"ok": True, "vision_preset": preset, "vision_label": preset, **VISION_DEFAULT})
+        effort = str((body or {}).get("effort") or "") if isinstance(body, dict) else ""
+        return 200, "application/json", json.dumps({"ok": True, "vision_preset": preset, "vision_label": preset, "vision_effort": effort, **VISION_DEFAULT, "vision_default_effort": ""})
     if len(parts) == 5 and parts[2] == "sessions" and parts[4] == "subagent-models":
         # Every session's Details shows which models its helpers may run on: the default here, every model;
         # a change answers the choice it was given. check_model_settings.py draws the others.

@@ -289,7 +289,7 @@ def desktop(page: Page, lang: str, width: int) -> None:
     expect(sheet.locator(".focus-cost")).to_contain_text(words["cost"])
     sheet.get_by_role("button", name=words["on"], exact=True).click()
     expect(page.locator(".chat.in-project.orchestrator .composer-field")).to_have_attribute("placeholder", words["placeholder"])
-    assert focus.enabled == [(GARDEN, {"model": "", "autonomy": "normal", "concurrency_cap": 10})], focus.enabled
+    assert focus.enabled == [(GARDEN, {"model": "", "effort": "", "autonomy": "normal", "concurrency_cap": 10})], focus.enabled
 
 
 def phone(page: Page, lang: str) -> None:
