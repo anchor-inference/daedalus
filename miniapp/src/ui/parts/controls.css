@@ -133,13 +133,6 @@ a.iconbtn { text-decoration: none; }
 .bar.attn i { background: var(--warn); }
 .bar.bad i { background: var(--bad); }
 .bar.ok i { background: var(--ok); }
-.kpi { background: var(--card); border: 1px solid var(--line); box-shadow: var(--drop-xs); border-radius: var(--radius-md); padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
-.kpi .label { color: var(--fg-2); font-size: var(--fs-13); }
-.kpi .value { font-size: 26px; font-weight: 600; letter-spacing: -0.022em; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.kpi .value small { font-size: .55em; color: var(--fg-2); margin-left: 2px; font-weight: 500; }
-.kpi .sub { font-size: var(--fs-12); }
-.kpi .bar { margin-top: 6px; }
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
 /* avatar: simple shape + expressive eyes; the motion carries the status */
 .avatar { width: var(--avatar); height: var(--avatar); flex: none; }
 .avatar .body { fill: var(--card-2); stroke: var(--line); }

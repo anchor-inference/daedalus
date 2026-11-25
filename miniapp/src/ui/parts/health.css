@@ -1,0 +1,30 @@
+/* ── Health: what needs the operator first and open, then the rows that work ─────────────────
+   A row is a line of 44: its state as a dot and a word, the thing, what it said. A row with something
+   to say (a remedy, the host's own text, a fix) turns over in place; one that has nothing is a plain
+   line. What failed starts open, so the page opens on the remedy and not on a list to dig through. */
+.health { padding-top: 16px; padding-bottom: 40px; }
+.pg-label.attention { color: var(--attention); }
+.health-row + .health-row { border-top: 1px solid var(--line); }
+.health-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--card-row-h); padding: 0 16px; box-sizing: border-box; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; }
+button.health-head { cursor: pointer; }
+button.health-head:hover { background: var(--hover); }
+button.health-head:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.health-head .pg-state { width: 84px; }
+.health-name { flex: none; max-width: 36%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+.health-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-13); color: var(--fg-2); }
+.health-head .ic-chevron { flex: none; color: var(--fg-3); transition: rotate var(--t-fast); }
+.health-row.open .health-head .ic-chevron { rotate: 180deg; }
+.health-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 2px 16px 14px 112px; font-size: var(--fs-13); line-height: 1.5; color: var(--fg-2); }
+.health-hint, .integration-fix { overflow-wrap: anywhere; }
+.health-code { display: block; align-self: stretch; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); font-family: var(--mono); font-size: var(--fs-mono); color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.health-foot { margin-top: 24px; }
+
+@media (max-width: 1023px) {
+  .health { padding-top: 8px; }
+  .health-head { min-height: var(--set-row-h); flex-wrap: wrap; row-gap: 0; padding-block: 8px; }
+  .health-head .pg-state { width: auto; order: 2; }
+  .health-name { order: 1; flex: 1; max-width: none; }
+  .health-text { order: 4; flex: 1 1 100%; white-space: normal; }
+  .health-head .ic-chevron { order: 3; }
+  .health-detail { padding: 0 14px 14px; }
+}

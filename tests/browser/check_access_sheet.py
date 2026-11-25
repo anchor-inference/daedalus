@@ -48,7 +48,7 @@ def run() -> int:
         page: Page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/services?token=t")
-        page.wait_for_selector(".service-row", timeout=15000)
+        page.wait_for_selector(".pg-item[data-service]", timeout=15000)
         open_menu(page)
         press(page, "Access")
         sheet = page.locator(".sheet-backdrop .sheet")

@@ -3,7 +3,7 @@ import { useEdgeFade } from "../edgefade";
 import { int, relTime, usd } from "../format";
 import { api, LoopView, ServiceView, ShareMode, ToolInfo } from "../api";
 import { Icon } from "../icons";
-import { OverflowMenu, Sheet } from "./dialogs";
+import { OverflowMenu, Sheet, type MenuItem } from "./dialogs";
 import { confirmAsync, errorText } from "../ui";
 import { LANGS, t, useLang } from "../i18n";
 import { retried } from "../chunks";
@@ -237,8 +237,12 @@ export async function copyText(text: string): Promise<boolean> {
 
 const accessWord = (mode: ShareMode) => t(`svc.access.${mode}`);
 
-/** One hosted service: what it is, whether it runs, where to open it, and the rest behind a menu. */
-export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s: ServiceView; sessionId: string; onChange: () => void; toast: (t: string) => void; onLogs: (text: string) => void; card?: boolean }) {
+type ServiceArgs = { s: ServiceView; sessionId: string; onChange: () => void; toast: (t: string) => void; onLogs: (text: string) => void };
+
+/** What a hosted service can be asked to do (stop, remove, show its log, change who can open it) and
+ *  the sheet that sets its access. The panel's row and the Services page draw one service from this
+ *  one place, so a command is never in one and missing from the other. */
+export function useService({ s, sessionId, onChange, toast, onLogs }: ServiceArgs) {
   const [share, setShare] = useState(false);
   const [busy, setBusy] = useState(false);
   async function stop() {
@@ -289,22 +293,62 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
   const shared = mode !== "local" && s.status === "running";
   const openUrl = shared && s.share?.url ? s.share.url : s.url;
   const lan = s.url?.replace(/^https?:\/\//, "");
-  const menu = (
-    <OverflowMenu
-      small
-      label={t("svc.actions", { name: s.name })}
-      items={[
-        ...(s.status === "running" && s.port ? [{ label: t("svc.menu.access"), icon: "share" as const, onSelect: () => setShare(true) }] : []),
-        { label: t("svc.menu.log"), icon: "file", onSelect: logs },
-        ...(openUrl ? [{ label: t("svc.menu.copyaddr"), icon: "copy" as const, ticks: true as const, onSelect: () => copy(openUrl, "address") }] : []),
-        "-" as const,
-        ...(s.status === "running" ? [{ label: t("common.stop"), icon: "stop" as const, onSelect: stop }] : []),
-        { label: t(s.status === "running" ? "svc.menu.remove.running" : "svc.menu.remove"), icon: "trash", danger: true, onSelect: remove },
-      ]}
-    />
-  );
+  const items: MenuItem[] = [
+    ...(s.status === "running" && s.port ? [{ label: t("svc.menu.access"), icon: "share" as const, onSelect: () => setShare(true) }] : []),
+    { label: t("svc.menu.log"), icon: "file" as const, onSelect: logs },
+    ...(openUrl ? [{ label: t("svc.menu.copyaddr"), icon: "copy" as const, ticks: true as const, onSelect: () => copy(openUrl, "address") }] : []),
+    "-" as const,
+    ...(s.status === "running" ? [{ label: t("common.stop"), icon: "stop" as const, onSelect: stop }] : []),
+    { label: t(s.status === "running" ? "svc.menu.remove.running" : "svc.menu.remove"), icon: "trash" as const, danger: true, onSelect: remove },
+  ];
+  const accessSheet = share && s.status === "running" ? (
+    <Sheet title={t("svc.sheet.title", { name: s.name })} onClose={() => setShare(false)} size="sm">
+      <div className="access-options" role="radiogroup">
+        {(["local", "key", "public"] as ShareMode[]).map((m) => (
+          <label key={m} className={`access-option ${mode === m ? "on" : ""}`}>
+            <input type="radio" name={`access-${s.name}`} checked={mode === m} disabled={busy} onChange={() => setMode(m)} />
+            <span>
+              <b>{accessWord(m)}</b>
+              <span className="sub">{m === "local" ? (s.machine === "host" && !lan ? t("svc.access.local.host") : t("svc.access.local.sub", { addr: lan ?? t("svc.access.local.addr") })) : m === "key" ? t("svc.access.key.sub") : t("svc.access.public.sub")}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {!s.share?.public_base && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.nopublic")}</div>}
+      {s.share?.public_base && s.share.sandboxed && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.sandboxed")}</div>}
+      {mode !== "local" && s.share?.url && (
+        <>
+          <label className="field">{t("svc.link")}</label>
+          <div className="share-field">
+            <input className="field mono" readOnly value={s.share.url} title={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
+            <button className="btn small" onClick={() => void copy(s.share!.url!, "link")}><Icon name={copied === "link" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
+          </div>
+          {mode === "key" && s.share.key && (
+            <>
+              <label className="field">{t("svc.key")}</label>
+              <div className="share-field">
+                <input className="field mono" readOnly value={s.share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
+                <button className="btn small" onClick={() => void copy(s.share!.key!, "key")}><Icon name={copied === "key" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
+                <button className="btn small" disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</button>
+              </div>
+            </>
+          )}
+          <div className="sub" style={{ marginTop: 8 }}>{t("svc.prefix", { slug: s.share.slug ?? "" })}</div>
+        </>
+      )}
+      {/* Keyed by the mode: a link taken for one mode is the wrong one once the mode has changed. */}
+      <Suspense fallback={null}><ServicePhone key={mode} sessionId={sessionId} name={s.name} port={s.port} toast={toast} /></Suspense>
+    </Sheet>
+  ) : null;
+  return { mode, shared, openUrl, lan, items, logs, stop, remove, accessSheet, openAccess: () => setShare(true) };
+}
+
+/** One hosted service in the chat's panel: what it is, whether it runs, where to open it, and the rest behind a menu. */
+export function ServiceRow(args: ServiceArgs) {
+  const { s } = args;
+  const { mode, shared, openUrl, lan, items, accessSheet } = useService(args);
   return (
-    <div className={`service-row ${s.status} ${card ? "erow service" : ""}`}>
+    <div className={`service-row ${s.status}`}>
       <div className="service-line">
         <div className="grow" style={{ minWidth: 0 }}>
           <div className="service-name">
@@ -327,47 +371,9 @@ export function ServiceRow({ s, sessionId, onChange, toast, onLogs, card }: { s:
             {t("common.open")}
           </a>
         )}
-        {menu}
+        <OverflowMenu small label={t("svc.actions", { name: s.name })} items={items} />
       </div>
-      {share && s.status === "running" && (
-        <Sheet title={t("svc.sheet.title", { name: s.name })} onClose={() => setShare(false)} size="sm">
-          <div className="access-options" role="radiogroup">
-            {(["local", "key", "public"] as ShareMode[]).map((m) => (
-              <label key={m} className={`access-option ${mode === m ? "on" : ""}`}>
-                <input type="radio" name={`access-${s.name}`} checked={mode === m} disabled={busy} onChange={() => setMode(m)} />
-                <span>
-                  <b>{accessWord(m)}</b>
-                  <span className="sub">{m === "local" ? (s.machine === "host" && !lan ? t("svc.access.local.host") : t("svc.access.local.sub", { addr: lan ?? t("svc.access.local.addr") })) : m === "key" ? t("svc.access.key.sub") : t("svc.access.public.sub")}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {!s.share?.public_base && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.nopublic")}</div>}
-          {s.share?.public_base && s.share.sandboxed && mode !== "local" && <div className="sub" style={{ color: "var(--warn)", margin: "8px 0" }}>{t("svc.sandboxed")}</div>}
-          {mode !== "local" && s.share?.url && (
-            <>
-              <label className="field">{t("svc.link")}</label>
-              <div className="share-field">
-                <input className="field mono" readOnly value={s.share.url} title={s.share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
-                <button className="btn small" onClick={() => void copy(s.share!.url!, "link")}><Icon name={copied === "link" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
-              </div>
-              {mode === "key" && s.share.key && (
-                <>
-                  <label className="field">{t("svc.key")}</label>
-                  <div className="share-field">
-                    <input className="field mono" readOnly value={s.share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
-                    <button className="btn small" onClick={() => void copy(s.share!.key!, "key")}><Icon name={copied === "key" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
-                    <button className="btn small" disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</button>
-                  </div>
-                </>
-              )}
-              <div className="sub" style={{ marginTop: 8 }}>{t("svc.prefix", { slug: s.share.slug ?? "" })}</div>
-            </>
-          )}
-          {/* Keyed by the mode: a link taken for one mode is the wrong one once the mode has changed. */}
-          <Suspense fallback={null}><ServicePhone key={mode} sessionId={sessionId} name={s.name} port={s.port} toast={toast} /></Suspense>
-        </Sheet>
-      )}
+      {accessSheet}
     </div>
   );
 }

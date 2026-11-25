@@ -100,7 +100,7 @@ def press(page: Page, selector_text: str) -> None:
 
 
 def open_menu(page: Page) -> None:
-    page.locator(".service-row").first.locator("button[aria-haspopup='menu']").click()
+    page.locator(".pg-item[data-service]").first.locator("button[aria-haspopup='menu']").click()
     page.wait_for_selector(".menu[role='menu']", timeout=5000)
     page.locator(".menu[role='menu']").evaluate("async menu => { await Promise.all(menu.getAnimations().map(animation => animation.finished)); }")
 
@@ -108,7 +108,7 @@ def open_menu(page: Page) -> None:
 def fresh(page: Page) -> None:
     """A clean screen for the next action: no leftover sheet to click through."""
     page.goto(f"{BASE}/services?token=t")
-    page.wait_for_selector(".service-row", timeout=15000)
+    page.wait_for_selector(".pg-item[data-service]", timeout=15000)
 
 
 def run() -> int:
@@ -118,7 +118,7 @@ def run() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/services?token=t")
-        page.wait_for_selector(".service-row", timeout=15000)
+        page.wait_for_selector(".pg-item[data-service]", timeout=15000)
 
         # The menu must not move while the button is held down: that movement is the bug.
         open_menu(page)

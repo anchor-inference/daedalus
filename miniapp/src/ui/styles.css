@@ -13,6 +13,10 @@
 @import "./parts/inbox.css";
 @import "./parts/board.css";
 @import "./parts/pages.css";
+@import "./parts/pagecards.css";
+@import "./parts/usage.css";
+@import "./parts/health.css";
+@import "./parts/hosting.css";
 @import "./parts/voice.css";
 @import "./parts/setup.css";
 @import "./parts/start.css";

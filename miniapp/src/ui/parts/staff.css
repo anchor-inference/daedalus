@@ -134,63 +134,7 @@
 }
 .staff-session { display: grid; gap: var(--space-4); }
 
-/* ── the Harnesses screen: a table on a desktop, a card per CLI on a phone ───────────────── */
-.harness-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.harness-actions .btn { gap: 6px; }
-.harness-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-13); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); overflow: hidden; }
-.harness-table th { text-align: left; font-weight: 500; font-size: var(--fs-12); color: var(--fg-3); padding: 8px 12px; border-bottom: 1px solid var(--line); background: transparent; white-space: nowrap; }
-.harness-table td { padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; height: var(--row-h); transition: background var(--t-fast); }
-.harness-table tbody tr:last-child td { border-bottom: 0; }
-.harness-table tbody tr.harness-row:hover td { background: var(--surface-2); }
-.harness-name { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0; background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; }
-.harness-name .ic-chevron { color: var(--fg-3); transition: rotate var(--t-fast); }
-.harness-row.open .harness-name .ic-chevron, .harness-card-more[aria-expanded="true"] .ic-chevron { rotate: 90deg; }
-.harness-version { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.harness-mark { font-size: var(--fs-11); font-weight: 500; padding: 1px 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--warn); white-space: nowrap; }
-.harness-mark.verified { color: var(--fg-2); }
-.harness-mark.unsupported { color: var(--bad); }
-.harness-newer { color: var(--accent); }
-.harness-signin.ok { color: var(--ok); }
-.harness-signin.warn { color: var(--warn); }
-.harness-models { color: var(--fg-2); }
-.harness-action { text-align: right; white-space: nowrap; }
-.harness-table th.harness-action { text-align: right; }
-.harness-screen .btn.accent { color: var(--fg); }
-.harness-busy { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }
-.harness-busy .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--fg-2); animation: harness-spin 900ms linear infinite; }
-@keyframes harness-spin { to { rotate: 360deg; } }
-.harness-row-details td, .harness-row-refused td { background: var(--inset); height: auto; padding: 10px 12px 12px 44px; }
-.harness-details { display: grid; gap: 6px; }
-.harness-details-label { color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; margin-top: 4px; }
-.harness-agents { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 12px; }
-.harness-agent { display: grid; gap: 2px; min-width: 0; }
-.harness-offer { display: grid; gap: 6px; }
-.harness-offer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.harness-check-line.failed { color: var(--bad); }
-.harness-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.harness-step { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: var(--row-h-dense); font-size: var(--fs-12); }
-.harness-step.ok .ic { color: var(--ok); }
-.harness-step.failed { color: var(--bad); }
-.harness-step.skipped { color: var(--fg-3); }
-.harness-guard, .staff-guard { padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); line-height: var(--lh-ui); }
-.staff-guard { margin: 8px 0; }
-.harness-refused { display: flex; align-items: center; gap: var(--space-2); margin: 6px 0; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); font-size: var(--fs-12); }
-.harness-node { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-3); padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-13); }
-.harness-node-name { font-weight: 500; }
-.harness-foot { display: flex; gap: var(--space-2); align-items: flex-start; margin-top: var(--space-3); font-size: var(--fs-12); }
-.harness-foot .ic { flex: none; margin-top: 1px; }
-.harness-cards { display: grid; gap: var(--space-3); }
-.harness-card { display: grid; gap: var(--space-2); padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); min-width: 0; }
-.harness-card-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--row-h); }
-.harness-card-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-13); }
-.harness-card-facts dt { color: var(--fg-3); }
-.harness-card-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.harness-card-more { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: var(--row-h); padding: 0; background: none; border: 0; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
-.harness-card .harness-card-head .btn.small { min-height: var(--ctl-h); }
-.harness-name b { white-space: nowrap; }
-.harness-row.open .harness-name .ic-chevron, .harness-card-more[aria-expanded="true"] .ic-chevron { rotate: 180deg; }
-.harness-step { min-height: 24px; }
-.harness-actions .harness-update-all { margin-left: auto; }
+.staff-guard { padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-size: var(--fs-12); line-height: var(--lh-ui); }
 
 /* The main orchestrator: its pinned entry, and the questions and dispatches above its conversation. */
 .main-entry { display: flex; align-items: center; gap: 10px; min-height: var(--row-h); padding: 4px 9px; border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; border: 1px solid transparent; }

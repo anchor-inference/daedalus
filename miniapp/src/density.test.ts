@@ -161,7 +161,10 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   // A board card's pane is a pane: its title is a pane's heading (18/500) and its description prose.
   ".task-pane-title", ".task-prose",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
-  ".ov-title"];
+  ".ov-title",
+  // A report page's hero is three figures at the size a page's headline may use (28/500), and the
+  // open Services or Harnesses entry is a pane whose title is a pane's heading (18/500).
+  ".usage-fig-value", ".pg-pane-title"];
 
 /** Surfaces that are meant to be large: a screen, a dialog, a stage, an empty state, a bar that holds
  *  rows rather than being one. Everything else is a row, a control or an avatar, and is held to the tokens. */
@@ -183,6 +186,9 @@ const BOX_ALLOWED = [
   // The open Inbox entry is a page of its own beside the list: the room above its first line and
   // below its last is the room a page has.
   ".inbox-pane",
+  // The open Services or Harnesses entry is a page of its own beside its list, and a list that has
+  // the page to itself (narrower than the split, or a phone) keeps the room under its last row.
+  ".pg-pane", ".pg-list",
   // The board's bar of filters is a bar under the page header, as tall as the bar it holds chips in
   // (44); the card pane's head is level with the page header beside it (52), and its foot holds the
   // pane's buttons with the room a dialog's foot has (64).
@@ -227,6 +233,9 @@ const CONTENT_BOXES = [
   // A list row comes in three heights (Row's `height`): a line, a title over a meta line, and the
   // large row the approved designs draw for a list of providers or entries. The 56 is that one.
   { selector: ".list-row.h56", property: "min-height", max: 56 },
+  // Usage's chart is 140 px of bars between three rules; its scale of three labels is as tall.
+  { selector: ".usage-scale", property: "height", max: 140 },
+  { selector: ".usage-bars", property: "height", max: 140 },
   // The model picker's list is a window onto six 32 px rows (six and the five 1 px gaps between them),
   // the same height whatever the tab or the search holds, so the box around it never changes size.
   { selector: ".model-picker-list", property: "height", max: 197 },

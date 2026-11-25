@@ -183,57 +183,6 @@ a.memory-source:hover { color: var(--fg); }
   .bulkbar { left: var(--sidebar-w); bottom: 0; }
   .memory-grid { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 0 12px; }
 }
-.usage-cards { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 4px; }
-@media (min-width: 900px) { .usage-cards { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); } }
-.usage-cards .card { margin-bottom: 0; }
-.quota-line { display: grid; grid-template-columns: minmax(56px, auto) 1fr auto auto; align-items: center; gap: 10px; padding: 6px 0; font-size: var(--fs-13); color: var(--fg-2); }
-.quota-line .quota-name { color: var(--fg); }
-.quota-line b { color: var(--fg); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
-.quota-line .sub { text-align: right; min-width: 90px; }
-/* The forecast sits under its window across the whole row: it is a sentence, not a column. */
-.quota-line .quota-fc { grid-column: 1 / -1; margin-top: -4px; font-size: var(--fs-12); color: var(--fg-3); }
-.quota-line .quota-fc.warn { color: var(--warn); }
-.tablecard { overflow-x: auto; }
-.tablecard td.dayc { white-space: nowrap; }
-/* A table in a card: hairlines between rows and none under the last, the head in the small grey of a
-   label, the figures in digits of one width, a row lit under the pointer. The cells take the card's
-   side padding, so the rules run from edge to edge of the card. */
-@media (min-width: 701px) {
-  .usage .card.tablecard { padding: 4px 0; }
-  .usage .tablecard th { padding: 8px 14px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-  .usage .tablecard td { padding: 8px 14px; font-variant-numeric: tabular-nums; transition: background var(--t-fast); }
-  .usage .tablecard tbody tr:last-child td { border-bottom: 0; }
-  .usage .tablecard tbody tr:hover td { background: var(--surface-2); }
-  .usage .tablecard .speed-hint { padding: 8px 14px; border-top: 1px solid var(--line); }
-}
-/* A phone has no room for seven columns: scrolled sideways, the cost column was the one off the
-   edge and a model's name broke at its hyphen. Each row becomes a small card of its own, the model
-   and its cost on top, the counts under them with their names. */
-@media (max-width: 700px) {
-  .usage .tablecard thead { display: none; }
-  .usage .tablecard table, .usage .tablecard tbody { display: block; }
-  .usage .tablecard tr { display: grid; grid-template-columns: repeat(4, auto) minmax(0, 1fr); grid-template-areas: "day day day day day" "model model model model usd" "calls in out cached ."; gap: 2px 12px; padding: 8px 0; border-top: 1px solid var(--line); }
-  .usage .tablecard tr:first-child { border-top: 0; }
-  .usage .tablecard td { display: block; padding: 0; border: 0; text-align: left; }
-  .usage .tablecard td.dayc { grid-area: day; font-weight: 600; }
-  .usage .tablecard td.dayc:empty { display: none; }
-  .usage .tablecard td.modelc { grid-area: model; min-width: 0; overflow-wrap: anywhere; }
-  .usage .tablecard td.usdc { grid-area: usd; text-align: right; white-space: nowrap; }
-  .usage .tablecard td.callsc { grid-area: calls; }
-  .usage .tablecard td.inc { grid-area: in; }
-  .usage .tablecard td.outc { grid-area: out; }
-  .usage .tablecard td.cachedc { grid-area: cached; }
-  .usage .tablecard td[data-label] { color: var(--fg-2); font-size: var(--fs-12); }
-  .usage .tablecard td[data-label]::before { content: attr(data-label) " "; color: var(--fg-3); }
-  /* The speed table has no day and no cost: the model on top, its four numbers under it in two
-     pairs, the two times side by side. Four in a row ran off the card's edge at phone width. */
-  .usage .tablecard[data-speed] tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "model model" "ttft ttft90" "tps calls"; }
-  .usage .tablecard[data-speed] td[data-label] { white-space: nowrap; }
-  .usage .tablecard td.ttftc { grid-area: ttft; }
-  .usage .tablecard td.ttft90c { grid-area: ttft90; }
-  .usage .tablecard td.tpsc { grid-area: tps; }
-}
-.speed-hint { padding: 6px 2px 2px; }
 /* A section of Settings is a column of groups. A group is one card: its title and a grey line about it
    inside, its rows under them with a hairline between, and nothing nested in it. A label that stands
    above a card instead is the small grey one the list of sections uses. The card's own padding is the
@@ -394,20 +343,6 @@ a.memory-source:hover { color: var(--fg); }
   .settings-inline-field { width: min(100%, 260px); margin-right: 0 !important; }
   .settings-name-field { flex: 1 1 160px; width: auto; }
 }
-/* A check is a row of its card: its mark, its name, what it found, and the remedy under a failing one. */
-.health-row { align-items: flex-start; gap: 10px; padding: 10px 0; font-size: var(--fs-14); }
-.health-row + .health-row { border-top: 1px solid var(--line); }
-.health-row b { font-weight: 500; }
-.health-row .sub { overflow-wrap: anywhere; }
-.card > .health-row:first-child { padding-top: 2px; }
-.card > .health-row:last-child { padding-bottom: 2px; }
-.health-mark { flex: none; width: var(--icon-sm); padding-top: 2px; }
-.health-mark.ok { color: var(--ok); }
-.health-mark.warn { color: var(--warn); }
-.health-mark.bad { color: var(--bad); }
-.health-mark.info { color: var(--fg-3); }
-.integration-detail summary { cursor: pointer; width: max-content; }
-.integration-detail code { display: block; margin-top: 4px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); font-family: var(--mono); font-size: var(--fs-12); overflow-wrap: anywhere; color: var(--fg-2); }
 .settings-color { display: inline-flex; align-items: center; gap: 8px; }
 .settings-color input { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
 .settings-faces { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); }

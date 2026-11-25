@@ -374,8 +374,8 @@ def run_server(browser, lang: str, width: int, problems: list[str]) -> None:  # 
 
 
 def open_sheet(page: Page, words: dict, index: int = 1) -> None:
-    page.wait_for_selector(".service-row", timeout=15000)
-    page.locator(".service-row").nth(index).locator("button[aria-haspopup='menu']").click()
+    page.wait_for_selector(".pg-item[data-service]", timeout=15000)
+    page.locator(".pg-item[data-service]").nth(index).locator("button[aria-haspopup='menu']").click()
     page.get_by_role("menuitem", name=words["access"], exact=True).or_(page.locator(".menu[role='menu'] button", has_text=words["access"])).first.click()
     page.wait_for_selector("[data-service-phone]", timeout=5000)
 
@@ -430,7 +430,7 @@ def run_phone(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     page.wait_for_selector("[data-service-phone]", state="detached", timeout=3000)
 
     # A service with no port has no Access sheet, so no way to a phone either.
-    page.locator(".service-row").nth(2).locator("button[aria-haspopup='menu']").click()
+    page.locator(".pg-item[data-service]").nth(2).locator("button[aria-haspopup='menu']").click()
     page.wait_for_selector(".menu[role='menu']")
     if page.locator(".menu[role='menu'] button", has_text=words["access"]).count():
         say("a service with no port offers Access")
