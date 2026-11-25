@@ -23,12 +23,15 @@ export function ProposalsScreen({ toast, selected }: { toast: (t: string) => voi
   };
   return (
     <>
-      <PageHeader title={screenTitle("changes")} subtitle={items ? (pending.length ? plural("changes.waiting", pending.length) : plural("changes.count", items.length)) : undefined}>
+      <PageHeader title={screenTitle("changes")} subtitle={items ? (pending.length ? plural("changes.waiting", pending.length) : plural("changes.count", items.length)) : undefined}
+        ruled
+        filters={
         <div className="chips">
           <button className="chip select" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>{t("common.all")}</button>
           <button className="chip select" aria-pressed={filter === "pending"} onClick={() => setFilter("pending")}>{t("changes.filter.pending")}{pending.length ? ` · ${pending.length}` : ""}</button>
         </div>
-      </PageHeader>
+        }
+      />
       <div className="screen narrow">
         {loading && !error && <Skeleton rows={4} />}
         {error && !items && <div className="empty"><b>{t("changes.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

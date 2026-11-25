@@ -28,14 +28,14 @@ export function ServicesScreen({ onOpen, toast }: { onOpen: (id: string) => void
   for (const r of shown) groups.set(r.session_id, [...(groups.get(r.session_id) ?? []), r]);
   return (
     <>
-      <PageHeader title={screenTitle("services")} subtitle={rows ? `${t("services.running", { n: running.length })}${stopped.length ? t("services.stopped", { n: stopped.length }) : ""}` : undefined}>
-        {stopped.length > 0 && (
+      <PageHeader title={screenTitle("services")} subtitle={rows ? `${t("services.running", { n: running.length })}${stopped.length ? t("services.stopped", { n: stopped.length }) : ""}` : undefined}
+        filters={stopped.length > 0 && (
           <div className="chips">
             <button className="chip select" aria-pressed={!showStopped} onClick={() => setShowStopped(false)}>{t("services.filter.running", { n: running.length })}</button>
             <button className="chip select" aria-pressed={showStopped} onClick={() => setShowStopped(true)}>{t("services.filter.all", { n: all.length })}</button>
           </div>
         )}
-      </PageHeader>
+      />
       <div className="screen narrow">
         {loading && !error && <Skeleton rows={3} />}
         {error && !rows && <div className="empty"><b>{t("services.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

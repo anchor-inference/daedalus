@@ -150,13 +150,15 @@ export function UsageScreen({ onOpen }: { onOpen?: (id: string) => void }) {
 
   return (
     <>
-      <PageHeader title={screenTitle("usage")} subtitle={t("usage.range", { n: days })}>
+      <PageHeader title={screenTitle("usage")} subtitle={t("usage.range", { n: days })}
+        filters={
         <div className="chips">
           {([7, 14, 30] as const).map((d) => (
             <button key={d} className="chip select" aria-pressed={days === d} onClick={() => setDays(d)}>{t("usage.days", { n: d })}</button>
           ))}
         </div>
-      </PageHeader>
+        }
+      />
       <div className="screen wide usage">
         {loading && !error && <Skeleton rows={4} />}
         {error && !usage && <div className="empty"><b>{t("usage.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

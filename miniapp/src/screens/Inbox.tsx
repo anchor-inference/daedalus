@@ -144,15 +144,17 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
       <PageHeader
         title={screenTitle("inbox")}
         subtitle={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
+        ruled
         actions={<button className="iconbtn" onClick={markAll} disabled={unseen === 0} title={t("inbox.markall")} aria-label={t("inbox.markall")}><Icon name="check" /></button>}
-      >
+        filters={
         <div className="chips">
           <button className="chip select" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>{t("common.all")}</button>
           <button className="chip select" aria-pressed={filter === "unseen"} onClick={() => setFilter("unseen")}>{t("inbox.filter.unread")}{unseen > 0 ? ` · ${unseen}` : ""}</button>
           <button className="chip select" aria-pressed={filter === "problems"} onClick={() => setFilter("problems")}>{t("inbox.filter.problems")}</button>
           <button className="chip select" aria-pressed={filter === "projects"} onClick={() => setFilter("projects")}>{t("centre.projects")}</button>
         </div>
-      </PageHeader>
+        }
+      />
       <div className={`inbox-layout ${split ? "split" : ""}`}>
       <div className="screen narrow inbox-list">
         <PushNudge />

@@ -95,8 +95,8 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
       <PageHeader
         title={screenTitle("harnesses")}
         subtitle={subtitle}
-      >
-        {/* Under the title rather than beside it: a phone has no room beside a title for three controls. */}
+        filters={
+        // Under the title rather than beside it: a phone has no room beside a title for three controls.
         <div className="harness-actions">
             <div className="segmented inline harness-env" role="group" aria-label={t("harness.env")}>
               <button className={env === "container" ? "on" : ""} aria-pressed={env === "container"} data-env="container" onClick={() => setEnv("container")}>{t("term.env.container")}</button>
@@ -111,7 +111,8 @@ export function HarnessesScreen({ toast }: { toast: (text: string) => void }) {
               <span>{t("harness.update.all")}</span>
             </button>
           </div>
-      </PageHeader>
+        }
+      />
       <div className="screen wide harness-screen">
         {loading && !data && <div className="empty calm">{t("common.loading")}</div>}
         {error && !data && (

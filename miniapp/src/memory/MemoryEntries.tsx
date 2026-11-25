@@ -143,13 +143,16 @@ export function MemoryHome({ switcher, onHistory }: { switcher: ReactNode; onHis
             />
           </>
         }
-      >
+        filters={
+        <>
         {searching && <input className="field search" autoFocus placeholder={t("memory.entries.search")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearching(false); } }} aria-label={t("memory.entries.search")} />}
         <div className="memory-modebar">
           {switcher}
           <StatusPill listing={data} />
         </div>
-      </PageHeader>
+        </>
+        }
+      />
       <div className="screen narrow memory memory-entries" data-view="entries">
         {loading && !data && <Skeleton rows={6} />}
         {error && !data && <div className="empty"><b>{t("memory.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}

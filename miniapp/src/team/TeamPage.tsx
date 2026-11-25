@@ -54,14 +54,13 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
             </>
           ) : undefined
         }
-      >
-        {team && !closed && (
+        filters={team && !closed && (
           <div className="chips">
             <button className="chip select" aria-pressed={!showArchived} onClick={() => setShowArchived(false)}>{t("team.filter.active")}</button>
             <button className="chip select" aria-pressed={showArchived} onClick={() => setShowArchived(true)}>{t("team.filter.all")}</button>
           </div>
         )}
-      </PageHeader>
+      />
       <div className="screen narrow team">
         {loading && !team && !error && <Skeleton rows={3} />}
         {error && !team && (

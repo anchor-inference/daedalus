@@ -203,6 +203,37 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     return out
 
 
+PAGE_ROUTES = ["inbox", "board", "usage", "health", "memory", "services", "changes", "schedules", "canvas", "harnesses", "terminals"]
+
+
+def check_page_header(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
+    """Every full page's header is one 52 px row with its title 24 px in from the main area's left
+    edge, at a laptop and an ultrawide width. Measured from the main area, not the window: the sidebar
+    is draggable, so "x = 324" holds only at its default width. The header once followed the page's
+    column (padded in to its edge), which put the titles at six different positions."""
+    problems: list[str] = []
+    measured: dict = {}
+    for width in (1366, 1920):
+        context = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="dark")
+        for route in PAGE_ROUTES:
+            page = open_page(context, route, ".pagehead h1")
+            m = page.evaluate("""() => {
+              const main = document.querySelector('.main').getBoundingClientRect();
+              const head = document.querySelector('.pagehead').getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(document.querySelector('.pagehead h1'));
+              return { titleX: Math.round(range.getBoundingClientRect().x - main.x), height: Math.round(head.height) };
+            }""")
+            measured[f"{route}-{width}"] = m
+            if m["titleX"] != 24:
+                problems.append(f"{route} at {width}: the title starts {m['titleX']} px from the main area's edge, not 24")
+            if m["height"] != 52:
+                problems.append(f"{route} at {width}: the header is {m['height']} px high, not 52")
+            page.close()
+        context.close()
+    return problems, measured
+
+
 def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
     """The browser's corner preview: a 240 px card inside the conversation's column, never over the
     panel beside it, at 1440 and 1280 (check_browser_pip.py drives the rest of it)."""
@@ -750,6 +781,8 @@ def run() -> int:
         if ASSERT:
             measured["sidebar"] = check_sidebar(browser)
             problems += check_browser_preview(browser)
+            head_problems, measured["page-header"] = check_page_header(browser)
+            problems += head_problems
             problems += check_settings(browser)
             phone_problems, measured["phone"] = check_phone(browser)
             problems += phone_problems
