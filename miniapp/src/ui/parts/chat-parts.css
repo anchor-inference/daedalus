@@ -371,6 +371,9 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .media-viewer .fullscreen-bar .iconbtn, .media-viewer .fullscreen-bar .btn { color:#fff; background:transparent; }
 .media-viewer .fullscreen-bar .iconbtn:hover, .media-viewer .fullscreen-bar .btn:hover { background:rgba(255,255,255,.14); }
 .media-viewer .fullscreen-bar .btn { border-color:rgba(255,255,255,.28); }
+/* A picture is touched as often as it is clicked: every control in the bar is a finger's 44 px. */
+.media-viewer .fullscreen-bar .iconbtn, .media-viewer .fullscreen-bar .btn { width:var(--row-h-touch); height:var(--row-h-touch); min-height:var(--row-h-touch); }
+.media-viewer .fullscreen-bar .btn { width:auto; padding:0 12px; }
 .media-viewer .fullscreen-body { position:relative; overflow:hidden; }
 .media-viewer-body { position:absolute; inset:0; }
 .media-viewer-stage { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#000; touch-action:none; user-select:none; }
