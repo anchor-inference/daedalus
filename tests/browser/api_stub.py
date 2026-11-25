@@ -711,7 +711,8 @@ GATES: dict[str, object] = {
     "/api/terminals/load": terminal_load(),
     "/api/commands": [],
     # The model list outside the app's settings (the terminal's /model): no address, no key.
-    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
+    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "favourite": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""},
+                {"id": "starred", "label": "Starred model", "provider": "keyproxy", "model": "starred-model", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 200000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
                     "providers": [{"id": "keyproxy", "kind": "openai", "name": "Key proxy", "billing": ""}], "efforts": ["low", "medium", "high", "xhigh"]},
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],

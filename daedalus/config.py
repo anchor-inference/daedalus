@@ -567,6 +567,9 @@ class ModelPresetConfig(BaseModel):
     reasoning_effort: ReasoningEffort = "medium"
     images: bool = False
     """The model accepts images (needed for ImageView and for photos sent in chat)."""
+    favourite: bool = False
+    """Starred by the operator: the model picker's first tab lists these. A mark on the preset and nothing
+    more, so a model removed takes its star with it."""
     free_only: bool = False
     """A free-catalog preset must stop on failure instead of entering the paid fallback chain."""
     context_window: int = Field(default=128_000, ge=8_000, le=4_000_000)

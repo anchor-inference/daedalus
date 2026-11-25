@@ -973,6 +973,7 @@ class PresetPatch(BaseModel):
     thinking: bool | None = None
     reasoning_effort: str | None = None
     images: bool | None = None
+    favourite: bool | None = None
     free_only: bool | None = None
     context_window: int | None = None
     context_window_source: Literal["auto", "manual"] | None = None
@@ -5312,6 +5313,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "thinking": preset.thinking,
                 "reasoning_effort": preset.reasoning_effort,
                 "images": preset.images,
+                "favourite": preset.favourite,
                 "context_window": preset.context_window,
                 "max_output_tokens": preset.max_output_tokens,
                 "provider_kind": str((providers.get(preset.provider) or {}).get("kind") or ""),
