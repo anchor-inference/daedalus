@@ -45,6 +45,7 @@ from daedalus.browser.model import (
     BrowserGone,
     ChromeChoice,
     ChromeElsewhere,
+    Conflict,
     Detached,
     EnvUnavailable,
     Forbidden,
@@ -180,6 +181,37 @@ class Waiter:
         return {"actor": self.actor, "env": self.env, "group_id": self.group_id, "since": self.since}
 
 
+OPERATOR_OUTCOMES = ("given_back", "declined", "timeout", "gone", "cancelled")
+"""How a wait for the operator ends: they did what was asked (or the sign-in form was sent), they said
+no, the wait limit passed, the browser closed under it, or the helper's leader was stopped."""
+
+
+@dataclass(slots=True)
+class OperatorWait:
+    """A quick agent waiting, inside its own tool call, for the operator to answer its browser's request.
+
+    An ordinary session ends its turn after asking and is woken with the answer. A quick agent cannot:
+    its turn ending is its run ending, and its leader sits in the call meanwhile. So the answer that
+    would have woken the owner (the leader, whose browser it drives) resolves this instead, and the
+    leader hears nothing of it but the helper's result."""
+
+    slot: str
+    """What it waits on: the group's id for a hand-over or a sign-in, ``chrome:<session>`` for the move
+    into the operator's Chrome, which has no group yet."""
+    session_id: str
+    """The helper that waits."""
+    kind: str
+    what: str
+    until: float
+    """When the wait gives up, as a Unix time, for the app's countdown."""
+    future: asyncio.Future[tuple[str, str]]
+    withdraw: Callable[[], Awaitable[None]]
+    group_id: str = ""
+
+    def view(self) -> dict[str, Any]:
+        return {"kind": self.kind, "what": self.what, "group_id": self.group_id, "until": datetime.fromtimestamp(self.until, UTC).isoformat()}
+
+
 Subscriber = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 """``(env, type, data)`` for every daemon event after the service has handled it."""
 Wake = Callable[[Owner, str], Awaitable[None]]
@@ -313,10 +345,16 @@ class Browsers:
         """``group → (note, by)``: what the operator said when giving a browser back, kept for the
         control event that carries the give-back to the owner. The event, not the request, wakes the
         owner, so a give-back is told once however it happened — the button, or the hold running out."""
-        self._returns: dict[str, str] = {}
-        """``group → the words its owner is woken with``, in place of "the operator gave the browser back",
-        when the give-back answers something the operator did in the app (the private sign-in), so the
-        owner hears the outcome rather than a hand-over it never saw happen."""
+        self._returns: dict[str, tuple[str, str]] = {}
+        """``group → (the words its owner is woken with, the outcome)``, in place of "the operator gave the
+        browser back", when the give-back answers something the operator did in the app (the private
+        sign-in, a decline), so the owner hears the outcome rather than a hand-over it never saw happen."""
+        self._operator_waits: dict[str, list[OperatorWait]] = {}
+        """``slot → the quick agents waiting on it``: an answer to the slot resolves them instead of
+        waking the owner (:class:`OperatorWait`)."""
+        self._withdrawn: set[str] = set()
+        """Groups whose unanswered request a wait took back: the give-back that unpauses them is the
+        helper's own, and the leader it would wake is sitting in the helper's call."""
         self._freed = asyncio.Event()
         self._waiting: list[Waiter] = []
         self._subscribers: list[Subscriber] = []
@@ -1187,22 +1225,134 @@ class Browsers:
         await self._needs_you(row, reason, what, url or row["url"], login=login)
         return {"url": row["url"], "title": row["title"]}
 
-    async def give_back(self, group: str, text: str, *, by: str = "operator") -> None:
+    async def give_back(self, group: str, text: str, *, by: str = "operator", declined: bool = False) -> None:
         """Hand the browser back to the agent once the operator answered a request in the app, and wake
-        its owner with ``text`` rather than with the usual words of a give-back."""
+        its owner with ``text`` rather than with the usual words of a give-back. ``declined`` says the
+        answer was no, which a quick agent waiting on the request is told as such."""
         row = await self._row(group)
         if row["status"] != "open":
             raise BrowserGone(self._gone_text(row))
+        outcome = "declined" if declined else "given_back"
         if row["control_owner"] == "agent":
             # Nothing to give back, so no control event will wake the owner: tell it here.
             await self.db.execute("UPDATE browser_groups SET needs_json = NULL WHERE id = ?", (group,))
             await self._publish("browser.returned", {"group_id": group, "url": row["url"], "title": row["title"], "tabs": int(row["tabs"]), "by": by}, row)
-            if self.wake is not None:
+            if not self.answer_wait(group, outcome, text) and self.wake is not None:
                 await self.wake(self.owner_of(row), text)
             return
-        self._returns[group] = text
+        self._returns[group] = (text, outcome)
         self._notes.pop(group, None)
         await self._call(row["env"], "control.set", {"group_id": group, "owner": "agent"}, what="giving the browser back")
+
+    async def decline(self, group: str, *, by: str = "operator") -> None:
+        """The operator will not do what the agent handed over: the browser goes back to it, and it is
+        told so instead of "the browser is back", which read as the step being done."""
+        row = await self._row(group)
+        need = _json(row.get("needs_json"))
+        if row["status"] != "open" or not need:
+            raise Conflict("nothing is asked of you in this browser now: it was answered, or the agent took the request back")
+        what = " ".join(str(need.get("what") or "").split())[:300] or "do what it asked"
+        await self.audit(group, row["env"], by, "decline", {"reason": str(need.get("reason") or "")})
+        await self.give_back(
+            group, f"[browser] The operator declined to {what}. Do not ask again for this task unless they say so; carry on without it, or say what it blocks.",
+            by=by, declined=True,
+        )
+
+    # -- a quick agent waiting for the operator -------------------------------------------------
+
+    async def wait_for_operator(
+        self, slot: str, *, session_id: str, kind: str, what: str, seconds: float, withdraw: Callable[[], Awaitable[None]], group_id: str = "",
+    ) -> tuple[str, str]:
+        """Wait for the answer to the request just made on ``slot``: ``(outcome, text)``, the outcome one
+        of :data:`OPERATOR_OUTCOMES` and the text what the owner would have been woken with.
+
+        Past ``seconds`` the request is withdrawn (``withdraw``) and the outcome is ``timeout``, unless
+        the operator holds the controls of the group at that moment: they are doing it, and the hold
+        has its own end, which gives the browser back. A cancelled wait withdraws too, so a stopped
+        leader leaves no request behind that nobody will read the answer to."""
+        loop = asyncio.get_running_loop()
+        wait = OperatorWait(slot=slot, session_id=session_id, kind=kind, what=what[:500], until=time.time() + seconds, future=loop.create_future(), withdraw=withdraw, group_id=group_id)
+        self._operator_waits.setdefault(slot, []).append(wait)
+        try:
+            while True:
+                try:
+                    return await asyncio.wait_for(asyncio.shield(wait.future), max(0.0, wait.until - time.time()))
+                except TimeoutError:
+                    if wait.future.done():
+                        return wait.future.result()
+                if group_id and await self._held_by_operator(group_id):
+                    wait.until = time.time() + min(seconds, 60.0)
+                    continue
+                wait.future.set_result(("timeout", ""))
+                await self._withdraw(wait)
+                return "timeout", ""
+        except asyncio.CancelledError:
+            if not wait.future.done():
+                wait.future.set_result(("cancelled", ""))
+                await asyncio.shield(self._withdraw(wait))
+            raise
+        finally:
+            waits = self._operator_waits.get(slot, [])
+            if wait in waits:
+                waits.remove(wait)
+            if not waits:
+                self._operator_waits.pop(slot, None)
+
+    def answer_wait(self, slot: str, outcome: str, text: str) -> bool:
+        """Resolve the quick agents waiting on ``slot`` with the answer; whether any was. A wait that
+        already ended (its limit, its leader stopped) is gone from the list, so a later answer to
+        another request on the same group cannot be swallowed by it and reaches the owner as usual."""
+        live = [w for w in self._operator_waits.get(slot, []) if not w.future.done()]
+        for wait in live:
+            wait.future.set_result((outcome, text))
+        return bool(live)
+
+    def operator_waits_of(self, session_id: str) -> builtins.list[dict[str, Any]]:
+        """What the helper waits for now, for the leader's transcript and the helper's own clock."""
+        return [w.view() for waits in self._operator_waits.values() for w in waits if w.session_id == session_id and not w.future.done()]
+
+    async def cancel_waits_of(self, session_id: str) -> int:
+        """Withdraw what the helper is waiting for, because its leader was stopped; how many."""
+        mine = [w for waits in self._operator_waits.values() for w in waits if w.session_id == session_id and not w.future.done()]
+        for wait in mine:
+            wait.future.set_result(("cancelled", ""))
+            await self._withdraw(wait)
+        return len(mine)
+
+    async def _withdraw(self, wait: OperatorWait) -> None:
+        if any(w is not wait and not w.future.done() for w in self._operator_waits.get(wait.slot, [])):
+            return  # another helper still waits on the same request: it stays open for that one
+        try:
+            await wait.withdraw()
+        except Exception:  # noqa: BLE001 — the helper is told how its wait ended whether or not the card went
+            logger.exception("could not withdraw the browser request on %s", wait.slot)
+
+    async def _held_by_operator(self, group: str) -> bool:
+        row = await self.db.fetchone("SELECT status, control_owner FROM browser_groups WHERE id = ?", (group,))
+        return row is not None and row["status"] == "open" and row["control_owner"] == "human"
+
+    async def withdraw_request(self, group: str, *, by: str = "agent") -> None:
+        """Take back a request of the group nobody answered: its "needs you" goes, the notification with
+        it (``browser.returned`` settles it), and a paused group is unpaused without waking anyone."""
+        row = await self.db.fetchone("SELECT * FROM browser_groups WHERE id = ?", (group,))
+        if row is None or row["status"] != "open":
+            return
+        row = dict(row)
+        await self.db.execute("UPDATE browser_groups SET needs_json = NULL WHERE id = ?", (group,))
+        self._returns.pop(group, None)
+        await self.audit(group, row["env"], by, "withdraw", {"control": row["control_owner"]})
+        if row["control_owner"] == "paused":
+            self._withdrawn.add(group)
+            try:
+                await self._call(row["env"], "control.set", {"group_id": group, "owner": "agent"}, what="taking the request back")
+                return
+            except BrowserError as exc:
+                # The daemon is away: the row is put right here, and the daemon's own state is
+                # reconciled when it is back.
+                self._withdrawn.discard(group)
+                logger.warning("browser %s was not unpaused when its request was withdrawn: %s", group, exc.message)
+                await self.db.execute("UPDATE browser_groups SET control_owner = 'agent', control_reason = '' WHERE id = ?", (group,))
+        await self._publish("browser.returned", {"group_id": group, "url": row["url"], "title": row["title"], "tabs": int(row["tabs"]), "by": by}, row)
 
     async def _needs_you(self, row: dict[str, Any], reason: str, what: str, url: str, *, by: str = "agent", login: dict[str, Any] | None = None) -> None:
         """The operator is needed: kept on the group, so every list says so until the browser is
@@ -1299,7 +1449,9 @@ class Browsers:
                 (status, reason, now_iso(), row["id"]),
             )
         self._notes.pop(row["id"], None)
+        self._withdrawn.discard(row["id"])
         self._wake_waiters()
+        self.answer_wait(row["id"], "gone", f"[browser] The browser was closed while you waited for the operator ({reason}); nothing more happens in it.")
         await self.audit(row["id"], row["env"], by, "close", {"reason": reason})
         await self._publish("browser.closed", {"group_id": row["id"], "reason": reason, "by": by}, row)
         return True
@@ -1842,8 +1994,16 @@ class Browsers:
         await self._publish("browser.control", {"group_id": row["id"], "owner": owner, "reason": str(data.get("reason") or "")[:300]}, row)
         if owner != "agent" or before == "agent" or row["status"] != "open":
             return
+        if row["id"] in self._withdrawn:
+            # A quick agent's own request, taken back when nobody answered it: settled, and nobody woken.
+            self._withdrawn.discard(row["id"])
+            self._notes.pop(row["id"], None)
+            fresh = await self._row(row["id"])
+            await self._publish("browser.returned", {"group_id": row["id"], "url": fresh["url"], "title": fresh["title"], "tabs": int(fresh["tabs"]), "by": "agent"}, fresh)
+            return
         note, by = self._notes.pop(row["id"], ("", "operator"))
-        told = self._returns.pop(row["id"], None)
+        returned = self._returns.pop(row["id"], None)
+        told, outcome = returned if returned is not None else (None, "given_back")
         # Whether the agent asked for this: a request was open (a handoff, a sign-in, a CAPTCHA), the
         # app answered one, or the operator left a note. Otherwise the operator only took the controls
         # for a while, and an owner whose turn is over is not woken for it.
@@ -1857,6 +2017,10 @@ class Browsers:
             where = f"{fresh['title']} — {fresh['url']}" if fresh["title"] else fresh["url"] or "a blank page"
             text = told or f"[browser] The operator gave the browser back. Now on {where}." + (f" Their note: {note}" if note else "") + " Take a BrowserSnapshot before acting: the page may have changed."
             try:
+                # A quick agent waiting on it in its tool call takes the answer; its leader, the owner,
+                # sits in the call that waits on the helper, and a message to it would be acted on twice.
+                if self.answer_wait(row["id"], outcome, text):
+                    return
                 if asked:
                     await self.wake(self.owner_of(fresh), text)
                 else:

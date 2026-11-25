@@ -10129,6 +10129,16 @@ Object.assign(DICT, {
   "qagent.none": { en: "None chosen: the agent has no quick agent.", ru: "Ничего не выбрано: быстрого агента у агента нет." },
   "qagent.off": { en: "off", ru: "выключен" },
   "qagent.starting": { en: "Starting the quick agent…", ru: "Запускается быстрый агент…" },
+  "qagent.wait.title": { en: "The quick agent waits for you in the browser", ru: "Быстрый агент ждёт вас в браузере" },
+  "qagent.wait.login": { en: "The quick agent waits for you to sign in", ru: "Быстрый агент ждёт, пока вы войдёте" },
+  "qagent.wait.chrome": { en: "The quick agent asks to work in your Chrome", ru: "Быстрый агент просит работать в вашем Chrome" },
+  "qagent.wait.left": { en: "It waits {time} more, then takes the request back and reports where it stopped.", ru: "Ждёт ещё {time}, потом снимет запрос и сообщит, где остановился." },
+  "qagent.wait.left.chrome": { en: "Answer the request below the conversation. It waits {time} more.", ru: "Ответьте на запрос под разговором. Ждёт ещё {time}." },
+  "qagent.wait.open": { en: "Open the browser", ru: "Открыть браузер" },
+  "qagent.wait.form": { en: "Open the form", ru: "Открыть форму" },
+  "qagent.wait.decline": { en: "Decline", ru: "Отказаться" },
+  "qagent.wait.setting": { en: "Quick agent waits for you", ru: "Быстрый агент ждёт вас" },
+  "qagent.wait.setting.sub": { en: "How long a quick agent waits for you to do in the browser what only you may: a CAPTCHA, a sign-in, a payment, your Chrome. Then it takes the request back and reports where it stopped. 1 to 60 minutes; its own time limit stands still meanwhile.", ru: "Сколько быстрый агент ждёт, пока вы сделаете в браузере то, что можете только вы: капча, вход, оплата, ваш Chrome. Потом он снимает запрос и сообщает, где остановился. От 1 до 60 минут; его собственный лимит времени на это время замирает." },
 });
 
 // The export of one conversation over an agent link (linkexport.tsx).

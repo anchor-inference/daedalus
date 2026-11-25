@@ -686,6 +686,13 @@ class BrowserStub:
             filled = [k for k in ("username", "password", "otp") if body.get(k)] or ["username", "password"]
             return 200, {"site": login.get("site", ""), "url": f"https://{login.get('site', '')}/home", "signed_in": "yes", "filled": filled, "waiting": "",
                          "saved": bool(body.get("save")) and not body.get("use_saved")}
+        if action == "decline" and method == "POST":
+            # The operator says no to a hand-over: the agent gets the browser back, told so, as the host does.
+            if not g.needs:
+                return 409, {"detail": "nothing is asked of you in this browser now", "code": "conflict"}
+            g.needs = None
+            self.set_control(g.id, "agent")
+            return 200, {"ok": True}
         if action == "close" and method == "POST":
             g.status = "closed"
             self.drop(g.id, 4404)

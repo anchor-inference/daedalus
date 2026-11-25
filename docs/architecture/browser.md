@@ -1336,7 +1336,33 @@ as does the daemon's own `needs_you`; the notification router makes an urgent en
 owner's chat with `?panel=browser`, closed when the browser is given back or closed. Its text ends
 with a line that opens the Mini App on that Browser tab (`https://t.me/<bot>?startapp=browser_<session>`
 once the bot's name is known, else the app's own address under `MINIAPP_PUBLIC_URL`), which is what a
-Telegram message or a lock screen can act on.
+Telegram message or a lock screen can act on. `POST /api/browsers/<group>/decline` is the operator's
+no to a hand-over: the browser goes back to the agent, which is told they declined rather than that
+the browser is back.
+
+### A quick agent waits in its call
+
+A quick agent (`daedalus/host/quick_agent.py`) drives its leader's group, so every request it makes
+is the leader's group's: the "needs you", the notification and the link lead to the leader's chat.
+It cannot end its turn and be woken, because its turn ending is its run ending while the leader sits
+in the QuickAgent call. So `BrowserHandoff`, `BrowserLogin` and `BrowserAskOperatorChrome` called by a
+quick agent make the request exactly as above and then wait inside the tool call
+(`Browsers.wait_for_operator`, keyed by the group, or by `chrome:<session>` for the Chrome ask, which
+has no group yet). The answer that would have woken the owner resolves the waiting call instead, with
+the same words, and the leader is not woken: the give-back's control event, the sign-in form's
+outcome, a decline (`declined=True` on `give_back`, said as such), the Chrome ask's yes or no, and a
+closed browser all end the wait. Past `[subagents] operator_wait_minutes` (10 by default) the request
+is withdrawn (`Browsers.withdraw_request`: "needs you" cleared, the group unpaused without a wake,
+`browser.returned` settling the notification; the Chrome ask settled on the leader's card) and the
+helper is told to finish without the step or report where it stopped; an operator holding the
+controls at that moment keeps the wait open until the hold ends. A wait that ended is gone from the
+list, so a later, unrelated give-back on the group reaches the owner as usual. A stopped leader
+withdraws what its helper asked before the helper is deleted. While the helper waits its own time
+limit (`quick_wait_minutes`) stands still, and the leader's transcript draws a row under the call
+with what to do, how long it still waits, and Open the browser and Decline
+(`/api/sessions/<leader>/quick-agents` carries `waiting`). These three tools and QuickAgent declare
+their own dispatch budget (`should_defer` with `default_timeout_ms`), because the core's flat
+`limits.tool_timeout_seconds` cancelled the leader's call, and with it the helper, at 900 s.
 
 ### The private sign-in
 
@@ -1823,7 +1849,8 @@ offered — connected or not, and whether this conversation is in it — worded 
 changes, so it costs no cache. When the operator asks for their own browser and the conversation is
 not in it, the agent calls `BrowserAskOperatorChrome(reason)`: the request goes on the operator's
 permission card (always the operator's, a staff member's too, and refused to an orchestrator) with
-the reason and the consent summary, and the agent ends its turn. The operator's yes switches the
+the reason and the consent summary, and the agent ends its turn (a quick agent's request goes on its
+leader's card and its call waits for the answer, as above). The operator's yes switches the
 conversation through the panel's own path, consent recorded as there, and wakes the agent; a no
 wakes it with that. The yes writes no grant, so no later call of the agent's can spend it. With
 Chrome not connected, or not offered, the tool says so and asks nothing. `BrowserOpen` in the

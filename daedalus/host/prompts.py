@@ -223,9 +223,11 @@ a strong, slow model, hand it the mechanical work rather than doing it step by s
 form to fill, a site to click through, pages to read — it uses your tabs and the operator's Chrome when you work \
 there), a sweep of many files or a repository for facts, web lookups, data to extract, routine edits across \
 files, checking a page or a command's output. Give it the exact values, the limits and the report you want; it \
-never asks and its approvals are lifted, so say what it must not do. Keep the judgement, the plan and the answer \
-yourself, and check what it reports before you build on it. For something you would wait for anyway, prefer it \
-to SubAgent.
+never asks questions and its approvals are lifted, so say what it must not do. A choice the task leaves open comes \
+back in its report: put it to the operator yourself and call it again. What only the operator can do in the \
+browser (a CAPTCHA, a sign-in, a payment) it waits for inside the call, the operator notified in this chat. Keep \
+the judgement, the plan and the answer yourself, and check what it reports before you build on it. For something \
+you would wait for anyway, prefer it to SubAgent.
 """
 
 BOARD_SERVICES = """- A demo, a server or any process that must keep running after your turn ends is a service: \

@@ -22,13 +22,21 @@ from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import ToolResult
 from protocore.tools.decorator import tool
 
-from daedalus.browser.agent import LOOK_INSTRUCTION, SWITCH_ASK, UPLOAD_MAX_BYTES, BrowserAgent, Caller, SensitiveAsk
+from daedalus.browser.agent import (
+    LOOK_INSTRUCTION,
+    SWITCH_ASK,
+    UPLOAD_MAX_BYTES,
+    BrowserAgent,
+    Caller,
+    SensitiveAsk,
+    WaitsHere,
+)
 from daedalus.browser.model import EnvUnavailable, Forbidden, NotFound, Owner
 from daedalus.host import quick_agent
 from daedalus.host.filesystem import ShellFS
 from daedalus.host.services import SessionServices
 from daedalus.stores.files import FileRefused, parse_handle, safe_name, saved_report
-from daedalus.tools import search_hint, tool_group
+from daedalus.tools import own_clock, search_hint, tool_group
 from daedalus.tools._common import FETCH_MAX_BYTES, FRAME_CHARS, error, ok, output_limit, services_for
 from daedalus.tools.vision import VisionUnavailable, look
 
@@ -230,7 +238,19 @@ def _caller(context: ToolContext) -> Caller | None:
 
     async def ask_operator(key: str, text: str, card: dict[str, Any], *, on_answer: str = SWITCH_ASK, extra: dict[str, Any] | None = None) -> bool:
         tool = "BrowserAskOperatorChrome" if on_answer == SWITCH_ASK else "BrowserOpen"
-        return bool(manager.ask_operator(context.session_id, key=key, tool=tool, text=text, on_answer=on_answer, card=card, extra=extra))
+        # On the conversation whose browser it is: a quick agent's request goes on its leader's card,
+        # where the operator is, and their yes switches the leader's conversation, which the helper uses.
+        return bool(manager.ask_operator(who, key=key, tool=tool, text=text, on_answer=on_answer, card=card, extra=extra))
+
+    async def withdraw_ask(key: str) -> None:
+        await manager.settle_ask(who, key, "expired", via="timeout")
+
+    waits = None
+    if browsing:
+        # A quick agent's turn ending is its run ending: it waits in the call for the operator instead.
+        subagents = getattr(getattr(manager, "config", None), "subagents", None)
+        minutes = float(getattr(subagents, "operator_wait_minutes", 10))
+        waits = WaitsHere(session_id=context.session_id, seconds=60.0 * minutes, withdraw_ask=withdraw_ask)
 
     def operator_words() -> list[str]:
         # The running engine's history is the one the model is reading, with the passages a
@@ -262,7 +282,7 @@ def _caller(context: ToolContext) -> Caller | None:
 
     return Caller(
         owner=owner, actor=f"agent:{context.session_id}", gate=gate, files=files, look=looked, budget=budget, note_scope=lasting, rules=rules,
-        ask_operator=ask_operator, operator_words=operator_words, used=used, send_saved=send_saved,
+        ask_operator=ask_operator, operator_words=operator_words, used=used, send_saved=send_saved, waits=waits,
     )
 
 
@@ -302,6 +322,7 @@ async def browser_open(context: ToolContext, url: str | None = None, fresh: bool
     return await _run(context, "BrowserOpen", {"url": url, "fresh": fresh, "why": why, "webgl": webgl, "chrome": chrome})
 
 
+@own_clock(quick_agent.OPERATOR_WAIT_CEILING_SECONDS)
 @tool_group("browser")
 @search_hint(
     "my browser my chrome use my chrome operator's chrome signed in as me switch to my browser "
@@ -314,7 +335,8 @@ async def browser_open(context: ToolContext, url: str | None = None, fresh: bool
         "(\"my browser\", \"in my Chrome\", \"в моём браузере\") and this conversation still uses yours: do not open your own "
         "instead. reason is one sentence they read on the card: what you need their Chrome for. Only their yes switches "
         "the conversation; end your turn after asking — a message brings the answer. When their Chrome is not connected "
-        "it says so and asks nothing."
+        "it says so and asks nothing. A quick agent's call waits for the answer instead, up to the operator's wait limit, "
+        "and returns it."
     ),
 )
 async def browser_ask_operator_chrome(context: ToolContext, reason: str) -> ToolResult:
@@ -525,6 +547,7 @@ async def browser_dialog(context: ToolContext, accept: bool, text: str | None = 
     return await _run(context, "BrowserDialog", {"accept": accept, "text": text, "tab": tab})
 
 
+@own_clock(quick_agent.OPERATOR_WAIT_CEILING_SECONDS)
 @tool_group("browser")
 @search_hint(
     "hand over to operator login sign in captcha two factor 2fa payment take over manually "
@@ -535,7 +558,8 @@ async def browser_dialog(context: ToolContext, accept: bool, text: str | None = 
     description=(
         "Hand the browser to the operator for what only they may do: reason 'login', 'captcha', 'two_factor', "
         "'payment', 'confirm' or 'other'; what says what to do ('sign in to github.com'). They are notified; end your "
-        "turn afterwards — a message comes when they give the browser back."
+        "turn afterwards — a message comes when they give the browser back. A quick agent's call waits instead, up to "
+        "the operator's wait limit, and returns where the page is once they give it back, or that they did not."
     ),
 )
 async def browser_handoff(context: ToolContext, reason: str, what: str) -> ToolResult:
@@ -688,6 +712,7 @@ async def browser_cookies(context: ToolContext, action: str = "import", path: st
     return await _run(context, "BrowserCookies", {"action": action, "path": path, "text": text, "domain": domain})
 
 
+@own_clock(quick_agent.OPERATOR_WAIT_CEILING_SECONDS)
 @tool_group("browser")
 @search_hint(
     "sign in log in login password account credentials private form operator types username two factor code "
@@ -701,7 +726,8 @@ async def browser_cookies(context: ToolContext, action: str = "import", path: st
         "url_or_domain is the sign-in page's address or the site (github.com); reason says what it is for (the operator "
         "reads it). selectors ({username, password, otp, submit} as CSS) name fields the guess misses. End your turn "
         "afterwards: a message says where the page is and whether the sign-in took (yes, no or unknown). A sign-in the "
-        "operator saved and allowed for this session is done at once and the result says so."
+        "operator saved and allowed for this session is done at once and the result says so. A quick agent's call waits "
+        "for the form instead, up to the operator's wait limit, and returns that outcome."
     ),
 )
 async def browser_login(context: ToolContext, url_or_domain: str, reason: str, selectors: dict[str, str] | None = None) -> ToolResult:

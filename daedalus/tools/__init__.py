@@ -250,6 +250,24 @@ now and then — other agents, the board, services, MCP — is ``auto``: on the 
 file, shell, web, memory and question tools are in no group and never leave."""
 
 
+def own_clock(seconds: float) -> Callable[[type[Tool]], type[Tool]]:
+    """Give a ``@tool``-decorated class a dispatch budget of its own in place of ``limits.tool_timeout_seconds``.
+
+    The core cancels a call at the flat budget (900 s) unless the tool declares that it keeps its own
+    clock: ``should_defer`` plus ``default_timeout_ms``, read off the registered object like
+    ``search_hint``. A call that waits by design for longer — QuickAgent holding its leader while the
+    helper works, a quick agent waiting for the operator in the browser — was cancelled at the flat
+    budget, and a cancelled QuickAgent deletes its helper with the work under way. ``seconds`` is the
+    ceiling past the tool's own limits, never the limit itself."""
+
+    def attach(cls: type[Tool]) -> type[Tool]:
+        cls.should_defer = True  # type: ignore[attr-defined]
+        cls.default_timeout_ms = int(seconds * 1000)  # type: ignore[attr-defined]
+        return cls
+
+    return attach
+
+
 def tool_group(name: str) -> Callable[[type[Tool]], type[Tool]]:
     """Put a ``@tool``-decorated class into one of :data:`TOOL_GROUPS`.
 
@@ -284,4 +302,4 @@ def tool_names(tools: Iterable[Tool]) -> list[str]:
     return sorted(t.name for t in tools)
 
 
-__all__ = ["GROUP_LOADS", "TOOL_GROUPS", "GroupLoad", "ToolGroupSpec", "discover_tools", "search_hint", "tool_group", "tool_names"]
+__all__ = ["GROUP_LOADS", "TOOL_GROUPS", "GroupLoad", "ToolGroupSpec", "discover_tools", "own_clock", "search_hint", "tool_group", "tool_names"]

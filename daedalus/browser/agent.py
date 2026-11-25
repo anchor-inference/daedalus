@@ -702,6 +702,44 @@ def named_sites(passages: Iterable[str]) -> set[str]:
 
 
 @dataclass(slots=True)
+class WaitsHere:
+    """A caller that waits inside its tool call for the operator's answer instead of ending its turn: a
+    quick agent, whose turn ending is its run ending while its leader sits in the call meanwhile."""
+
+    session_id: str
+    """The helper that waits, which the app's countdown under the leader's call is found by."""
+    seconds: float
+    """The operator's wait limit (``[subagents] operator_wait_minutes``)."""
+    withdraw_ask: Callable[[str], Awaitable[None]] | None = None
+    """Takes back the request on the operator's card by its key (the move into their Chrome)."""
+
+
+def chrome_slot(session_id: str) -> str:
+    """What a wait for the move into the operator's Chrome is filed under: the conversation that asked,
+    since the request has no browser group until it is answered."""
+    return f"chrome:{session_id}"
+
+
+QUICK_WRAP = (
+    " You are a quick agent and nobody else is asked for you: do not ask again. Finish the task without this "
+    "step if it allows, else end now with a report of where you stopped and what is left for the operator."
+)
+
+
+def waited_words(outcome: str, text: str, seconds: float) -> str:
+    """What a quick agent's waiting call returns: the operator's answer as an ordinary session would have
+    been woken with it, and, when it was not a yes, how to wrap up."""
+    if outcome == "given_back":
+        return text
+    if outcome == "timeout":
+        minutes = max(1, round(seconds / 60))
+        return f"[browser] The operator did not answer within {minutes} min. The request was withdrawn and the browser is yours again." + QUICK_WRAP
+    if outcome == "cancelled":
+        return "[browser] The wait was cancelled and the request withdrawn: your leader was stopped."
+    return (text or "[browser] The request ended without an answer.") + QUICK_WRAP
+
+
+@dataclass(slots=True)
 class Caller:
     owner: Owner
     actor: str
@@ -736,6 +774,9 @@ class Caller:
     """Hands the file :attr:`files` saved last to the operator, as SendFile does, with a caption; the
     sentence it answers says how it went. ``None`` for a caller with no chat of the operator's to
     send to (a staff member's command-line browser, whose files reach the operator through its team)."""
+    waits: WaitsHere | None = None
+    """Set for a caller that waits in the call for the operator's answer to a hand-over, a sign-in or the
+    move into their Chrome (a quick agent); ``None`` asks and tells the caller to end its turn."""
 
     @property
     def scope(self) -> str:
@@ -1321,6 +1362,15 @@ class BrowserAgent:
         text = f"The agent asks to work in your Chrome «{name}»: {said}. {CONSENT}"
         if not await caller.ask_operator(key, text, {"chrome": {"name": name, "reason": said}}):
             raise EnvUnavailable("this session is not loaded; nothing was asked")
+        if caller.waits is not None:
+            withdraw_ask = caller.waits.withdraw_ask
+
+            async def withdraw() -> None:
+                if withdraw_ask is not None:
+                    await withdraw_ask(key)
+
+            outcome, answer = await self._wait_for_operator(caller, chrome_slot(owner.session_id), kind="chrome", what=f"work in your Chrome «{name}»: {said}", withdraw=withdraw)
+            return answer, outcome != "given_back"
         return (
             f"Waiting for the operator: asked to work in their Chrome «{name}». Approval key: {key}. Only their yes switches this "
             "conversation. End your turn now: a message brings their answer. Do not open your own browser for this meanwhile, and do not ask again."
@@ -2657,7 +2707,19 @@ class BrowserAgent:
             raise InvalidRequest("what is required: say what the operator should do ('sign in to github.com')")
         group = await self._group(caller)
         await self.service.handoff(group["id"], reason, what.strip()[:500], actor=caller.actor)
+        if caller.waits is not None:
+            return (await self._wait_for_group(caller, group["id"], kind=reason, what=what.strip()))[1]
         return f"Asked the operator to {what.strip()[:300]}. End your turn now; you will get a message when they hand the browser back."
+
+    async def _wait_for_group(self, caller: Caller, group: str, *, kind: str, what: str) -> tuple[str, str]:
+        """Wait in the call for the answer to the request just made on ``group``; taken back unanswered."""
+        return await self._wait_for_operator(caller, group, kind=kind, what=what, withdraw=lambda: self.service.withdraw_request(group, by=caller.actor), group_id=group)
+
+    async def _wait_for_operator(self, caller: Caller, slot: str, *, kind: str, what: str, withdraw: Callable[[], Awaitable[None]], group_id: str = "") -> tuple[str, str]:
+        waits = caller.waits
+        assert waits is not None
+        outcome, text = await self.service.wait_for_operator(slot, session_id=waits.session_id, kind=kind, what=what, seconds=waits.seconds, withdraw=withdraw, group_id=group_id)
+        return outcome, waited_words(outcome, text, waits.seconds)
 
     async def _user_refusal(self, caller: Caller, what: str) -> None:
         """Refuse what the operator's own Chrome is never given: a cookie import or clear, which would
@@ -2711,7 +2773,10 @@ class BrowserAgent:
         done = await self.logins.at_once(group, session_id=caller.owner.session_id, site=site, tab_id=str(current["id"]), selectors=chosen, actor=caller.actor)
         if done is not None:
             return done
-        return await self.logins.ask(group, session_id=caller.owner.session_id, site=site, url=here, reason=reason.strip(), selectors=chosen, actor=caller.actor)
+        asked = await self.logins.ask(group, session_id=caller.owner.session_id, site=site, url=here, reason=reason.strip(), selectors=chosen, actor=caller.actor)
+        if caller.waits is not None:
+            return (await self._wait_for_group(caller, group["id"], kind="login", what=f"sign in to {site}: {reason.strip()}"))[1]
+        return asked
 
     async def close(self, caller: Caller, *, tab: str | None = None, all: bool = False) -> str:  # noqa: A002 — the tool's own argument name
         group = await self._group(caller)

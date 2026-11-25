@@ -2399,8 +2399,12 @@ export type QuickModelsView = {
   options: { id: string; label: string }[];
 };
 
+/** What a quick agent waits for the operator to do in the browser, inside its call: a hand-over (its
+ *  reason: captcha, login, two_factor, payment, confirm, other), the private sign-in form (`login`) or
+ *  the move into their Chrome (`chrome`). `until` is when the wait gives up and the request is withdrawn. */
+export type QuickWait = { kind: string; what: string; group_id: string; until: string };
 /** One of a session's quick agents and the tool call it answers (`/api/sessions/{id}/quick-agents`). */
-export type QuickAgentRow = { session_id: string; call: string; created_at: string; running: boolean };
+export type QuickAgentRow = { session_id: string; call: string; created_at: string; running: boolean; waiting?: QuickWait };
 
 export type ContextWindowSource = "manual" | "provider" | "catalog" | "table" | "error" | "default";
 
@@ -2467,7 +2471,7 @@ export type Settings = {
   };
   self_change: { approval: string; auto_rebuild: boolean };
   limits: { max_iterations: number; tool_timeout_seconds: number; usd_per_day?: number; usd_per_run: number; usd_total: number; usd_total_per_provider: Record<string, number>; total_since: string };
-  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice; quick_models?: string[]; quick_effort?: string; quick_wait_minutes?: number };
+  subagents?: { max_active: number; wait_timeout_minutes: number; linger_remind_minutes: number; models?: SubagentModelsChoice; quick_models?: string[]; quick_effort?: string; quick_wait_minutes?: number; operator_wait_minutes?: number };
   /** The disk guard: `workspace_soft_limit_gb` is the size past which a workspace is flagged, 0 for none. */
   disk?: { workspace_soft_limit_gb: number };
   usd_per_day?: number;

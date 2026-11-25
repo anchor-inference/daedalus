@@ -235,7 +235,7 @@ class LoginDesk:
         login = self._request(row, login_id)
         site = str(login.get("site") or "")
         await self.service.audit(group_id, row["env"], "operator", "login", {"site": site, "declined": True})
-        await self.service.give_back(group_id, f"[browser] The operator declined to sign in to {site}. Do not ask again for this task unless they say so; carry on without the sign-in or tell them what it blocks.")
+        await self.service.give_back(group_id, f"[browser] The operator declined to sign in to {site}. Do not ask again for this task unless they say so; carry on without the sign-in or tell them what it blocks.", declined=True)
 
     # -- shared ------------------------------------------------------------------------------------
 
