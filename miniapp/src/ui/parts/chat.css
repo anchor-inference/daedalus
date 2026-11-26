@@ -307,12 +307,27 @@
    drew a card around every table, which is the box the rest of the answer does without. A table wider
    than the column scrolls inside its own strip; the head stays on the page's colour as it scrolls. */
 .tablewrap { overflow:auto; max-height:70vh; width:100%; margin:0 0 16px; }
+/* A table that does not fit says so: its clipped edge fades out instead of ending mid-word, which read
+   as a column cut off by the page. The fade follows the scroll position (it is gone at the end the box is
+   scrolled to), and is only there while the table is wider than its box: the scroll timeline of a box
+   with nothing to scroll is inactive, so the properties keep the 0 they start at. A browser without
+   scroll-driven animations draws the plain strip. */
+@property --tw-fade-start { syntax:"<length>"; inherits:false; initial-value:0px; }
+@property --tw-fade-end { syntax:"<length>"; inherits:false; initial-value:0px; }
+@keyframes tablewrap-fade {
+  0% { --tw-fade-start:0px; --tw-fade-end:32px; }
+  3%, 97% { --tw-fade-start:32px; --tw-fade-end:32px; }
+  100% { --tw-fade-start:32px; --tw-fade-end:0px; }
+}
+.tablewrap { mask-image:linear-gradient(to right, transparent, #000 var(--tw-fade-start), #000 calc(100% - var(--tw-fade-end)), transparent); animation:tablewrap-fade linear both; animation-timeline:scroll(self inline); }
 .tablewrap table, .answer .tablewrap table, .summary-body .tablewrap table { border:0; border-radius:0; min-width:100%; }
 .answer thead th, .summary-body thead th { position:sticky; top:0; background:var(--panel-bg, var(--chat-bg, var(--bg))); z-index:1; color:var(--fg-3); font-size:var(--fs-13); font-weight:400; white-space:nowrap; line-height:20px; }
 .answer table, .summary-body table { width:100%; border:0; border-collapse:separate; border-spacing:0; font-family:var(--font); font-size:var(--fs-14); }
 .answer th, .answer td, .summary-body th, .summary-body td { padding:8px 16px 8px 0; border-bottom:1px solid var(--line); vertical-align:top; }
 .answer td, .summary-body td { line-height:22px; }
 .answer :is(th, td):last-child, .summary-body :is(th, td):last-child { padding-right:0; }
+/* The last column keeps the gap the others have when the strip scrolls, so scrolled to its end it is read whole and not against the fade or the edge. */
+.tablewrap table :is(th, td):last-child { padding-right:16px; }
 /* A cell breaks between words, and inside a word only when the word alone is wider than the table
    can give: the answer's break-anywhere let a narrow column split "framework" into "framewo" / "rk". */
 .answer th, .answer td, .summary-body th, .summary-body td { word-break:normal; overflow-wrap:break-word; }

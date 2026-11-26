@@ -205,9 +205,17 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         page.goto(f"{BASE}/agents/{S4}?token=t&lang={lang}")
         row = page.locator(f".sidebar [data-session='{S4}']").first
         expect(row).to_be_visible(timeout=15000)
-        expect(row.locator(".host-mark .term-env.host")).to_be_visible()
-        if page.locator(f".sidebar [data-session='{S1}'] .host-mark").count():
-            say("a container session is marked as on the host")
+        # One chat on the host among chats in the container: the row that breaks its group's rule says
+        # so in its name and tooltip (its slot shows its kind, which outranks it), never as a pill.
+        expect(row).to_have_attribute("aria-label", re.compile(words["host"]))
+        if words["host"] not in (row.get_attribute("title") or ""):
+            say("the host chat's tooltip does not say where it runs")
+        if page.locator(".sidebar .term-env, .sidebar .host-mark").count():
+            say("the sidebar draws an environment pill")
+        # Every other row the column draws is a container chat; none may say it runs on the host.
+        others = page.locator(f".sidebar [data-session]:not([data-session='{S4}'])").evaluate_all("rows => rows.map((row) => row.getAttribute('aria-label') || '')")
+        if not others or any(words["host"] in label for label in others):
+            say(f"a container session is marked as on the host ({len(others)} rows)")
         expect(page.locator(".panel .host-mark .term-env.host")).to_be_visible(timeout=10000)
         context.close()
 

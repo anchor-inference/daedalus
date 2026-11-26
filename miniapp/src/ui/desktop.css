@@ -4,6 +4,8 @@
 /* A provider's mark is a neutral tile: outlined and in a brand's colour each, a list of five was five
    coloured boxes competing with the names beside them. */
 .provider-mark { display:grid; place-items:center; flex:none; width:var(--ctl-h); height:var(--ctl-h); border:0; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--fg); }
+/* An endpoint without a brand of its own wears the letters of its name on the same neutral ground. */
+.provider-letter { font-size:var(--fs-12); font-weight:600; line-height:1; letter-spacing:-0.02em; white-space:nowrap; color:var(--fg); background:var(--surface-2); }
 /* The approval mode of a conversation in the operator's Chrome: a quiet chip beside the mode, its word
    dropped in a narrow composer where the icon alone says it, and the alert colour while nothing asks. */
 .composer-row .approvals-chip { display:inline-flex; align-items:center; gap:var(--space-1); flex:none; height:var(--ctl-h-sm); min-height:var(--ctl-h-sm); padding-inline:var(--space-2); border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-12); white-space:nowrap; cursor:pointer; }

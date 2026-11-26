@@ -2,14 +2,30 @@
 // chats apart, newest first. Which project is a project and which is a chat's own scratch folder is
 // decided once, in grouping.ts (`isProject`), by the same rule the phone's Chats page splits by.
 //
-// Every row is one line of 32 px. A chat is its title, and at the right edge the one thing about it the
-// operator acts on: its state in a word while it asks for them or works ("needs you" in the attention
-// colour, "working" in the live one), otherwise when it last moved. A computer, browser or terminal chat,
-// a loop and a fork carry a small mark beside that word; the model, the host and the loop's cadence are
-// in the row's tooltip. A project is a folder with its count, or its state in a word while one of its
-// chats asks or works. Projects start collapsed, the one holding the open chat opens itself, and a
-// collapsed project still lists the chats that wait for the operator, because a closed folder must
-// never hide a question.
+// Every row is one line of 32 px in three parts, and the title has the whole middle of it:
+// - a 16 px slot at the left, the same on every chat row so every title starts at one x. It holds the
+//   chat's one most telling property as a quiet glyph — its kind (computer, browser, remote), the
+//   program it was imported from, a loop, a fork, private, the machine it runs on where that breaks
+//   its group's rule, its subagents' number — or, inside a project, a quiet dot. Over the glyph sits
+//   the chat's live state as a dot: needs you, working, failed, or a result not seen yet. A leader's
+//   slot is the button that folds its subagents out, which hang under it on a tree line.
+// - the title, cut with an ellipsis and whole in the tooltip;
+// - one thing at the right edge: its state in a word while it asks for the reader or works ("needs
+//   you" in the attention colour, "working" in the live one), else how many of its subagents work,
+//   else when it last moved. Hovering or focusing the row puts its actions there instead.
+// Everything the row does not draw — the kind in words, the machine, the loop's cadence, the fork's
+// origin, the terminals, the model — is in its tooltip and its accessible name. The marks once stood
+// in a row of pills between the title and the time, and an installation whose chats all run on the
+// host drew the same amber "Host" on every row: a 276 px column left a title two words.
+//
+// Where chats run is said once, where it is the rule: a project whose chats run on the host says so
+// by a lock on its own line, as does the Chats label for the chats outside projects, and only a chat
+// that runs elsewhere than the rest of its group carries a mark. On a native installation everything
+// runs on the host and nothing is said.
+//
+// A project is a folder with its count, or its state in a word while one of its chats asks or works.
+// Projects start collapsed, the one holding the open chat opens itself, and a collapsed project still
+// lists the chats that wait for the reader, because a closed folder must never hide a question.
 //
 // What the operator pins sits in a block of its own above both sections, newest pin first, and is not
 // drawn again below it: a pinned project keeps its fold and its live chats, a pinned chat its row.
@@ -30,14 +46,15 @@ import { projectPath } from "../folders";
 import { Skeleton, fmtInterval, statusWord } from "../ui/components";
 import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
 import { Menu, isAction } from "../ui/primitives";
-import { relTime, shortModel, untilShort } from "../format";
+import { relTime, relTimeLong, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
-import { MoveSessionSheet, ProjectSettingsSheet } from "../projects";
+import { MoveSessionSheet, ProjectSettingsSheet, useEnvironments } from "../projects";
 import { MakeProjectSheet, asChatCommand, dropChat, endChatDrag, makeProjectCommand, startChatDrag, takesDrop } from "../chatproject";
 import { openNewProject } from "../project/NewProject";
 import { openImport } from "../imports/ImportExplorer";
 import { PlateMark, importedHarness } from "../imports/ImportedChat";
+import { harnessMeta } from "../imports/model";
 import { navigate, newAgentPath, parse, pathFor, sessionPath, useRoute } from "../router";
 import { subagentPath } from "../subagents";
 import { agentsListing } from "../mode";
@@ -50,9 +67,8 @@ import { insideTerminal } from "../terminal/keys";
 import { plural, t } from "../i18n";
 import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
-import { HostMark } from "../runon";
 import { PrivateMark, isPrivate } from "../privatechat";
-import { KIND_TABS, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { type ChatKind, KIND_TABS, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
 import { remoteRowWords } from "../remote";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -158,6 +174,13 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
   const chatProjects = useMemo(() => new Map(arranged.folders.filter((f) => f.chat).map((f) => [f.key, f.project])), [arranged]);
   // The archive is a list of what was put away, where nothing is lifted out of its order.
   const sections = useMemo(() => sidebarSections(arranged.folders, { filtered, pins: view !== "archive" }), [arranged, filtered, view]);
+  // Where the chats outside projects run, said once on the Chats label; only on an installation in a
+  // container, where a chat may run on either side.
+  const docker = !!useEnvironments().data?.docker;
+  const looseRule = useMemo(
+    () => (docker ? envRule([...sections.pinned.filter((f) => f.chat).flatMap((f) => f.rows), ...sections.days.flatMap((d) => d.rows)]) : undefined),
+    [docker, sections],
+  );
   const counts = useMemo(() => {
     const top = (everything.data ? agentsListing(everything.data).sessions : []).filter((s) => !s.metadata?.subagent_of && (!project || s.project_id === project));
     return {
@@ -302,8 +325,8 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             <div className="sb-sec sb-pinsec"><span>{t("side.pinned")}</span></div>
             <div className="sb-pinned" data-pinned="">
               {sections.pinned.map((f) => f.chat
-                ? <PinnedChat key={f.key} folder={f} onOpen={onOpen} current={current} />
-                : <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} />)}
+                ? <PinnedChat key={f.key} folder={f} onOpen={onOpen} current={current} rule={looseRule?.env} />
+                : <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} docker={docker} />)}
             </div>
           </>
         )}
@@ -315,7 +338,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
               {!searching && <button type="button" className="iconbtn sb-sec-add" onClick={() => openNewProject()} aria-label={t("np.title")} title={t("np.title")}><Icon name="plus" size={14} /></button>}
             </div>
             {sections.projects.map((f) => (
-              <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} />
+              <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} docker={docker} />
             ))}
           </>
         )}
@@ -330,6 +353,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
                 </button>
               } />
             )}
+            {sections.chats > 0 && <EnvRuleMark rule={looseRule} />}
           </div>
         )}
         {!searching && data && kindShown !== "all" && view === "all" && arranged.shown === 0 ? (
@@ -339,7 +363,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             {kindShown !== "chat" && <div>{t(`kind.empty.${kindShown}.sub`)}</div>}
           </div>
         ) : ((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty sb-empty">{t("common.nothing")}</div>}
-        {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} chatProjects={chatProjects} />)}
+        {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} chatProjects={chatProjects} rule={looseRule?.env} />)}
         {!searching && next && <button ref={more} className="btn ghost load-more" disabled={paging} onClick={() => void loadMore()}>{t(paging ? "agents.loading" : "agents.more")}</button>}
       </div>
     </>
@@ -424,6 +448,31 @@ function holds(rows: RowModel[], id: string | undefined): boolean {
   return rows.some((r) => r.s.id === id || r.kids.some((k) => k.id === id) || holds(r.forks, id));
 }
 
+type EnvName = "host" | "container";
+/** Where most of a group's chats run, and whether all of them do. */
+type EnvRule = { env: EnvName; all: boolean };
+
+function envOf(s: SessionSummary): EnvName {
+  return s.env === "host" ? "host" : "container";
+}
+
+/** Where most of these chats run, forks included: the host when more than half of them run there.
+ *  The container is what a Docker installation runs a chat in unless asked, so it wins a tie and is
+ *  never said as a rule; a group without chats has no rule. */
+function envRule(rows: RowModel[]): EnvRule | undefined {
+  const all = lines(rows).map((l) => envOf(l.row.s));
+  if (!all.length) return undefined;
+  const host = all.filter((env) => env === "host").length;
+  return host * 2 > all.length ? { env: "host", all: host === all.length } : { env: "container", all: host === 0 };
+}
+
+/** The rule said once, on a project's line or the Chats label: a lock while the group runs on the host. */
+function EnvRuleMark({ rule }: { rule?: EnvRule }) {
+  if (rule?.env !== "host") return null;
+  const words = t(rule.all ? "side.env.rule.all" : "side.env.rule.most");
+  return <span className="sb-env" data-env-rule={rule.all ? "all" : "most"} role="img" aria-label={words} title={words}><Icon name="lock" size={12} /></span>;
+}
+
 /** The live state a project's tile carries: a question first, then work. */
 function folderState(rows: RowModel[]): "waiting" | "running" | "" {
   const all = lines(rows).flatMap((l) => [l.row.s, ...l.row.kids]);
@@ -435,7 +484,7 @@ function folderState(rows: RowModel[]): "waiting" | "running" | "" {
 /** One day of the chats section, without a heading of its own: each row says when it last moved at its
  *  right edge, so the day's name was a row of its own saying the same. Windowed: a long history is the
  *  same few rows in the DOM. */
-function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string; chatProjects: Map<string, ProjectRef> }) {
+function DayGroup({ day, rows, onOpen, current, chatProjects, rule }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string; chatProjects: Map<string, ProjectRef>; rule?: EnvName }) {
   const host = useRef<HTMLDivElement>(null);
   const unfolded = useSubsShown();
   const shown = useMemo(() => withSubs(lines(rows), unfolded), [rows, unfolded]);
@@ -445,7 +494,7 @@ function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDa
       <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={34} render={(i) => shown[i].sub ? (
         <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} />
       ) : (
-        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} chat={shown[i].fork ? undefined : chatProjects.get(shown[i].row.s.project_id)} />
+        <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} chat={shown[i].fork ? undefined : chatProjects.get(shown[i].row.s.project_id)} envRule={rule} />
       )} />
     </div>
   );
@@ -453,22 +502,22 @@ function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDa
 
 /** A pinned chat in the pinned block: its row and the forks taken from it, as under its day. Not
  *  windowed: a pin is a handful of rows by intent. */
-function PinnedChat({ folder, onOpen, current }: { folder: Folder; onOpen: (id: string) => void; current?: string }) {
+function PinnedChat({ folder, onOpen, current, rule }: { folder: Folder; onOpen: (id: string) => void; current?: string; rule?: EnvName }) {
   const unfolded = useSubsShown();
   const shown = useMemo(() => withSubs(lines(folder.rows), unfolded), [folder.rows, unfolded]);
   return <>{shown.map((l) => l.sub
     ? <SubagentRow key={lineKey(l)} kid={l.sub} leader={l.row.s} last={!!l.last} />
-    : <ChatRow key={lineKey(l)} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} subsOpen={unfolded(l.row)} chat={l.fork ? undefined : folder.project} />)}</>;
+    : <ChatRow key={lineKey(l)} row={l.row} fork={l.fork} onOpen={onOpen} current={current} projectName={l.row.s.project} pin={l.fork ? undefined : "on"} subsOpen={unfolded(l.row)} chat={l.fork ? undefined : folder.project} envRule={rule} />)}</>;
 }
 
-type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: string; filtered: boolean; toast: (text: string) => void };
+type GroupProps = { folder: Folder; onOpen: (id: string) => void; current?: string; filtered: boolean; toast: (text: string) => void; docker: boolean };
 
 /** Whether a project's group would look the same. The listing is re-fetched whole and every object in
  *  it is new each time; `sig` is built once while the folders are arranged, so this costs a string
  *  comparison where a reconcile of every row would cost the frame. */
 function sameGroup(a: GroupProps, b: GroupProps): boolean {
   const l = a.folder, r = b.folder;
-  if (a.filtered !== b.filtered || a.current !== b.current || a.onOpen !== b.onOpen || a.toast !== b.toast) return false;
+  if (a.filtered !== b.filtered || a.current !== b.current || a.onOpen !== b.onOpen || a.toast !== b.toast || a.docker !== b.docker) return false;
   if (l.key !== r.key || l.name !== r.name || l.total !== r.total || l.system !== r.system || l.last_message_at !== r.last_message_at || l.pinned_at !== r.pinned_at) return false;
   if (projectPath(l.project) !== projectPath(r.project) || l.project.entity_revision !== r.project.entity_revision) return false;
   return l.sig === r.sig;
@@ -480,7 +529,7 @@ function sameGroup(a: GroupProps, b: GroupProps): boolean {
  * open chat opens itself without remembering it, and a search or a filter opens what it found.
  * Collapsed, it still lists its live chats (waiting, working, failed).
  */
-const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filtered, toast }: GroupProps) {
+const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filtered, toast, docker }: GroupProps) {
   const [open, setOpen] = useState(() => folderOpen(folder.key));
   const [all, setAll] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -520,6 +569,10 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const shown = useMemo(() => withSubs(chats, unfolded), [chats, unfolded]);
   const keys = useMemo(() => shown.map(lineKey), [shown]);
   const state = folderState(folder.rows);
+  // Where the project's chats run, said on its line when it is the host; a chat that runs elsewhere
+  // than the rest says so in its own slot.
+  const rule = useMemo(() => (docker ? envRule(folder.rows) : undefined), [docker, folder.rows]);
+  const ruleWords = rule?.env === "host" ? t(rule.all ? "side.env.rule.all" : "side.env.rule.most") : "";
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
@@ -535,13 +588,14 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
     <section ref={section} data-project={folder.key} className={`sb-project ${showing ? "open" : ""} ${folder.system ? "system" : ""}`}>
       {/* A chat dragged onto the row moves into the project; the keyboard and the phone use Move. */}
       <div ref={head} className={`sb-row sb-prow ${dropping ? "drop" : ""}`} data-nav="project" data-project-head="" role="button" tabIndex={0} aria-expanded={showing}
-        aria-label={t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })} title={projectPath(folder.project)}
+        aria-label={[t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), ruleWords].filter(Boolean).join(", ")} title={[projectPath(folder.project), ruleWords].filter(Boolean).join("\n")}
         onClick={() => toggle()} onKeyDown={onKey}
         onDragOver={(e) => { if (!takesDrop(e, folder)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dropping) setDropping(true); }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
         onDrop={(e) => { setDropping(false); if (!takesDrop(e, folder)) return; e.preventDefault(); toggle(true); void dropChat(folder); }}>
         <span className="sb-tile">{folder.system ? <CompanionFace size={16} /> : <Icon name="folder" size={16} />}</span>
         <span className="sb-t">{folder.name}</span>
+        <EnvRuleMark rule={rule} />
         <span className="sb-ptrail">
           {showing ? <span className="sb-chev" aria-hidden><Icon name="chevron" size={14} /></span>
             : state ? <span className={`sb-word ${state}`}>{stateWord(state)}</span>
@@ -558,7 +612,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
           <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={34} render={(i) => shown[i].sub ? (
             <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} nested />
           ) : (
-            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} />
+            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} envRule={rule?.env} />
           )} />
           {(hidden > 0 || (all && all_lines.length > KIDS_SHOWN)) && (
             <button type="button" className="sb-more" onClick={() => setAll((v) => !v)}>
@@ -588,7 +642,7 @@ type RowProps = {
   onOpen: (id: string) => void;
   current?: string;
   fork?: { of: string; seq: number };
-  /** Inside a project's fold: indented to the project's name. */
+  /** Inside a project's fold: a quiet dot in the slot when the chat has no glyph of its own. */
   nested?: boolean;
   projectName: string;
   onNewIn?: () => void;
@@ -601,6 +655,9 @@ type RowProps = {
   subsOpen?: boolean;
   /** The chat's own project, on the row of a chat that is not in a project: "Make a project" settles it. */
   chat?: ProjectRef;
+  /** Where most chats of the row's group run, on an installation where it can differ: the row marks
+   *  itself only when it runs elsewhere. Absent where every chat runs on the host. */
+  envRule?: EnvName;
 };
 
 /** What a row actually draws, so a fresh read of the list does not reconcile a row that did not
@@ -609,9 +666,9 @@ type RowProps = {
 function sameRow(a: RowProps, b: RowProps): boolean {
   const l = a.row.s, r = b.row.s;
   if (l.id !== r.id || l.title !== r.title || l.status !== r.status || !!l.unread_result !== !!r.unread_result || l.last_message_at !== r.last_message_at || l.model !== r.model || l.env !== r.env || !!l.archived !== !!r.archived || l.kind !== r.kind) return false;
-  if (remoteRowWords(l) !== remoteRowWords(r) || (l.controlling ?? []).join() !== (r.controlling ?? []).join()) return false;
+  if (remoteRowWords(l) !== remoteRowWords(r) || (l.controlling ?? []).join() !== (r.controlling ?? []).join() || isPrivate(l) !== isPrivate(r) || l.imported_from !== r.imported_from) return false;
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
-  if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
+  if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen || a.envRule !== b.envRule) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
   if (a.nested !== b.nested || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin || !!a.subsOpen !== !!b.subsOpen) return false;
   if (a.chat?.id !== b.chat?.id || a.chat?.entity_revision !== b.chat?.entity_revision || !!a.chat?.settings.ephemeral !== !!b.chat?.settings.ephemeral) return false;
@@ -620,7 +677,8 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   return lk.length === rk.length && lk.every((k, i) => k.id === rk[i].id && k.status === rk[i].status && k.title === rk[i].title);
 }
 
-/** The state a row says at its right edge, in place of its time: only what asks for the operator or works. */
+/** The state a project's row says in place of its count, and the collapsed project keeps a chat in
+ *  sight for: a question anywhere in the chat's tree, its failure, or work in it. */
 function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "running" | "failed" | "" {
   if (s.status === "waiting" || kids.some((k) => k.status === "waiting")) return "waiting";
   if (s.status === "failed") return "failed";
@@ -628,17 +686,50 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
   return "";
 }
 
+/** What a chat's own row says in a word at its right edge: a question anywhere in its tree, its own
+ *  failure, its own work. Its subagents at work are said by their number there instead, which is
+ *  what the reader unfolds them for. */
+function wordState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "running" | "failed" | "" {
+  if (s.status === "waiting" || kids.some((k) => k.status === "waiting")) return "waiting";
+  if (s.status === "failed") return "failed";
+  return s.status === "running" || s.status === "compacting" ? "running" : "";
+}
+
 /** The word for a row's state, lower case as it trails the title: "needs you", "working", "failed". */
 function stateWord(state: "waiting" | "running" | "failed"): string {
   return t(`side.state.${state}`);
 }
 
+const working = (s: SessionSummary) => s.status === "running" || s.status === "compacting";
+
+/** The one property a chat's slot draws, the most telling first: what the chat is (a computer, a
+ *  browser, a remote terminal, a program it came from), that it runs by itself, where it came from,
+ *  that it is private, that it runs elsewhere than its group, that it was put away, and for a plain
+ *  leader how many helpers it has. */
+type Glyph = { key: string; node: ReactNode };
+
+function glyphOf(s: SessionSummary, o: { kind: ChatKind; kindClass: string; kindTitle?: string; imported: string; fork: boolean; envOff: boolean; kids: number }): Glyph | null {
+  const quiet = (key: string, icon: IconName, words: string): Glyph => ({ key, node: <span className={`sb-glyph g-${key}`} role="img" aria-label={words} title={words}><Icon name={icon} size={14} /></span> });
+  const kindGlyph = kindIcon(o.kind);
+  if (kindGlyph) {
+    return { key: "kind", node: <span className={`sb-kind${o.kindClass}`} data-kind={o.kind} title={o.kindTitle} role="img" aria-label={o.kindTitle}><Icon name={kindGlyph} size={14} /></span> };
+  }
+  if (o.imported) return { key: "imported", node: <PlateMark harness={o.imported} /> };
+  if (s.metadata?.loop) return quiet("loop", "loop", loopLine(s));
+  if (o.fork) return quiet("fork", "fork", t("agents.fork.at", { n: s.metadata?.forked_from?.seq ?? 0 }));
+  if (isPrivate(s)) return { key: "private", node: <PrivateMark on size={14} /> };
+  if (o.envOff) return quiet(`env-${envOf(s)}`, envOf(s) === "host" ? "lock" : "terminal", t(`side.row.env.${envOf(s)}`));
+  if (s.archived) return quiet("archived", "archive", t("side.row.archived"));
+  if (o.kids) return { key: "subs", node: <span className="sb-subs-n num" aria-hidden>{o.kids}</span> };
+  return null;
+}
+
 /**
- * A chat: one line, its title and at the right edge its state or its time, with a small mark before
- * that for a chat of another kind. Hovering or focusing it shows "Open beside" and the menu over the
- * right edge; the right click opens the same menu, with the commands of the phone's sheet.
+ * A chat: its slot, its title, and at the right edge its state, its working helpers or its time.
+ * Hovering or focusing it shows "Open beside" and the menu over the right edge; the right click opens
+ * the same menu, with the commands of the phone's sheet. A leader's slot folds its helpers.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, onNewIn, onParent, pin, subsOpen, chat }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, onNewIn, onParent, pin, subsOpen, chat, envRule: rule }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   // The project's own settings are the project row's to offer; in a chat's menu they were one more
@@ -647,16 +738,19 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   const { items, layers, run } = useSessionCommands(s, { projectName, chat, onMadeProject: () => onOpen(s.id) });
   const here = current === s.id || kids.some((k) => k.id === current);
   const unread = !!s.unread_result;
-  const state = rowState(s, kids);
+  const state = wordState(s, kids);
+  const helpersWorking = kids.filter(working).length;
   const imported = importedHarness(s);
-  // A computer or Chrome chat says so on its plate, where a loop says it is a loop: the mark that lets
-  // the mixed list of the All tab, or a search, be read without opening the chat.
-  // An ordinary chat holding the operator's Chrome or computer now borrows that mark, hollow, until
-  // it lets go (chatkind.tsx).
+  // A computer or Chrome chat says so in its slot, the mark that lets the mixed list of every kind, or
+  // a search, be read without opening the chat. An ordinary chat holding the reader's Chrome or
+  // computer now borrows that mark, hollow, until it lets go (chatkind.tsx).
   const plate = kindPlate(s);
   const kind = plate.kind;
-  const kindClass = plate.className ? ` ${plate.className}` : "";
-  const kindTitle = plate.title;
+  const env = envOf(s);
+  const glyph = glyphOf(s, { kind, kindClass: plate.className ? ` ${plate.className}` : "", kindTitle: plate.title, imported, fork: !!(fork || s.metadata?.forked_from), envOff: !!rule && env !== rule, kids: kids.length });
+  // The live state over the glyph, so it reads at the left edge while the eye runs down the titles:
+  // a question first, then a failure, then work, then a result not seen yet.
+  const pip = state === "waiting" || state === "failed" ? state : state === "running" || helpersWorking ? "running" : unread ? "unread" : "";
   const open = () => onOpen(s.id);
   const beside = () => {
     const route = parse();
@@ -664,7 +758,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else open();
   };
   // No entry per subagent: a chat with many helpers made the menu taller than the screen, and the
-  // helpers are one click away already, on the plate that folds them out under the row.
+  // helpers are one click away already, in the slot that folds them out under the row.
   const menu: MenuItem[] = [
     { label: t("common.open"), icon: "open", hint: t("side.key.open"), onSelect: open },
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
@@ -692,48 +786,60 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else if (e.key === "ArrowLeft" && plain && kids.length && subsOpen) { e.preventDefault(); toggleSubagents(s.id, false); }
     else if (e.key === "ArrowLeft" && plain && onParent) { e.preventDefault(); onParent(); }
   };
-  // What the row no longer has room to say is its tooltip: which computer a remote chat works on, the
-  // loop's cadence, the fork's message, the model.
-  const about = [
+  // Everything about the chat in words, whatever the slot and the right edge chose to draw: the
+  // tooltip for a pointer and the row's name for a screen reader, which hears no glyph.
+  const name = agentName(s);
+  const forkOf = fork ? t("side.row.fork", { name: fork.of, n: fork.seq }) : s.metadata?.forked_from ? t("agents.fork.at", { n: s.metadata.forked_from.seq }) : "";
+  const facts = [
+    state ? stateWord(state) : "",
+    unread ? t("agents.unread") : "",
+    plate.title ?? "",
+    imported ? t("imp.mark.title", { name: harnessMeta(imported).name }) : "",
+    rule ? t(`side.row.env.${env}`) : "",
     remoteRowWords(s),
     s.metadata?.loop ? loopLine(s) : "",
-    fork ? t("agents.fork.at", { n: fork.seq }) : "",
-    s.model ?? "",
+    forkOf,
+    isPrivate(s) ? t("private.mark") : "",
+    kids.length ? (helpersWorking ? t("side.row.subs.working", { all: plural("side.row.subs", kids.length), n: helpersWorking }) : plural("side.row.subs", kids.length)) : "",
+    s.terminals ? plural("term.count", s.terminals) : "",
+    s.archived ? t("side.row.archived") : "",
     s.workspace_own && !fork ? t("agents.own.chip") : "",
     s.metadata?.subagent_of ? t("agents.orphan") : "",
-  ].filter(Boolean).join(" · ");
-  const mark: IconName | null = s.archived ? "archive" : kindIcon(kind) ?? (s.metadata?.loop ? "loop" : fork || s.metadata?.forked_from ? "fork" : null);
+    s.model ?? "",
+    relTimeLong(s.last_message_at),
+  ].filter(Boolean);
+  const slotClass = `sb-gut${glyph ? ` g-${glyph.key}` : nested ? " g-nest" : " bare"}`;
+  const slotInside = <>
+    {glyph ? glyph.node : nested ? <span className="sb-nest" aria-hidden /> : null}
+    {pip === "unread"
+      ? <span className="unread-dot" aria-hidden />
+      : pip && <span className={`sb-pip ${pip}`} aria-hidden />}
+  </>;
   return (
     <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""} ${s.match ? "match" : ""}`}
-      title={about ? `${agentName(s)}\n${about}` : agentName(s)} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
+      title={`${name}\n${facts.join(" · ")}`} aria-label={`${name}, ${facts.join(", ")}`} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
       draggable onDragStart={(e) => startChatDrag(e, s)} onDragEnd={endChatDrag}>
+      {kids.length > 0 ? (
+        // A leader's helpers fold out under it from its slot, the way a tree's node opens: the glyph
+        // gives way to the chevron under the pointer, the keyboard's focus and while they are out.
+        <button type="button" className={`${slotClass} sb-fold`} aria-expanded={!!subsOpen}
+          aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name })}
+          onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
+          {slotInside}
+          <span className="sb-fold-chev" aria-hidden><Icon name="chevron" size={14} /></span>
+        </button>
+      ) : <span className={slotClass}>{slotInside}</span>}
       {s.match ? (
         <span className="sb-main">
-          <span className="sb-t">{agentName(s)}</span>
+          <span className="sb-t">{name}</span>
           <span className="sb-snip search-passage">{s.match.snippet}</span>
         </span>
-      ) : <span className="sb-t">{agentName(s)}</span>}
-      {unread && <span className="unread-dot" role="img" aria-label={t("agents.unread")} title={t("agents.unread")} />}
-      <span className="sb-marks">
-        {mark && <span className={`sb-kind${kindClass}`} data-kind={kind === "chat" ? undefined : kind} title={kindTitle} role={kindTitle ? "img" : undefined} aria-label={kindTitle}><Icon name={mark} size={14} /></span>}
-        {imported && <PlateMark harness={imported} />}
-        <HostMark env={s.env} />
-        <PrivateMark on={isPrivate(s)} size={12} />
-        {s.terminals ? <span className="sb-terms num" title={plural("term.count", s.terminals)} aria-label={plural("term.count", s.terminals)}><Icon name="terminal" size={12} />{s.terminals}</span> : null}
-        {kids.length > 0 && (
-          // A leader's helpers fold out under it from here: their number and a chevron, so the row says
-          // it has them without a line of its own.
-          <button type="button" className={`sb-subs ${subsOpen ? "open" : ""}`} aria-expanded={!!subsOpen}
-            aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })}
-            onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
-            <span className="sb-subs-n num">{kids.length}</span>
-            <Icon name="chevron" size={12} />
-          </button>
-        )}
-      </span>
+      ) : <span className="sb-t">{name}</span>}
       {state
         ? <span className={`sb-word ${state}`}>{stateWord(state)}</span>
-        : <span className="sb-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>}
+        : helpersWorking
+          ? <span className="sb-subs live num" title={t("side.row.subs.working", { all: plural("side.row.subs", kids.length), n: helpersWorking })}><Icon name="spawn" size={12} />{helpersWorking}/{kids.length}</span>
+          : <span className="sb-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>}
       <span className="sb-acts session-row-menu" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <button type="button" className="iconbtn small quiet" onClick={beside} aria-label={t("side.beside")} title={t("side.beside")}><Icon name="columns" size={14} /></button>
         <OverflowMenu contextSelector="[data-session]" small className="quiet" label={`${s.title}: ${t("dlg.menu")}`} items={withRule} />
@@ -751,9 +857,10 @@ function subState(s: SessionSummary): "running" | "waiting" | "failed" | "idle" 
 }
 
 /**
- * A subagent under its unfolded leader: one short line indented under it, smaller and quieter than
- * a chat, with its state as a dot. It opens beside the leader, in the Subagents tab; its full chat is
- * the tab's button and the row's menu. The arrows walk it like any row, and Left goes to the leader.
+ * A subagent under its unfolded leader: a quieter line whose slot is the tree line from the leader's,
+ * with the helper's state as a dot on it, and its title where every title starts. It opens beside
+ * the leader, in the Subagents tab; its full chat is the tab's button and the row's menu. The arrows
+ * walk it like any row, and Left goes to the leader.
  */
 const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { kid: SessionSummary; leader: SessionSummary; last: boolean; nested?: boolean }) {
   const route = useRoute();
@@ -771,11 +878,13 @@ const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { k
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); box.current?.parentElement?.querySelector<HTMLElement>(`[data-session="${CSS.escape(leader.id)}"]`)?.focus(); }
   };
+  const name = agentName(kid);
+  const facts = [state !== "idle" ? stateWord(state) : relTimeLong(kid.last_message_at), kid.model ?? ""].filter(Boolean);
   return (
-    <div ref={box} data-subagent={kid.id} data-nav="chat" role="link" tabIndex={0} aria-current={here ? "page" : undefined}
+    <div ref={box} data-subagent={kid.id} data-nav="chat" role="link" tabIndex={0} aria-current={here ? "page" : undefined} aria-label={`${name}, ${facts.join(", ")}`}
       className={`sb-row sb-sub ${here ? "current" : ""} ${last ? "last" : ""} ${nested ? "nested" : ""}`} title={kid.model ? `${kid.model} · ${kid.id}` : kid.id} onClick={open} onKeyDown={onKey}>
-      <span className={`sub-dot ${state}`} aria-hidden />
-      <span className="sb-t">{agentName(kid)}</span>
+      <span className={`sb-gut sb-tree ${last ? "last" : ""}`} aria-hidden><span className={`sub-dot ${state}`} /></span>
+      <span className="sb-t">{name}</span>
       {state !== "idle" ? <span className={`sb-word ${state}`}>{stateWord(state)}</span> : <span className="sb-time num">{relTime(kid.last_message_at)}</span>}
     </div>
   );

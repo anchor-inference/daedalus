@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePetModel, usePetPreference } from "../ui/pet";
-import { COLOR_KEYS, FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
+import { COLOR_KEYS, COLUMNS, FONT_CATALOG, FONT_ROLES, PROSE_MAX, PROSE_MIN, usualProse, FontRole, THEMES, ThemeId, fontUrlAllowed, readPrefs, resolvedTheme, resetColors, updatePrefs, type ColorKey, type Column, type Leading, type Prefs, type Radius, type Scale } from "../appearance";
 import { LANGS, t, useLang } from "../i18n";
 import { Button, Combobox, Segmented, Select, Switch } from "../ui/primitives";
 import { Row, SetBlock, SetFoot, SetGroup } from "../settingsrow";
@@ -150,7 +150,7 @@ export function AppearancePanel({ part }: { part: "theme" | "text" }) {
         <Row title={t("theme.prose")} desc={t("theme.prose.sub")} data-setting="appearance.prose"><ProseStepper prefs={prefs} update={update} /></Row>
         <SetBlock className="set-specimen"><p className="prose-stepper-preview" style={{ fontSize: `${prefs.prose ?? Math.round(usualProse(prefs.scale, window.matchMedia?.("(max-width: 1023px)")?.matches ?? false))}px` }}>{t("theme.prose.preview")}</p></SetBlock>
         <Row title={t("theme.leading")} data-setting="appearance.leading"><Segmented value={prefs.leading} onChange={(leading: Leading) => update({ leading })} options={(["tight", "normal", "open"] as const).map((id) => ({ id, label: t(`theme.leading.${id}`) }))} /></Row>
-        <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} options={(["narrow", "normal", "wide"] as const).map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
+        <Row title={t("theme.column")} desc={t("theme.column.sub")} data-setting="appearance.column"><Segmented value={prefs.column} onChange={(column: Column) => update({ column })} label={t("theme.column")} options={COLUMNS.map((id) => ({ id, label: t(`theme.column.${id}`) }))} /></Row>
       </SetGroup>
 
       <SetGroup title={t("theme.layout")}>
