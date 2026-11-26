@@ -16,6 +16,18 @@ the settings index the page and the agent's documentation search both read:
   header in its order, every section under it, nothing sideways, and on a desktop the open
   section's entry in view inside the list however far down it is.
 
+One page serves a whole variant (a language and a width), and most addresses are reached the way a
+link in a conversation reaches them: the app is told the address changed (the history entry and the
+`popstate` the router listens to, which is what its own `navigate` does), after the page has been
+taken to another screen so that the settings screen mounts afresh. That runs the same route
+resolution, the same redirect made as the screen mounts, and the same reveal of the row; what it
+leaves out is the page load itself, the app's start-up and the settings screen's lazily loaded
+chunk. Those are what `COLD` covers: a few addresses per variant, and the first section, are opened
+by loading the page. The sections' rows are walked from one section to the next on one screen, as the
+list does it. Every old address is walked in two variants (one per size, one per language) and a
+representative few in the other two: the redirect does not read the language. How long a late
+answer keeps a row from its place is `check_settings_late.py`.
+
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_settings_tabs.py
 """
 from __future__ import annotations
@@ -26,6 +38,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
@@ -34,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app, terminal_load  # noqa: E402
 from browser_stub import browser_load, render_scenes  # noqa: E402
 from check_settings_browser import BROWSER, prepared  # noqa: E402
+from holding import gate  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -79,6 +93,17 @@ OLD = [
 ]
 
 
+# The addresses of OLD that are opened by loading the page in every variant: a plain id, a tab with a
+# row, and the row of a section whose answers come late (the one that failed on a slow machine).
+COLD = {("heartbeat", None), ("models?tab=providers", "keyproxy.upstreams"), ("environments", "browser.profiles")}
+# Every address is walked in two variants, one per size and one per language; the redirect does not
+# read the language, and the size is what changes the screen the row is scrolled in. In the other two
+# variants a representative few are walked: the cold ones, an old id and a tab, and one row from each
+# of the sections that lost rows to the models, voice and rules pages.
+FULL = {("en", 1440), ("ru", 390)}
+REPRESENTATIVE = COLD | {("providers", "providers.list"), ("voice", "asr.transcriber"), ("limits", "limits.usd_total"), ("rules", "self_change.approval"), ("models?tab=free", None)}
+
+
 def everything_shown() -> dict:
     """The settings with every engine among the search fallbacks and the cloud transcriber chosen, so
     the rows that belong to one engine or to the cloud endpoint are on their pages."""
@@ -93,11 +118,15 @@ def everything_shown() -> dict:
 SCENES: list = []
 
 
-def open_page(browser, width: int, lang: str) -> Page:  # type: ignore[no-untyped-def]
+def open_page(browser, width: int, lang: str, held: list[str] | None = None) -> Page:  # type: ignore[no-untyped-def]
+    """A page of the stubbed installation; `held` are the answers (regular expressions on the address)
+    it is kept from until `holding.release`."""
     phone = width < 1024
     context = browser.new_context(viewport={"width": width, "height": 900 if not phone else 844}, color_scheme="dark", is_mobile=phone, has_touch=phone)
     # The companion is this browser's choice; on, its model's row is drawn.
     context.add_init_script("try { localStorage.setItem('daedalus.pet', 'on'); } catch {}")
+    if held:
+        gate(context, held)
     page = context.new_page()
     # A configured browser, so the three sections of the agent's browser draw their cards rather than
     # the one that says there is none.
@@ -162,8 +191,42 @@ def redirected(page: Page, home: str) -> bool:
     return False
 
 
-def drawn(page: Page, section: str, lang: str, want: set[str]) -> set[str]:
-    page.goto(f"{BASE}/settings/{section}?token=t&lang={lang}")
+APP_PATH = urlsplit(BASE).path.rstrip("/")
+
+# Moves the app to an address the way its own `navigate` does: a history entry and the event the router listens to.
+GO = "(path) => { history.pushState({ d: 1 }, '', path); dispatchEvent(new PopStateEvent('popstate', { state: { d: 1 } })); }"
+
+
+class Visitor:
+    """One page that is taken from address to address, by loading it or by telling the app."""
+
+    def __init__(self, page: Page, lang: str) -> None:
+        self.page = page
+        self.lang = lang
+        self.loaded = False
+
+    def go(self, path: str, *, cold: bool = False, remount: bool = True) -> None:
+        """Open `path` (below the app, `/settings/...`, with its fragment): a page load when `cold` or
+        when nothing is loaded yet; otherwise the app is sent away from Settings, so that the settings
+        screen is drawn afresh, and then to the address. With `remount` false the app goes straight
+        there, which from one section to another is what following an entry of the list does."""
+        page = self.page
+        if cold or not self.loaded:
+            base, hash_, fragment = path.partition("#")
+            page.goto(f"{BASE}{base}{'&' if '?' in base else '?'}token=t&lang={self.lang}{hash_}{fragment}")
+            self.loaded = True
+            return
+        page.evaluate("window.__flashed.clear()")
+        if remount:
+            page.evaluate(GO, f"{APP_PATH}/primitives")
+            page.wait_for_selector(".settings-index, .settings-col", state="detached", timeout=BOUND_MS)
+        page.evaluate(GO, f"{APP_PATH}{path}")
+
+
+def drawn(visitor: Visitor, section: str, want: set[str]) -> set[str]:
+    page = visitor.page
+    # From one section to the next, as the list does it: the screen stays, what is drawn is the section.
+    visitor.go(f"/settings/{section}", remount=False)
     page.wait_for_selector(".settings-col .card, .settings-col .set-card, .settings-col .settings-row, .settings-col .empty", timeout=BOUND_MS)
     # Cards that read their own listing draw their rows after it answers: waited for, up to a limit.
     try:
@@ -176,12 +239,13 @@ def drawn(page: Page, section: str, lang: str, want: set[str]) -> set[str]:
 
 def rows(browser, problems: list[str]) -> None:
     page = open_page(browser, 1440, "en")
+    visitor = Visitor(page, "en")
     for section in INDEX["sections"]:
         sid = section["id"]
         if sid in ELSEWHERE:
             continue
         want = {field["anchor"] for field in INDEX["fields"] if field["section"] == sid} - CONDITIONAL
-        found = drawn(page, sid, "en", want)
+        found = drawn(visitor, sid, want)
         missing = sorted(want - found)
         print(f"rows {sid}: {len(want)} listed, {len(want) - len(missing)} drawn")
         for anchor in missing:
@@ -191,9 +255,12 @@ def rows(browser, problems: list[str]) -> None:
 
 def old_addresses(browser, lang: str, width: int, problems: list[str]) -> None:
     page = open_page(browser, width, lang)
+    visitor = Visitor(page, lang)
     for old, row, home in OLD:
+        if (lang, width) not in FULL and (old, row) not in REPRESENTATIVE:
+            continue
         where = f"[{lang} {width}] /settings/{old}{'#' + row if row else ''}"
-        page.goto(f"{BASE}/settings/{old}{'&' if '?' in old else '?'}token=t&lang={lang}{'#' + row if row else ''}")
+        visitor.go(f"/settings/{old}{'#' + row if row else ''}", cold=(old, row) in COLD)
         if not redirected(page, home):
             mounted = page.locator(".settings-index, .settings-col").count() > 0
             problems.append(f"{where}: stayed at {page.url}, not /settings/{home}" + ("" if mounted else " (the page never drew the settings screen)"))
@@ -267,16 +334,23 @@ def listing(browser, lang: str, width: int, problems: list[str]) -> None:
     page.context.close()
 
 
+def timed(label: str, step, *args) -> None:  # type: ignore[no-untyped-def]
+    """Runs one part and says how long it took, so the part that costs is the one that is seen."""
+    started = time.monotonic()
+    step(*args)
+    print(f"{label}: {time.monotonic() - started:.0f} s")
+
+
 def main() -> int:
     problems: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"])
         SCENES.append(render_scenes(browser))
-        rows(browser, problems)
+        timed("rows", rows, browser, problems)
         for lang in ("en", "ru"):
             for width in (1440, 390):
-                listing(browser, lang, width, problems)
-                old_addresses(browser, lang, width, problems)
+                timed(f"[{lang} {width}] list", listing, browser, lang, width, problems)
+                timed(f"[{lang} {width}] old addresses", old_addresses, browser, lang, width, problems)
         browser.close()
     print("problems:", problems or "none")
     return 1 if problems else 0
