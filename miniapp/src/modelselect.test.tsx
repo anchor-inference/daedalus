@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // The model picker: opened from somewhere other than its own chip it hangs from that control, not from
 // the composer at the far side of the window, and the keyboard goes back to that control on Escape.
-// Its tabs (Favourites first), its search across providers, its keys and its star; the account; and
-// the two Anthropic routes told apart by name.
+// Its column of providers by name (Favourites first, Settings' order, the free models last), its search
+// across providers with each provider's count of matches, its keys and its star; the account; the two
+// Anthropic routes told apart by name; and the letters an endpoint without a brand wears.
 
 import { act, useState } from "react";
 import { createRoot, Root } from "react-dom/client";
@@ -10,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { setLang } from "./i18n";
 import { AccountChoice, ModelSelect } from "./modelselect";
-import { providerName } from "./ui/provider-mark";
+import { monogram, providerName } from "./ui/provider-mark";
 
 /** What each GET answers; a path not here never answers, which is the loading state the anchor tests draw. */
 const answers = vi.hoisted((): Record<string, unknown> => ({}));
@@ -32,6 +33,17 @@ describe("the provider names", () => {
     // A name the operator gave the provider still wins.
     expect(providerName("claude", { kind: "anthropic", name: "Work", base_url: "", timeout_seconds: 0 })).toBe("Work");
     setLang("en");
+  });
+
+  it("gives an endpoint without a brand the first letters of its name's first two words", () => {
+    expect(monogram("Work-test-vllm")).toBe("WT");
+    expect(monogram("abliteration")).toBe("AB");
+    expect(monogram("vLLM")).toBe("VL");
+    // A number is a word of its own, so numbered endpoints differ.
+    expect(monogram("test-2")).toBe("T2");
+    expect(monogram("test1")).toBe("T1");
+    expect(monogram("Лаборатория")).toBe("ЛА");
+    expect(monogram("—")).toBe("?");
   });
 });
 
@@ -155,8 +167,12 @@ describe("the box", () => {
     (globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= class { observe() {} disconnect() {} };
     answers["/api/settings"] = {
       model: { preset: "opus" },
-      providers: { claude: { kind: "anthropic", base_url: "", timeout_seconds: 0, billing: "subscription" }, deepseek: { kind: "deepseek", base_url: "", timeout_seconds: 0, api_key_set: true } },
-      presets: { opus: preset("claude", "Claude Opus 5", { favourite: true }), sonnet: preset("claude", "Claude Sonnet"), flash: preset("deepseek", "DeepSeek Flash", { thinking: false }), free: preset("deepseek", "Free one", { free_only: true }) },
+      // Settings lists the providers in this order; the presets name them the other way round.
+      providers: { claude: { kind: "anthropic", base_url: "", timeout_seconds: 0, billing: "subscription" }, deepseek: { kind: "deepseek", base_url: "", timeout_seconds: 0, api_key_set: true },
+        lab: { kind: "openai_compat", name: "Lab box", base_url: "", timeout_seconds: 0 } },
+      provider_keys: { lab: { via_proxy: true, key_held: false, key_kind: "api_key", ready: false } },
+      presets: { flash: preset("deepseek", "DeepSeek Flash", { thinking: false }), opus: preset("claude", "Claude Opus 5", { favourite: true }), sonnet: preset("claude", "Claude Sonnet"),
+        free: preset("deepseek", "Free one", { free_only: true }), lab: preset("lab", "Lab model") },
     };
   });
   afterEach(() => {
@@ -172,26 +188,47 @@ describe("the box", () => {
     return props;
   }
   const tabs = () => [...document.querySelectorAll<HTMLButtonElement>(".model-picker [role=tab]")];
+  const tab = (id: string) => document.querySelector<HTMLButtonElement>(`.model-picker [role=tab][data-id="${id}"]`)!;
   const rows = () => [...document.querySelectorAll<HTMLElement>(".model-picker [role=option]")];
+  const names = () => rows().map((row) => row.querySelector(".model-row-name")!.textContent);
   const search = () => document.querySelector<HTMLInputElement>(".model-picker .model-search")!;
-  const key = async (k: string) => act(async () => { search().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true })); });
+  const press = async (target: Element, k: string, extra: KeyboardEventInit = {}) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...extra })); });
+  const key = async (k: string) => press(search(), k);
+  const type = async (text: string) => act(async () => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    set.call(search(), text);
+    search().dispatchEvent(new Event("input", { bubbles: true }));
+  });
 
-  it("opens on Favourites, then one tab per provider and the free models last", async () => {
+  it("names every provider in a column: Favourites first, Settings' order, the free models last", async () => {
     await open();
-    expect(tabs().map((tab) => tab.dataset.tab ?? tab.dataset.provider)).toEqual(["favourites", "claude", "deepseek", "free"]);
+    expect(tabs().map((row) => row.dataset.id)).toEqual(["favourites", "claude", "deepseek", "lab", "free"]);
+    expect(tabs().map((row) => row.querySelector(".model-prov-name")!.textContent)).toEqual(["Favourites", "Anthropic · subscription", "DeepSeek", "Lab box", "Free"]);
+    expect(tabs().map((row) => row.querySelector(".model-prov-count")?.textContent ?? "")).toEqual(["1", "2", "1", "", "1"]);
+    // A provider whose key is missing says so on its row, in the word Settings uses.
+    expect(tab("lab").querySelector(".model-prov-state")!.textContent).toBe("no key");
+    // An endpoint without a brand wears the letters of its name; a brand keeps its mark.
+    expect(tab("lab").querySelector(".provider-letter")!.textContent).toBe("LB");
+    expect(tab("deepseek").querySelector(".provider-letter")).toBeNull();
     expect(tabs()[0].getAttribute("aria-selected")).toBe("true");
-    expect(rows().map((row) => row.querySelector(".model-row-name")!.textContent)).toEqual(["Claude Opus 5"]);
-    // Across providers a row says how the model is paid for; the model in use is checked.
-    expect(rows()[0].querySelector(".model-row-meta")!.textContent).toBe("subscription");
+    expect(names()).toEqual(["Claude Opus 5"]);
+    // Across providers a row names its provider; the model in use is checked.
+    expect(rows()[0].querySelector(".model-row-meta")!.textContent).toBe("Anthropic · subscription");
     expect(rows()[0].getAttribute("aria-selected")).toBe("true");
   });
 
-  it("walks the tabs with the side arrows and the rows with up and down, and Enter picks", async () => {
+  it("crosses to the providers with the left arrow, walks them with up and down, and comes back with the right", async () => {
     const props = await open();
-    await key("ArrowRight");
-    expect(tabs()[1].getAttribute("aria-selected")).toBe("true");
+    await key("ArrowLeft");
+    // Arriving in the column does not choose: the provider on show takes the keyboard.
+    expect(document.activeElement).toBe(tab("favourites"));
+    await press(tab("favourites"), "ArrowDown");
+    expect(document.activeElement).toBe(tab("claude"));
+    expect(tab("claude").getAttribute("aria-selected")).toBe("true");
     // The provider of the default carries it first, then its models with their windows.
-    expect(rows().map((row) => row.querySelector(".model-row-name")!.textContent)).toEqual(["Global default", "Claude Opus 5", "Claude Sonnet"]);
+    expect(names()).toEqual(["Global default", "Claude Opus 5", "Claude Sonnet"]);
+    await press(tab("claude"), "ArrowRight");
+    expect(document.activeElement).toBe(search());
     expect(rows()[1].classList.contains("active")).toBe(true);
     await key("ArrowDown");
     expect(rows()[2].classList.contains("active")).toBe(true);
@@ -201,23 +238,45 @@ describe("the box", () => {
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("searches every provider, and the box keeps its parts while it does", async () => {
+  it("goes round the box with Tab, and typing in the column goes to the search", async () => {
     await open();
-    await act(async () => {
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      set.call(search(), "flash");
-      search().dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(rows().map((row) => row.querySelector(".model-row-name")!.textContent)).toEqual(["DeepSeek Flash"]);
+    search().focus();
+    await key("Tab");
+    expect(document.activeElement).toBe(tab("favourites"));
+    await press(tab("favourites"), "Tab");
+    expect(document.activeElement?.closest(".model-effort-seg")).not.toBeNull();
+    await press(document.activeElement!, "Tab", { shiftKey: true });
+    expect(document.activeElement).toBe(tab("favourites"));
+    await press(tab("favourites"), "f");
+    expect(document.activeElement).toBe(search());
+    expect(search().value).toBe("f");
+  });
+
+  it("searches every provider, counts each one's matches, and narrows to the one chosen", async () => {
+    await open();
+    await type("flash");
+    expect(names()).toEqual(["DeepSeek Flash"]);
     expect(document.querySelector(".model-picker-title")!.textContent).toBe("Found: 1");
-    expect(tabs().every((tab) => tab.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(tabs().every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(tabs().map((row) => row.querySelector(".model-prov-count")!.textContent)).toEqual(["0", "0", "1", "0", "0"]);
+    expect(tabs().map((row) => row.classList.contains("none"))).toEqual([true, true, false, true, true]);
     expect(document.querySelector(".model-picker-effort")).not.toBeNull();
     expect(document.querySelector(".model-picker-foot")).not.toBeNull();
+    await type("model");
+    expect(names()).toEqual(["Lab model"]);
+    // A provider pressed while searching narrows the matches to it, and pressed again lets them span every provider.
+    await type("o");
+    const every = names().length;
+    await act(async () => tab("claude").click());
+    expect(names()).toEqual(["Claude Opus 5", "Claude Sonnet"]);
+    expect(document.querySelector(".model-picker-title")!.textContent).toBe("Anthropic · subscription · Found: 2");
+    await act(async () => tab("claude").click());
+    expect(names().length).toBe(every);
   });
 
   it("stars a model through its preset, from the row or with *", async () => {
     await open();
-    await key("ArrowRight");
+    await act(async () => tab("claude").click());
     const star = rows()[2].querySelector<HTMLButtonElement>(".model-star")!;
     expect(star.getAttribute("aria-pressed")).toBe("false");
     await act(async () => star.click());
