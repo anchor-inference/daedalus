@@ -27,7 +27,15 @@
 .panel-crumbs .crumb { display: inline-flex; align-items: center; gap: 2px; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-size: var(--fs-12); }
 .panel-crumbs button.crumb { cursor: pointer; }
 .panel-crumbs button.crumb:hover { color: var(--fg); }
-.panel-crumbs .crumb.last { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+/* The name never gives way while anything else can: the folders go first, from their start (the
+   right-to-left box puts the ellipsis at the left and keeps the nearest folder), then the root, then
+   the name's middle. The weights are large rather than the name's small: a shrink factor under 1
+   gives way only that share of the overflow, and the name's end was left cut by the line. */
+.panel-crumbs .crumb.root { display: block; flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.panel-crumbs .crumb.dirs { display: block; flex: 0 1000000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.panel-crumbs .crumb.dirs > span { unicode-bidi: isolate; }
+.panel-crumbs .crumb.last { flex: 0 1 auto; min-width: 0; color: var(--fg); font-weight: 500; }
+.panel-crumbs .crumb.last > .file-name { min-width: 0; }
 .panel-crumbs .sep { color: var(--fg-3); padding: 0 2px; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 16px; }
 .panel-body.tab-preview { padding: 0; display: flex; flex-direction: column; }
@@ -254,8 +262,8 @@
   .screen { padding: 4px 24px 32px; }
   /* The title 24 px in from the main's edge, as every page's; the buttons 12 px from the other. */
   .chat-head { padding: 0 12px 0 24px; }
-  .chat-scroll { padding: 20px 24px 16px; }
-  .composer { padding: 8px 24px 16px; }
+  .chat-scroll { padding: 20px var(--chat-pad) 16px; }
+  .composer { padding: 8px var(--chat-pad) 16px; }
   /* The panel stands beside the whole chat at the window's full height, its tab row level with the
      chat's header rather than under a header drawn across both. The chat keeps the room on its right
      as padding, so the header, the conversation and the composer centre in what is left; the panel
@@ -282,7 +290,7 @@
      else and the conversation uses the room the window gives it. */
   .answer, .msg-wrap, .thinking-head, .activity, .artifacts { max-width: 100%; }
 }
-/* The conversation keeps one measure at every width: 760 px at 15/1.6 is about 85 characters, and a
+/* The conversation keeps one measure at every width: the chosen stripe, 840 px by default, and a
    stripe that grew to 1120 and 1320 on a wide window made every line of an answer a long return trip
    for the eye. The room a wide window has is the margin around the column, as in a book. */
 @media (min-width: 1600px) {

@@ -64,10 +64,12 @@ def desktop(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-de
     count = page.locator(".chat-head .term-button .term-count").inner_text().strip()
     if count != "3":
         problems.append(f"the header button counts {count!r} running terminals, not 3")
-    # The session's row in the sidebar carries the same count (the listing says 3).
-    row_pill = page.locator(f".sidebar [data-session='{S1}'] .sb-terms")
-    if not row_pill.count() or row_pill.first.inner_text().strip() != "3":
-        problems.append("the session's row in the sidebar does not show its terminal count")
+    # The session's row in the sidebar says the same count (the listing says 3). A row's line holds
+    # its title and one thing beside it, so the count is in the row's tooltip and accessible name.
+    row = page.locator(f".sidebar [data-session='{S1}']").first
+    said = " ".join(filter(None, [row.get_attribute("title") or "", row.get_attribute("aria-label") or ""])) if row.count() else ""
+    if "3 terminals" not in said and "3 терминала" not in said:
+        problems.append(f"the session's row in the sidebar does not say its terminal count ({said!r})")
 
     # The hidden tab is connected but has never sent a size.
     wait_live(page, "t2bbbbbbbbbb")

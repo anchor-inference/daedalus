@@ -41,6 +41,7 @@ import orchestrationColumn from "./orchestration.tsx?raw";
 import projectColumn from "./project/ProjectSidebar.tsx?raw";
 import mainEntry from "./main/MainEntry.tsx?raw";
 import app from "./App.tsx?raw";
+import sessions from "./screens/Sessions.tsx?raw";
 import canvasList from "./canvas/CanvasList.tsx?raw";
 import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
 import schedulesBrowser from "./schedules/SchedulesBrowser.tsx?raw";
@@ -169,6 +170,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".task-pane-title", ".task-prose",
   // A Memory entry's pane opens on its title, a pane's heading (18/500).
   ".memory-pane-title",
+  // An open secret's pane opens on its name as the pane's heading: 18/500, or 16 in the monospace
+  // face, whose letters are wider, when it is the secret's own name.
+  ".secret-pane-title",
   // A schedule's pane opens on its name as the pane's heading, the same 18.
   ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
@@ -214,6 +218,8 @@ const BOX_ALLOWED = [
   // The schedule pane is the same pane: its head is level with the page header beside it (52), its foot
   // holds the schedule's buttons with the room a dialog's foot has (64).
   ".sched-pane-head", ".sched-pane-foot",
+  // The open secret's pane is that pane again: its foot holds Remove, Attach and Save in a dialog's 64.
+  ".secret-pane-foot",
   // The open event's pane is a page of its own beside the grid, and its head is level with the page header.
   ".cal-pane-head",
   // The field that adds a task to a chat's own board is the one wide control of its panel's tab, as
@@ -573,6 +579,31 @@ describe("the inbox", () => {
   });
 });
 
+describe("the secrets manager", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  const at = (media: string, selector: string) => all.filter((r) => r.media.includes(media) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists secrets as 44 px rows (56 on a phone) in a 400 px column beside the open one, in a sheet 1080 wide", () => {
+    expect(rule(".secrets-manager.layout-split")).toContain("grid-template-columns: 400px minmax(0, 1fr)");
+    expect(rule(".secret-row-open")).toContain("height: var(--card-row-h)");
+    expect(at("max-width: 1023px", ".secret-row-open")).toContain("height: var(--card-row-h-lg)");
+    expect(at("min-width: 1024px", ".sheet.xl.secret-sheet")).toContain("width: min(1080px, 94vw)");
+    expect(rule(".secret-pane-head")).toContain("height: var(--head-h)");
+    expect(rule(".secret-pane-foot")).toContain("height: 64px");
+  });
+
+  it("sets only the name in the monospace face: where a secret belongs and when it was used are words", () => {
+    expect(rule(".secret-row-name")).toContain("font-family: var(--mono)");
+    expect(rule(".secret-row-used")).not.toContain("--mono");
+    expect(rule(".secret-row .secret-where")).not.toContain("--mono");
+  });
+
+  it("draws the open secret beside Settings' list only from a 900 px column, sticky along a long list", () => {
+    expect(at("min-width: 1024px", ".secrets-manager.in-settings.layout-split")).toContain("grid-template-columns: minmax(0, 1fr) 440px");
+    expect(at("min-width: 1024px", ".secrets-manager.in-settings .secret-pane")).toContain("position: sticky");
+  });
+});
+
 describe("the canvas", () => {
   const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
@@ -750,10 +781,20 @@ describe("the sidebar", () => {
     expect(wide(".sidebar-foot")).toContain("height: var(--head-h)");
     expect(wide(".sb-nav")).toContain("height: var(--row-h)");
     expect(wide(".sb-row")).toContain("height: var(--row-h)");
-    // Inside a project a chat's text starts where the project's name does: 12 + 16 + 8 of the row.
-    expect(wide(".sb-kids > .sb-row")).toContain("padding-left: 36px");
-    // A subagent under its unfolded leader is one short line, quieter than a chat: the dense row.
-    expect(wide(".sb-sub")).toContain("height: var(--row-h-dense)");
+    // Every chat row — in a project, outside one, a subagent under its leader — is the slot, the
+    // title and one trailing item: a 16 px slot 12 px in and the title 8 px after it, where a
+    // project's chats always started (12 + 16 + 8). The indent that pushed a project's chats 36 px
+    // in stood empty; the slot is in its place and holds the chat's one glyph, so no row draws its
+    // marks between the title and the time any more.
+    expect(wide(".sb-chat")).toContain("padding: 0 10px 0 var(--space-3)");
+    expect(wide(".sb-chat")).toContain("gap: var(--space-2)");
+    expect(wide(".sb-gut")).toContain("width: 16px");
+    expect(wide(".sb-kids > .sb-row")).toBe("");
+    expect(wide(".sb-marks")).toBe("");
+    // A subagent is quieter by its type, not its height: the 32 px pitch of every row keeps its tree
+    // line one stroke and the windowed list's estimate one number.
+    expect(wide(".sb-sub")).not.toMatch(/(^|;)\s*height:/);
+    expect(sessions).toMatch(/estimate=\{34\}/);
     // No second line and no plate is left to pin a two-line height on.
     expect(declared()).not.toContain("--row-h-kid");
     expect(wide(".sb-plate")).toBe("");
@@ -940,15 +981,23 @@ describe("rows and controls", () => {
     expect(wide).not.toMatch(/\.answer[^{]*\{[^}]*max-width: var\(--reading-w\)/);
   });
 
-  it("holds the stripe at 760 px at every window width", () => {
-    // One measure, 760 px at 15/1.6 (about 85 characters), on a
-    // laptop and on a 2560 screen alike. The stripe once widened to 1120 and 1320 on wide windows, and
-    // every line of an answer became a long return trip for the eye. One declaration, no media rule
-    // that moves it; the Appearance setting's narrow and wide columns are the operator's own choice.
+  it("holds the stripe at the chosen width, 840 px by default, at every window width", () => {
+    // One measure on a laptop and on a 2560 screen alike. 840 px at 15 px Inter is about 95 characters a
+    // line, the upper edge of a comfortable measure; it is where it is because answers here carry tables
+    // and code more than prose. The stripe once widened to 1120 and 1320 on wide windows, and every line
+    // of an answer became a long return trip for the eye. One declaration, no media rule that moves it;
+    // Appearance sets 720, 960 or the whole room (up to 1400) on the same token and nothing else.
     const stripes = all.filter((r) => /--chat-w:/.test(r.body) && /(^|[\s,]):root($|[\s,])/.test(r.selector));
     expect(stripes.map((r) => r.media)).toEqual([""]);
-    expect(stripes[0].body).toMatch(/--chat-w: 760px/);
-    // The operator's bubble reads at the answer's size and stops at three quarters of the stripe.
+    expect(stripes[0].body).toMatch(/--chat-w: 840px/);
+    expect(stripes[0].body).toMatch(/--chat-pad: 24px/);
+    // The side padding of the scroller and of the composer is that token, so the whole-room choice can widen it.
+    const desktop = all.filter((r) => r.media.includes("min-width: 1024px")).map((r) => `${r.selector}{${r.body}}`).join("\n");
+    expect(desktop).toMatch(/\.chat-scroll\{[^}]*padding: 20px var\(--chat-pad\) 16px/);
+    expect(desktop).toMatch(/\.composer\{[^}]*padding: 8px var\(--chat-pad\) 16px/);
+    // The start page's import card follows the same column rather than a width of its own.
+    expect(all.filter((r) => selectors(r).includes(".start-import")).map((r) => r.body).join(";")).not.toMatch(/max-width: 720px/);
+    // A message you sent reads at the answer's size and stops at 560 px.
     expect(decl(".msg.user")).toContain("max-width: min(560px, 100%)");
     expect(decl(".msg.user")).toContain("font-size: var(--fs-prose)");
     expect(decl(".msg.user")).toContain("border-radius: var(--radius-bubble)");
@@ -986,14 +1035,15 @@ describe("settings", () => {
   // outside any media query and only the column's own (the grid, the fold, the hover) inside the wide one.
   const wide = (selector: string) => all.filter((r) => (!r.media || r.media.includes("min-width: 1024px")) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("is a page: the list of sections in the sidebar's 300 px, the section in a centred 880 px column", () => {
+  it("is a page: the list of sections in the sidebar's 300 px, the section in a centred 960 px column", () => {
     // Settings was a dialog over the screen it was opened from, its list 248 px and its section the
     // dialog's whole width. It is a page of its own now: the list stands where the sidebar was and is
     // as wide, a 52 px header carries the section's title, and the section reads in the same centred
-    // 880 px column (less 24 px a side on a narrower window) at every width.
+    // 960 px column (less 24 px a side on a narrower window) at every width. The other pages' lists
+    // keep 880: only a section of Settings puts a label at one edge and its control at the other.
     expect(wide(".settings-nav")).toContain("width: 300px");
     expect(wide(".settings-head")).toContain("height: var(--head-h)");
-    expect(wide(".settings-page .settings-col")).toContain("width: min(880px, 100% - 48px)");
+    expect(wide(".settings-page .settings-col")).toContain("width: min(960px, 100% - 48px)");
     expect(wide(".settings-page .settings-col")).toContain("margin: 0 auto");
     expect(wide(".settings-nav .settings-link")).toContain("height: var(--row-h)");
   });

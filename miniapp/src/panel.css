@@ -74,19 +74,6 @@
 .ov-row-tag { flex: none; color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .ov-row-tag.live, .ov-row-tag.add { color: var(--live); }
 .ov-row-tag.attn { color: var(--attention); }
-/* The subscription's windows in the Usage row: each its name, a thin meter and the share used, in the
-   attention colour once it nears its limit and in the danger colour at it. */
-.ov-quota { display: inline-flex; align-items: center; gap: 14px; min-width: 0; max-width: 100%; }
-.ov-window { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.ov-window-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ov-meter { flex: none; width: 36px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
-.ov-meter i { display: block; height: 100%; background: var(--fg-2); }
-.ov-window-pct { flex: none; color: var(--fg); font-size: var(--fs-13); }
-.ov-window.attn, .ov-window.attn .ov-window-pct { color: var(--attention); }
-.ov-window.attn .ov-meter i { background: var(--attention); }
-.ov-window.bad, .ov-window.bad .ov-window-pct { color: var(--bad); }
-.ov-window.bad .ov-meter i { background: var(--bad); }
-
 /* The chat's tasks under the rows: how many are done, the bar, where the rest stand, the open ones. */
 .ov-board { display: flex; flex-direction: column; gap: 8px; margin: 12px 12px 0; padding: 0 12px; }
 .ov-board-head { display: flex; align-items: flex-end; gap: 8px; min-height: 36px; }
@@ -282,6 +269,28 @@
   .panel-sheet .files .explorer-actions { opacity: 1; }
   .panel-sheet .files .explorer-actions .iconbtn { color: var(--fg-2); }
   .panel-sheet .files .field { min-height: var(--row-h-touch); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
+
+  /* One side gutter for every tool in the sheet: the page's 16 px, the line the drawer's pages and the
+     Settings sections keep. The tools came with the desktop panel's own insets (24, 20, 12, 8 and, for
+     the Context and Usage pages, 4), so a phone saw the words of one tool on the sheet's edge and the
+     next one's a finger further in. A block drawn in words stands at the gutter; a list whose rows light
+     up under the finger stands 4 px out, so the row's 12 px of padding puts its words on the same line. */
+  .panel-sheet .panel-body.tab-notes, .panel-sheet .panel-body.tab-jobs, .panel-sheet .panel-body.tab-subagents,
+  .panel-sheet .panel-body.tab-agents, .panel-sheet .panel-body.tab-sources { padding-inline: var(--gutter); }
+  .panel-sheet .ov-head { padding: 8px var(--gutter) 12px; }
+  .panel-sheet .ov-rows { padding: 0 var(--space-1); }
+  .panel-sheet .ov-board { margin: 12px var(--space-1) 0; }
+  .panel-sheet .details.inspector { padding: 0 var(--space-1) var(--space-6); }
+  .panel-sheet .details.tool-page { padding: var(--space-2) var(--gutter) var(--space-6); }
+  .panel-sheet .details.tool-page > .dt-page { padding: 0; }
+  .panel-sheet .tool-list { padding: var(--space-2) var(--space-1) var(--space-4); }
+  .panel-sheet .cb-head { padding-inline: var(--gutter); }
+  .panel-sheet .cb-scroll { padding-inline: var(--gutter); }
+  .panel-sheet .cb-add-wrap { margin-inline: var(--gutter); }
+  .panel-sheet .ch-diff { margin: 8px var(--gutter); }
+  .panel-sheet .ch-files { padding-inline: var(--gutter); }
+  .panel-sheet .ch-foot { padding-inline: var(--gutter); }
+  .panel-sheet .dt-prop { padding-right: 12px; }
 }
 /* A phone narrower than 400 px: the quota windows keep their figures and drop their bars, which pushed
    the second window's percent past the edge of the line. */

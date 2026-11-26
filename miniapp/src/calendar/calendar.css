@@ -309,10 +309,17 @@
 /* The phone's header is the app's top bar; the planner's own buttons ride in its row of filters. */
 .cal-screen.phone .cal-filter-row { padding-bottom: 6px; }
 .cal-today-icon { flex: none; }
-.cal-screen.phone .cal-agenda { padding: var(--space-1) var(--space-3) var(--space-8); }
-.cal-screen.phone .cal-agenda-day { grid-template-columns: 46px minmax(0, 1fr); gap: var(--space-2); }
-.cal-screen.phone .cal-agenda-date { flex-direction: column; align-items: center; gap: 0; }
-.cal-screen.phone .cal-agenda-wd { text-align: center; }
+/* The list keeps the page's 16 px line: the day's number and its word start on it, as the headers and
+   rows of the other pages do. The words were centred in a column narrower than "Сегодня", which hung
+   past the list's 12 px edge, at 10 px from the screen's. */
+.cal-screen.phone .cal-agenda { padding: var(--space-1) var(--gutter) var(--space-8); }
+.cal-screen.phone .cal-agenda-day { grid-template-columns: 52px minmax(0, 1fr); gap: var(--space-2); }
+.cal-screen.phone .cal-agenda-date { flex-direction: column; align-items: flex-start; gap: 0; }
+.cal-screen.phone .cal-agenda-wd { text-align: left; }
+/* A day's rows take the column they are given: their own widest row once made the list 7 px wider
+   than its column at 360, and a row's end ran into the gutter. */
+.cal-screen.phone .cal-agenda-items, .cal-screen.phone .cal-rows { grid-template-columns: minmax(0, 1fr); }
+.cal-screen.phone .cal-rows { min-width: 0; }
 .cal-screen.phone .cal-agenda-wd small { display: none; }
 .cal-screen.phone .cal-agenda-wd b { font-size: var(--fs-12); font-weight: 600; color: var(--fg-3); }
 .cal-screen.phone .cal-row { grid-template-columns: 52px 14px minmax(0, 1fr); gap: 8px; padding: 4px; }

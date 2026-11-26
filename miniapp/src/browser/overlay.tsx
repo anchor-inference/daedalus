@@ -34,6 +34,10 @@ export const CursorOverlay = memo(function CursorOverlay({ action, meta, rect, p
   // A person driving makes the agent's last keystrokes history: the chips go, the waiting tag stays.
   const typing = action.kind === "type" && !compact && !parked;
   const pressing = action.kind === "press" && !!action.keys && !compact && !parked;
+  // The name hangs right of and under the pointer; near the picture's right or lower edge it would be
+  // cut by the frame, so it goes to the other side. Its width is estimated from the name: measuring it
+  // would cost a layout on every move of the pointer.
+  const side = [at.x + 14 + agent.length * 8 + 16 > rect.x + rect.w ? "left" : "", at.y + 17 + 20 > rect.y + rect.h ? "up" : ""].filter(Boolean).join(" ");
   return (
     <div className={`bv-overlay ${compact ? "compact" : ""} ${parked ? "parked" : ""}`} aria-hidden="true" data-action={action.id} data-kind={action.kind}>
       {box && (
@@ -47,7 +51,7 @@ export const CursorOverlay = memo(function CursorOverlay({ action, meta, rect, p
           {typing ? plural("browser.cursor.typing", action.text_len ?? 0) : <kbd>{action.keys}</kbd>}
         </span>
       )}
-      <div className="bv-cursor" style={cursorStyle} data-x={Math.round(at.x * 10) / 10} data-y={Math.round(at.y * 10) / 10}>
+      <div className="bv-cursor" style={cursorStyle} data-side={side || undefined} data-x={Math.round(at.x * 10) / 10} data-y={Math.round(at.y * 10) / 10}>
         <svg viewBox="0 0 24 24" width={compact ? 14 : 22} height={compact ? 14 : 22} aria-hidden="true">
           <path className="bv-cursor-arrow" d="M4 2.5l15.2 8.3-6.6 1.7-3.1 6.9z" />
         </svg>

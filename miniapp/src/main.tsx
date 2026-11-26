@@ -7,6 +7,7 @@ import { SidePanel } from "./sidepanel/SidePanel";
 import { VisitApp } from "./visitapp";
 import { installShareTransport, shareToken } from "./visit";
 import { installFileDrop } from "./filedrop";
+import { installFocusOrigin } from "./focusorigin";
 // The app's two faces, bundled into hashed assets: the service worker keeps them after the first
 // open, and no font host is ever asked. Each sheet declares one variable face per script with its
 // unicode range, so a browser fetches only the files for the letters it draws (Latin, Cyrillic).
@@ -30,6 +31,9 @@ if (!visiting && "serviceWorker" in navigator && window.location.protocol === "h
 // A file let go of anywhere but a drop target does nothing, on every screen: the browser would otherwise
 // open it in place of the app.
 installFileDrop();
+
+// The focus ring is a control's; a region shows it only when the reader tabbed to it (focusorigin.ts).
+installFocusOrigin();
 
 const root = createRoot(document.getElementById("root")!);
 // The desktop's Quick Chat window loads /app/quick: the box alone, without the app around it. The

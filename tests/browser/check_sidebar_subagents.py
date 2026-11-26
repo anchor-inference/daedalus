@@ -144,12 +144,13 @@ def run() -> int:
         page.wait_for_url(f"**/agents/{S12}")
         expect(page.locator(".leader-link")).to_be_visible()
 
-        # The left column: the leader's plate folds its helpers, quieter rows on a tree line.
+        # The left column: the leader's slot folds its helpers, quieter rows on a tree line. Its name
+        # says how many there are; the slot shows the chat's kind, which outranks the count.
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
         leader = page.locator(f'.sidebar [data-session="{S1}"]')
-        fold = leader.locator(".sb-subs")
+        fold = leader.locator(".sb-fold")
         expect(fold).to_have_attribute("aria-expanded", "false")
-        expect(fold.locator(".sb-subs-n")).to_have_text("3")
+        expect(leader).to_have_attribute("aria-label", re.compile(r"\b3 subagents\b"))
         expect(page.locator(".sidebar .sb-sub")).to_have_count(0)
         fold.click()
         subs = page.locator(".sidebar .sb-sub")
@@ -165,11 +166,11 @@ def run() -> int:
         expect(page.locator(f'.sidebar [data-subagent="{S13}"]')).to_have_class(re.compile(r"\bcurrent\b"))
         # Remembered: the fold is still open on the next visit.
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark", wait_until="networkidle")
-        expect(page.locator(f'.sidebar [data-session="{S1}"] .sb-subs')).to_have_attribute("aria-expanded", "true")
+        expect(page.locator(f'.sidebar [data-session="{S1}"] .sb-fold')).to_have_attribute("aria-expanded", "true")
         expect(page.locator(".sidebar .sb-sub")).to_have_count(3)
         if os.environ.get("SHOTS"):
             page.screenshot(path=os.environ["SHOTS"] + "/sidebar-subagents.png")
-        page.locator(f'.sidebar [data-session="{S1}"] .sb-subs').click()
+        page.locator(f'.sidebar [data-session="{S1}"] .sb-fold').click()
         expect(page.locator(".sidebar .sb-sub")).to_have_count(0)
 
         # A phone's rows carry no "+" of their own: a new agent in a project is the first command of

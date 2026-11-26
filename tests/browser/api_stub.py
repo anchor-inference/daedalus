@@ -1304,7 +1304,7 @@ class FakeSecrets:
     """The host's secrets routes over a list held here, values included, as the host keeps them.
 
     Settings → Security and the composer's Secret sheet read the list; the reveal answers the stored
-    value, a list never does. Empty unless a check seeds it (``check_secrets_manage.py``), so every
+    value, a list never does; the usage answers the conversations and the trail a check seeds. Empty unless a check seeds it (``check_secrets_manage.py``), so every
     other run draws the screens with no secret at all. ``revealed`` records who asked for a value.
     """
 
@@ -1312,6 +1312,7 @@ class FakeSecrets:
         self.items: list[dict] = []
         self.values: dict[str, str] = {}
         self.usage: dict[str, list[dict]] = {}
+        self.audit: dict[str, list[dict]] = {}
         self.revealed: list[tuple[str, str]] = []
         self.deleted: list[str] = []
         self.patched: list[tuple[str, dict]] = []
@@ -1370,7 +1371,7 @@ class FakeSecrets:
             return 200, {"value": self.values[row["id"]]}
         if len(parts) == 5 and parts[4] == "usage" and method == "GET":
             titles = self.usage.get(row["id"], [])
-            return 200, {"conversations": len(titles), "titles": titles, "audit": []}
+            return 200, {"conversations": len(titles), "titles": titles, "audit": self.audit.get(row["id"], [])}
         return None
 
 

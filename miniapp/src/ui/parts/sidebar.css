@@ -145,43 +145,96 @@
 .sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
 .sb-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sb-row.unread .sb-t { font-weight: 500; }
-.sb-row .unread-dot { margin-left: -6px; }
 .sb-tile { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
 .sb-project.system .sb-tile { color: var(--fg); }
 .sb-prow.open .sb-t, .sb-project.open > .sb-prow .sb-t { font-weight: 500; }
+/* A project's name is as long as it is, so the lock that says its chats run on the host stands right
+   after it, and its count or state still keeps the right edge. */
+.sb-prow > .sb-t { flex: 0 1 auto; }
+.sb-prow > .sb-ptrail { margin-left: auto; }
+.sb-env { display: grid; place-items: center; flex: none; color: var(--fg-3); }
+.sb-sec > .sb-env { margin: 0 var(--space-2) 0 auto; }
 /* A project row a dragged chat would move into: a ring on the pressed fill, so the drop target is unmistakable. */
 .sb-prow.drop, .sb-prow.drop:hover { background: var(--selected); box-shadow: inset 0 0 0 2px var(--ring); }
 .sb-ptrail { flex: none; display: flex; align-items: center; gap: 6px; }
 .sb-pcount { color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .sb-chev { display: grid; color: var(--fg-3); }
-/* A project's chats sit under it with their text where the project's name starts. */
-.sb-kids > .sb-row { padding-left: 36px; }
 .sb-word, .sb-time { flex: none; font-size: var(--fs-12); white-space: nowrap; }
 .sb-time { color: var(--fg-3); font-variant-numeric: tabular-nums; }
 .sb-word.waiting, .sb-word.failed { color: var(--attention); }
 .sb-word.running { color: var(--live); }
-/* The marks of a chat that is not an ordinary one, beside its state: its kind, a loop, a fork, the
-   machine it runs on, whether it is private, its terminals, the helpers it can fold out. */
-.sb-marks { display: flex; align-items: center; gap: 6px; flex: none; color: var(--fg-3); }
-.sb-marks:empty { display: none; }
-.sb-kind { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--fg-3); }
-/* An imported chat's harness letter, which sits on a plate's corner elsewhere, stands in the row. */
-.sb-marks .imp-hmini { position: static; box-shadow: none; }
-.sb-terms { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); }
-.sb-subs { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 4px 0 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-12); cursor: pointer; }
-.sb-subs:hover, .sb-subs.open { background: var(--selected); color: var(--fg); }
-.sb-subs:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.sb-subs > .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
-.sb-subs.open > .ic { transform: none; }
+
+/* A chat's row: the slot, the title, one thing at the right edge. Every chat row, in a project or not,
+   draws the slot 12 px in and its title 8 px after it, so every title starts where a project's chats'
+   always did (12 + 16 + 8) and a long list reads down one edge. Inside a project the slot holds a
+   quiet dot when the chat has no glyph: the nesting is said there, where the indent used to stand
+   empty, and the title keeps the width. */
+.sb-chat, .sb-sub { gap: var(--space-2); padding: 0 10px 0 var(--space-3); }
+.sb-gut { position: relative; display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
+.sb-gut .ic { display: block; }
+.sb-nest { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-3); opacity: .6; }
+/* The glyphs are the neutral ink, never a pill or a coloured ground: they say what a chat is, which
+   does not change while the reader watches. Colour is kept for state. */
+.sb-glyph { display: grid; place-items: center; }
+.sidebar .sb-row .sb-gut > .sb-kind[data-kind] { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: transparent; color: var(--fg-2); }
+/* A chat holding the reader's Chrome or computer only for now borrows the kind as a ring. */
+.sidebar .sb-row .sb-gut > .sb-kind.kind-borrowed { box-shadow: inset 0 0 0 1px var(--fg-3); }
+.sidebar .sb-row .sb-gut > .sb-kind.kind-borrowed > .ic { width: 10px; height: 10px; }
+.sidebar .sb-row .sb-gut > .kind-live::after { background: var(--live); box-shadow: 0 0 0 1.5px var(--sb-row-bg, var(--bg)); }
+/* The program an imported chat came from: its letter in a ringed square, not the program's colour. */
+.sb-gut > .imp-hmini { position: static; width: 15px; height: 15px; border-radius: 4px; background: transparent; color: var(--fg-2); box-shadow: inset 0 0 0 1px var(--fg-3); font-size: var(--fs-12); line-height: 15px; }
+.sb-gut > .private-mark { color: var(--fg-2); }
+.sb-subs-n { color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; line-height: 1; }
+/* The live state over the glyph's corner, ringed in the row's own colour so it reads on any glyph;
+   on an empty slot it stands in the middle of it. */
+.sb-pip, .sb-gut > .unread-dot { position: absolute; top: -2px; right: -3px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px var(--sb-row-bg, var(--bg)); }
+.sb-gut.bare > .sb-pip, .sb-gut.bare > .unread-dot, .sb-gut.g-nest > .sb-pip, .sb-gut.g-nest > .unread-dot { inset: 0; margin: auto; width: 8px; height: 8px; }
+.sb-gut.g-nest:has(> .sb-pip, > .unread-dot) > .sb-nest { display: none; }
+.sb-pip.waiting, .sb-pip.failed { background: var(--attention); }
+.sb-pip.running { background: var(--live); animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sb-pip.running { animation: none; } }
+/* A leader's slot is the button that folds its helpers out: the glyph until the pointer or the focus
+   comes, or while they are out, then a chevron, pointing down once they are. */
+.sb-fold { padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; font: inherit; cursor: pointer; }
+/* The slot is 16 px; its ::after is the target a pointer or a finger hits (44 px on a phone), and the
+   phone's target guard reads it there. The tree line's first stroke is ::before. */
+.sb-fold::after { content: ""; position: absolute; inset: -6px -4px; }
+.sb-fold:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.sb-fold-chev { display: none; color: var(--fg-2); }
+.sb-fold-chev > .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
+.sb-fold[aria-expanded="true"] .sb-fold-chev > .ic { transform: none; }
+.sb-row:hover .sb-fold > :not(.sb-fold-chev):not(.sb-pip):not(.unread-dot), .sb-row:focus-within .sb-fold > :not(.sb-fold-chev):not(.sb-pip):not(.unread-dot), .sb-fold[aria-expanded="true"] > :not(.sb-fold-chev):not(.sb-pip):not(.unread-dot) { display: none; }
+.sb-row:hover .sb-fold-chev, .sb-row:focus-within .sb-fold-chev, .sb-fold[aria-expanded="true"] .sb-fold-chev { display: grid; }
+.sb-fold:hover { background: var(--selected); }
+.sb-fold:hover .sb-fold-chev { color: var(--fg); }
+/* The helpers working, at the right edge of a leader that is not working itself. */
+.sb-subs { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--live); font-size: var(--fs-12); white-space: nowrap; }
+/* Too narrow for a word and a title both, a row says its state by the dot in its slot alone and gives
+   the word's width to the title; the word is still in its name and tooltip. */
+.sidebar .sb-list { container-type: inline-size; }
+@container (max-width: 239px) {
+  .sb-chat > .sb-word, .sb-sub > .sb-word { display: none; }
+}
 /* A search hit shows the passage it was found by, under its title. */
 .sb-row.match { height: auto; min-height: var(--row-h); padding-block: 6px; }
 .sb-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .sb-snip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 0; color: var(--fg-3); font-size: var(--fs-12); }
 .sb-acts .iconbtn.small { width: 28px; height: 28px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); }
 .sb-acts .iconbtn.small:hover { background: var(--hover); color: var(--fg); }
-/* A subagent under its unfolded leader: the dense row, quieter than a chat, a dot for its state. */
-.sb-sub { height: var(--row-h-dense); gap: var(--space-2); padding-left: 24px; color: var(--fg-2); font-size: var(--fs-13); }
-.sb-kids > .sb-row.sb-sub { padding-left: 48px; }
+/* A subagent under its unfolded leader: a quieter line, its slot the tree line down from the leader's
+   with the helper's state as a dot on it, its title where every title starts. The line runs through
+   the 2 px gaps and stops at the last helper's dot. The row keeps the 32 px pitch of every row, so the
+   line is one stroke and the windowed list measures one height. */
+.sb-sub { color: var(--fg-2); font-size: var(--fs-13); }
+.sb-gut.sb-tree { align-self: stretch; height: auto; }
+.sb-tree::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; margin-left: -0.5px; background: var(--line-strong); }
+.sb-tree.last::before { bottom: 50%; }
+.sb-tree > .sub-dot { position: relative; box-shadow: 0 0 0 2px var(--sb-row-bg, var(--bg)), inset 0 0 0 1.5px var(--fg-3); background: var(--sb-row-bg, var(--bg)); }
+.sb-tree > .sub-dot.running, .sb-tree > .sub-dot.waiting, .sb-tree > .sub-dot.failed { box-shadow: 0 0 0 2px var(--sb-row-bg, var(--bg)); }
+.sb-tree > .sub-dot.running { background: var(--live); }
+.sb-tree > .sub-dot.waiting, .sb-tree > .sub-dot.failed { background: var(--attention); }
+/* The leader's slot starts the line while its helpers are out. */
+.sb-fold[aria-expanded="true"]::before { content: ""; position: absolute; left: 50%; top: calc(100% + 1px); height: 9px; width: 1px; margin-left: -0.5px; background: var(--line-strong); }
 .sb-sub .sb-t { color: var(--fg-2); }
 .sb-sub:hover .sb-t, .sb-sub.current .sb-t { color: var(--fg); }
 .sb-empty { padding: 6px var(--space-3); font-size: var(--fs-12); }
@@ -221,10 +274,11 @@
   .sb-sec-link { height: var(--row-h-touch); }
   .sb-sec .iconbtn.sb-sec-add { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; }
   .sb-sec .iconbtn.sb-sec-add > .ic { width: 20px; height: 20px; }
-  .sb-kids > .sb-row { padding-left: 40px; }
-  .sb-sub, .sb-kids > .sb-row.sb-sub { height: var(--row-h-touch); }
-  .sb-subs { position: relative; }
-  .sb-subs::after { content: ""; position: absolute; inset: -12px -6px; }
+  .sb-chat, .sb-sub { gap: 10px; }
+  .sb-gut { width: 20px; height: 20px; }
+  .sb-gut .ic, .sidebar .sb-row .sb-gut > .sb-kind[data-kind] { width: 18px; height: 18px; }
+  .sb-fold::after { inset: -12px; }
+  .sb-fold[aria-expanded="true"]::before { height: 13px; }
   .sb-tools { padding: var(--space-2) var(--space-2) var(--space-1); }
   .sb-search, .sb-lens { height: var(--row-h-touch); }
   .sb-search input { font-size: var(--fs-16); }

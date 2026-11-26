@@ -92,7 +92,7 @@ FACTS = {
         "context": ["50%", "491k", "980k", "Last model request", "1,075", "26", "3 hours ago", "auto", "Instructions", "Tools", "Conversation", "Attachments", "Reserved response", "398k", "100%", "tool set", "Compact history"],
         "usage": ["$41.70", "220.9M", "405k", "212.9M", "787", "$6.12", "31.4M", "58k", "112", "Tool time"],
         "workspace": ["Files"],
-        "provider": ["Max 20×", "5h", "23%", "weekly", "84%", "Fable", "100%"],
+        "provider": ["Max 20×", "5 hours", "23%", "Weekly", "84%", "Fable", "100%", "in 3h"],
         "loop": ["No loop", "Loop"],
         "mcp": ["github", "Ready", "1 active", "list_issues", "sentry", "no description"],
         "vision": ["default (GPT-5.6 Luna)", "Image understanding"],
@@ -102,7 +102,7 @@ FACTS = {
         "context": ["50%", "491 тыс", "980 тыс", "Последний запрос к модели", "1 075", "26", "3 часа назад", "auto", "Инструкции", "Инструменты", "Диалог", "Вложения", "Резерв ответа", "398 тыс", "100%", "набор инструментов", "Сжать историю"],
         "usage": ["$41.70", "220.9 млн", "405 тыс", "212.9 млн", "787", "$6.12", "31.4 млн", "58 тыс", "112", "Время инструментов"],
         "workspace": ["Файлы"],
-        "provider": ["Max 20×", "5h", "23%", "weekly", "84%", "Fable", "100%"],
+        "provider": ["Max 20×", "5 часов", "23%", "Неделя", "84%", "Fable", "100%", "через 3 ч"],
         "loop": ["Цикла нет", "Цикл"],
         "mcp": ["github", "Готов", "активных: 1", "list_issues", "sentry", "без описания"],
         "vision": ["по умолчанию (GPT-5.6 Luna)", "Понимание изображений"],
@@ -155,7 +155,7 @@ def check(page: Page, scope: str, language: str, where: str) -> None:
             assert fact.replace(" ", " ") in words.replace(" ", " ").replace(" ", " "), f"{where}: {section} lacks {fact!r}: {words[:600]}"
         assert "188057562" not in words and "67108864" not in words, f"{where}: a raw byte count is on the {section} page"
         if section == "provider":
-            # Every quota window is a labelled bar coloured by how full it is.
+            # Every quota window is a line with its name, a bar coloured by how full it is, and its reset.
             bars = page.locator(f"{scope} [data-quota]")
             expect(bars, f"{where}: quota bars").to_have_count(3)
             tones = bars.evaluate_all("els => els.map(e => e.dataset.tone)")

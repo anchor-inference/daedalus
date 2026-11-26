@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { readLayout, writeLayout } from "./layout";
-import { absTime, middleTruncate, relTimeLong, untilShort } from "./format";
+import { absTime, middleTruncate, relTimeLong } from "./format";
 import { Icon, type IconName } from "./icons";
 import { useCopied } from "./ui/components";
 import { t } from "./i18n";
@@ -133,15 +133,6 @@ export function When({ at }: { at: string | number | null | undefined }) {
   const date = new Date(typeof at === "number" && at < 1e12 ? at * 1000 : at);
   if (Number.isNaN(date.getTime())) return null;
   return <time dateTime={date.toISOString()} title={absTime(date)}>{relTimeLong(date)}</time>;
-}
-
-/** A moment ahead as "in 4d", the exact date and time on hover. Rounded, not floored: a reset four
- *  days out read "in 3 days" a second after the page loaded. */
-export function Until({ at }: { at: string | number | null | undefined }) {
-  if (!at) return null;
-  const date = new Date(typeof at === "number" && at < 1e12 ? at * 1000 : at);
-  if (Number.isNaN(date.getTime())) return null;
-  return <time dateTime={date.toISOString()} title={absTime(date)}>{untilShort(date)}</time>;
 }
 
 function dataAttributes(data: Record<string, string> | undefined): Record<string, string> {

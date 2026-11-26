@@ -109,7 +109,7 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     check(send.is_visible() and send.is_enabled(), f"{where}: text makes Send live")
     check(bool(circle) and abs(circle["width"] - circle["height"]) < 1, f"{where}: the primary is a circle ({circle})")
     box = composer.locator(".composer-box").bounding_box()
-    check(bool(box) and round(box["width"]) == 760, f"{where}: the composer is the conversation's 760 px column ({box and box['width']})")
+    check(bool(box) and round(box["width"]) == 840, f"{where}: the composer is the conversation's 840 px column ({box and box['width']})")
 
     # Where the chat starts: a chip inside the card, in the row of where and how the chat starts above
     # the model's row, "No project" first, with the run-on choice.

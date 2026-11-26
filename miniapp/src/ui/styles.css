@@ -9,6 +9,7 @@
 @import "./parts/workspace.css";
 @import "./parts/sidebar.css";
 @import "./parts/chat-parts.css";
+@import "./parts/secrets.css";
 @import "./parts/lists.css";
 @import "./parts/inbox.css";
 @import "./parts/board.css";

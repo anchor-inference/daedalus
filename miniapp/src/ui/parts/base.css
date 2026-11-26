@@ -6,6 +6,17 @@
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap; src: url("../../terminal/fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
 :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* The ring is a control's. A region — the conversation's scroller (Chromium makes a scroller focusable
+   when nothing in it is), the panel's body, a sheet, the phone's drawer, a settings page — is focused
+   by the browser or by a script putting the focus somewhere safe, and after a message sent with Enter
+   the browser counts any such focus as keyboard focus: the whole conversation drew a violet ring. So
+   it draws none, unless the reader reached it with Tab (`data-tabbed`, focusorigin.ts). Controls are
+   what is native, what the author put in the tab order, and the widget roles; their own rules below
+   keep their rings. */
+:focus-visible:not(:where(a[href], button, input, select, textarea, summary, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"]),
+  [role="button"], [role="link"], [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"],
+  [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [role="separator"], [role="gridcell"], [role="row"], [role="listbox"], [role="combobox"],
+  [role="textbox"], [role="spinbutton"], [role="searchbox"]), [data-tabbed]) { outline: none; }
 /* A scroll bar is a thin thumb with no track, on every scroller: the platform's wide grey one cut a
    lane out of every panel and popover it appeared in. */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
