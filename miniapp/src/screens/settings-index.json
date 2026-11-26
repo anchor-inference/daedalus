@@ -298,9 +298,9 @@
     },
     {
       "section": "text", "anchor": "appearance.column", "config": null,
-      "title": { "en": "Column width", "ru": "Ширина колонки" },
-      "about": { "en": "How wide the stripe is that the conversation and the composer share.", "ru": "Насколько широка полоса, в которой идут переписка и поле ввода." },
-      "synonyms": ["column width", "wide layout", "chat width", "narrow", "ширина", "ширина колонки", "широкий чат", "узкий"]
+      "title": { "en": "Conversation width", "ru": "Ширина разговора" },
+      "about": { "en": "How wide the stripe is that the conversation and the composer share: 720, 840 or 960 px, or the whole room.", "ru": "Насколько широка полоса, в которой идут переписка и поле ввода: 720, 840 или 960 px, либо всё свободное место." },
+      "synonyms": ["conversation width", "column width", "width", "chat width", "wide layout", "full width", "narrow", "wide", "ширина", "ширина разговора", "ширина колонки", "ширина чата", "на всю ширину", "широкий чат", "узкий"]
     },
     {
       "section": "text", "anchor": "appearance.radius", "config": null,

@@ -9,8 +9,9 @@ What is checked:
 - a chat sent while private is created with ``private: true``, and one sent after the chip turned it
   off is created without the field;
 - the New agent sheet offers the same choice and sends it;
-- a private session carries the mark on its sidebar row (desktop), on its Chats row and in the drawer
-  (phone), and the badge in its header; an ordinary session carries none.
+- a private session says so in its sidebar row's name and tooltip (desktop; its slot draws the glyph
+  only when nothing outranks it), carries the mark on its Chats row (phone), and the badge in its
+  header; an ordinary session carries none.
 
     APP_URL=http://127.0.0.1:8163/app python3 tests/browser/check_private_chat.py
 """
@@ -160,9 +161,15 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
         page.goto(f"{BASE}/agents/{S4}?token=t&lang={lang}")
         row = page.locator(f".sidebar [data-session='{S4}']").first
         expect(row).to_be_visible(timeout=15000)
-        expect(row.locator(".private-mark")).to_be_visible()
-        if page.locator(f".sidebar [data-session='{S1}'] .private-mark").count():
-            say("an ordinary chat is marked private in the sidebar")
+        # The row's slot draws one glyph, and this chat's kind (a browser chat) outranks private: the
+        # row says private in its name and tooltip, which every row does whatever its slot shows.
+        if words["menu"] not in (row.get_attribute("aria-label") or "") or words["menu"] not in (row.get_attribute("title") or ""):
+            say(f"the private chat's row does not say it is private: {row.get_attribute('aria-label')!r}")
+        # Every other row the column draws is an ordinary chat; none may say or show private.
+        others = page.locator(f".sidebar [data-session]:not([data-session='{S4}'])").evaluate_all(
+            "rows => rows.map((row) => ({ label: row.getAttribute('aria-label') || '', mark: !!row.querySelector('.private-mark') }))")
+        if not others or any(o["mark"] or words["menu"] in o["label"] for o in others):
+            say(f"an ordinary chat is marked private in the sidebar ({len(others)} rows)")
         badge = page.locator(".chat-title-line .private-badge")
         expect(badge).to_be_visible(timeout=15000)
         expect(badge).to_contain_text(words["badge"])

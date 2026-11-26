@@ -300,7 +300,9 @@ def composer(browser, width: int, failures: list[str]) -> None:  # type: ignore[
     page.wait_for_timeout(100)
     rows = page.locator(".model-picker [role=option][data-preset]:not(.on)").filter(has_text="Bulk Model")
     target = rows.nth(min(5, rows.count() - 1))
-    label = target.locator(".model-row-name").inner_text().strip()
+    # The text, not the rendered lines: a long name is drawn as a head and a tail kept apart so that it
+    # can be cut in its middle, and the rendered text has a line break between the two.
+    label = (target.locator(".model-row-name").text_content() or "").strip()
     target_id = next((k for k, v in settings_with_models()["presets"].items() if v["label"] == label), "")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/composer-{width}-open.png")

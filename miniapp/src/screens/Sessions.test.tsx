@@ -122,27 +122,48 @@ describe("the sidebar", { timeout: 30_000 }, () => {
     expect(localStorage.getItem("daedalus.folder.esp")).toBeNull();
   });
 
-  it("draws a chat in one line: its state in a word or its time, its marks, the model in its tooltip", async () => {
+  it("draws a chat in one line: a glyph in its slot, its state in a word or its time, the rest in its name", async () => {
     await render();
     const waiting = host.querySelector('[data-session="h1"]')!;
     expect(waiting.querySelector(".sb-word.waiting")?.textContent).toBe("needs you");
-    // The word takes the time's place: a row says one thing at its right edge.
+    // The word takes the time's place: a row says one thing at its right edge, and its state is a
+    // dot in its slot as well, where the eye runs down the list.
     expect(waiting.querySelector(".sb-time")).toBeNull();
+    expect(waiting.querySelector(".sb-gut .sb-pip.waiting")).not.toBeNull();
+    // One of the two chats outside projects runs on the host, so the container is the rule and the
+    // host one carries a lock in its slot; no pill is drawn on any row.
     const onHost = host.querySelector('[data-session="c2"]')!;
-    expect(onHost.querySelector(".host-mark .term-env.host")).not.toBeNull();
+    expect(onHost.querySelector(".sb-gut.g-env-host")).not.toBeNull();
+    expect(host.querySelector('[data-session="c1"] .sb-gut.g-env-container')).toBeNull();
+    expect(host.querySelector(".term-env, .host-mark")).toBeNull();
     expect(onHost.querySelector(".sb-word")).toBeNull();
     expect(onHost.getAttribute("title")).toContain("Local model");
+    expect(onHost.getAttribute("title")).toContain("On the host");
+    expect(onHost.getAttribute("aria-label")).toContain("On the host");
     expect(onHost.querySelector(".sb-time")?.getAttribute("title")).toBeTruthy();
     const unread = host.querySelector('[data-session="c1"]')!;
     expect(unread.classList.contains("unread")).toBe(true);
-    expect(unread.querySelector(".unread-dot")).not.toBeNull();
+    expect(unread.querySelector(".sb-gut .unread-dot")).not.toBeNull();
     // Natively every chat runs on the host, so nothing is marked. A fresh tree: a memoised row
     // hears of the environment from its query, which this fake does not publish.
     environments.docker = false;
     await act(async () => root.unmount());
     root = createRoot(host);
     await render();
-    expect(host.querySelector(".host-mark")).toBeNull();
+    expect(host.querySelector(".g-env-host, .sb-env")).toBeNull();
+    expect(host.querySelector('[data-session="c2"]')?.getAttribute("aria-label")).not.toContain("On the host");
+  });
+
+  it("says once, on the Chats label and a project's line, that their chats run on the host", async () => {
+    listing.data.sessions = listing.data.sessions.map((s) => (s.id === "c1" || s.id === "h1" || s.id === "h2" ? { ...s, env: "host" as const } : s));
+    await render();
+    expect(host.querySelector(".sb-sec-chats .sb-env")?.getAttribute("data-env-rule")).toBe("all");
+    expect(host.querySelector('[data-project="home"] .sb-prow .sb-env')?.getAttribute("aria-label")).toBe("Every chat here runs on the host");
+    expect(projectRow("home").getAttribute("aria-label")).toContain("Every chat here runs on the host");
+    expect(host.querySelector('[data-project="esp"] .sb-env')).toBeNull();
+    // The rows themselves say nothing in their slots: the rule is their group's.
+    expect(host.querySelector(".g-env-host, .g-env-container")).toBeNull();
+    expect(host.querySelector('[data-session="c1"]')?.getAttribute("aria-label")).toContain("On the host");
   });
 
   it("leads to every project from the Projects label, and makes one with its +", async () => {
@@ -262,7 +283,7 @@ describe("the sidebar", { timeout: 30_000 }, () => {
     expect((await menuOf('[data-session="h2"]')).some((b) => b.textContent === "Make a project")).toBe(false);
   });
 
-  it("lists no subagents in a chat's menu: the plate folds them out instead", async () => {
+  it("lists no subagents in a chat's menu: the row's slot folds them out instead", async () => {
     listing.data.sessions = [...listing.data.sessions,
       chat("k1", "c2", 30, { title: "[sub] lint", metadata: { subagent_of: "c2", subagent_name: "lint" } }),
       chat("k2", "c2", 30, { title: "[sub] build", metadata: { subagent_of: "c2", subagent_name: "build" } })];
@@ -270,7 +291,13 @@ describe("the sidebar", { timeout: 30_000 }, () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[data-session="c2"] .sb-acts button[aria-haspopup="menu"]')!.click());
     const words = Array.from(document.querySelectorAll('[role="menuitem"]')).map((b) => b.textContent ?? "");
     expect(words.some((w) => w.includes("lint") || w.includes("build"))).toBe(false);
-    expect(host.querySelector('[data-session="c2"] .sb-subs')).not.toBeNull();
+    const fold = host.querySelector<HTMLButtonElement>('[data-session="c2"] .sb-fold')!;
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector('[data-session="c2"]')?.getAttribute("aria-label")).toContain("2 subagents");
+    await act(async () => fold.click());
+    expect(Array.from(host.querySelectorAll(".sb-sub")).map((r) => (r as HTMLElement).dataset.subagent)).toEqual(["k1", "k2"]);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-session="c2"] .sb-fold')!.click());
+    expect(host.querySelectorAll(".sb-sub")).toHaveLength(0);
   });
 
   it("lists what is pinned in a block above both sections, and not again below it", async () => {

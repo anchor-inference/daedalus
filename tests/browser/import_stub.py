@@ -371,6 +371,8 @@ def imported_session(base: dict[str, Any]) -> dict[str, Any]:
 
 
 def imported_row(base: dict[str, Any]) -> dict[str, Any]:
-    """The chat's row in the session list, with the program it came from for its plate's corner mark."""
+    """The chat's row in the session list, with the program it came from for its row's mark. An ordinary
+    chat that holds nothing now: copied from a row driving the reader's Chrome, it borrowed that
+    chat's browser mark, which a row's slot draws before the program's letter."""
     return {**base, "id": IMPORTED_ID, "title": "Rebind the Aqara lock after the battery change", "env": "host", "status": "idle",
-            "last_message_at": _ago(minutes=2), "imported_from": "claude"}
+            "last_message_at": _ago(minutes=2), "imported_from": "claude", "kind": "chat", "controlling": []}

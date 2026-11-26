@@ -6,7 +6,7 @@
 // move when a project is entered. Folded, it is gone like the other columns.
 
 import { useState, type ReactNode, type RefObject } from "react";
-import type { Ask } from "../api";
+import type { Ask, TerminalEnvName } from "../api";
 import type { ProjectBoardData } from "../board/board";
 import { useStreamUp } from "../events";
 import { plural, t } from "../i18n";
@@ -46,6 +46,7 @@ export type ProjectSidebarProps = {
 
 export function ProjectSidebar(p: ProjectSidebarProps) {
   const { project } = useProject(p.projectId);
+  const projectEnv: TerminalEnvName = project?.settings.default_env ?? project?.folders[0]?.env ?? "container";
   const { team, board, terminals, sessions, wakeups: alarms, watches } = useFocus(p.projectId);
   const usage = useUsage(p.projectId);
   const live = useStreamUp();
@@ -91,7 +92,7 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
           <div className="focus-project">
             <div className="focus-project-line">
               <span className="focus-project-name truncate">{project?.name ?? "…"}</span>
-              {project && <EnvPill env={project.settings.default_env ?? project.folders[0]?.env ?? "container"} tiny />}
+              {project && <EnvPill env={projectEnv} tiny />}
               {project && <RevealButton target={{ project_id: project.id }} className="focus-project-reveal" />}
             </div>
             {project && (
@@ -127,12 +128,12 @@ export function ProjectSidebar(p: ProjectSidebarProps) {
               {team && <IconButton icon="plus" size={28} className="sb-sec-add" label={t("team.hire")} onClick={() => setHiring(true)} />}
             </div>
             {team && members.length === 0 && <div className="focus-none">{t("focus.nobody")}</div>}
-            {members.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} />)}
+            {members.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} projectEnv={project ? projectEnv : undefined} />)}
 
             {oneOff.length > 0 && (
               <>
                 <div className="sb-sec focus-sec"><span>{t("focus.oneoff")} <span className="n">{oneOff.length}</span></span></div>
-                {oneOff.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} compact />)}
+                {oneOff.map((m) => <StaffRow key={m.id} projectId={p.projectId} member={m} taskTitle={m.live?.task_id ? tasks.get(m.live.task_id)?.title : undefined} current={isCurrent(p.view, m)} projectEnv={project ? projectEnv : undefined} compact />)}
               </>
             )}
 
@@ -201,22 +202,24 @@ function isCurrent(view: FocusView, member: Staff): boolean {
 /** A member of the team: who, what they are on, what runs them, and a dot for how it goes. A launch
  *  waiting in the queue says why it waits — "queued" alone is the question the operator would then
  *  have to go and ask. */
-function StaffRow({ projectId, member, taskTitle, current, compact }: { projectId: string; member: Staff; taskTitle?: string; current: boolean; compact?: boolean }) {
+function StaffRow({ projectId, member, taskTitle, current, compact, projectEnv }: { projectId: string; member: Staff; taskTitle?: string; current: boolean; compact?: boolean; projectEnv?: TerminalEnvName }) {
   const tone = staffTone(member);
   const wait = firstWait(member);
   const line = wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : taskTitle ?? t(`focus.tone.${tone}`);
   // One line: the face, the name, then what the member is on — a waiting launch's reason in the
   // attention colour — and the dot for how it goes. The role and the whole line are the tooltip.
-  const title = [member.role ? `${member.name} · ${member.role}` : member.name, wait?.detail || member.live?.waiting_for || line].filter(Boolean).join("\n");
+  // Where the member runs is the project's, said once on the column's head; a member that runs
+  // elsewhere says so by a quiet glyph, never the amber pill that stood on every host member's row.
+  const env: TerminalEnvName = member.env || projectEnv || "container";
+  const envOff = !!projectEnv && env !== projectEnv;
+  const title = [member.role ? `${member.name} · ${member.role}` : member.name, wait?.detail || member.live?.waiting_for || line, projectEnv ? t(`side.row.env.${env}`) : ""].filter(Boolean).join("\n");
   return (
     <button className={`sb-row focus-staff ${current ? "current" : ""} ${compact ? "compact" : ""}`} onClick={() => openMember(projectId, member)} aria-current={current ? "page" : undefined} title={title}>
       <StaffAvatar name={member.name} color={member.color} size="small" />
       <span className="focus-staff-name">{member.name}</span>
       {!compact && <span className={`focus-staff-line truncate ${wait ? "waits" : ""}`}>{line}</span>}
       {compact && <span className="grow" />}
-      {/* The same outlined chip that marks a host terminal: an amber word inside the name once read as
-          part of the role, or as a warning that had leaked out of the status line. */}
-      {member.env === "host" && <EnvPill env="host" tiny />}
+      {envOff && <span className="sb-env" role="img" aria-label={t(`side.row.env.${env}`)} title={t(`side.row.env.${env}`)}><Icon name={env === "host" ? "lock" : "terminal"} size={12} /></span>}
       <HarnessBadge harness={member.harness} />
       <span className={`focus-dot tone-${tone}`} aria-label={t(`focus.tone.${tone}`)} role="img" />
     </button>
