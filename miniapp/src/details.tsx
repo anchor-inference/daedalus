@@ -14,11 +14,12 @@ import { projectPath } from "./folders";
 import { ServiceRow, Switch, ToolPicker, fmtInt, fmtUsd, loopLabel, statusWord, timeAgo } from "./ui/components";
 import { absTime, clock, duration, planName, relTimeLong, shortDateTime, shortModel, untilShort } from "./format";
 import { Icon, type IconName } from "./icons";
-import { CopyValue, Fact, Facts, Headline, Meter, Note, Stat, Stats, Until } from "./detailsparts";
+import { CopyValue, Fact, Facts, Headline, Note, Stat, Stats } from "./detailsparts";
 import { contextSegments, contextTone, quotaTone } from "./detailsmodel";
 import { confirmAsync, errorText, fmtTok } from "./ui";
 import { plural, t } from "./i18n";
 import { SessionToolGroups } from "./toolgroupsview";
+import { QuotaRows } from "./quotarow";
 import { ServerGrantButton, StandingGrants, type Standing } from "./servergrant";
 import { McpQuickAdd } from "./mcpquickadd";
 import { SessionSubagentModels } from "./subagentmodels";
@@ -665,7 +666,8 @@ export function ProviderSummary({ usage }: { usage: ProviderUsage | null }) {
   return <>{fmtUsd(usage.today?.cost_usd)}<span className="quiet">{t("details.prop.today")}</span></>;
 }
 
-/** What the session's provider has left: a subscription's windows, or the day's metered spend and balance. */
+/** What the session's provider has left: a subscription's windows, or the day's metered spend and
+ *  balance. A window is the same line the Overview draws (quotarow.tsx), so the two never disagree. */
 export function ProviderUsageBody({ usage }: { usage: ProviderUsage | null }) {
   const sub = usage?.subscription;
   const today = usage?.today ?? {};
@@ -677,10 +679,7 @@ export function ProviderUsageBody({ usage }: { usage: ProviderUsage | null }) {
     {!usage && <div className="dt-hint">…</div>}
     {sub && !sub.logged_in && <div className="dt-hint">{t("usage.notloggedin")}</div>}
     {sub?.error && <Note tone="bad">{sub.error}</Note>}
-    {(sub?.windows ?? []).map((w) => (
-      <Meter key={w.name} label={w.name} percent={w.used_percent} tone={quotaTone(w.used_percent)} data={{ quota: w.name }}
-        detail={w.resets_at ? <>{t("details.quota.resets")} <Until at={w.resets_at} /></> : undefined} />
-    ))}
+    {(sub?.windows?.length ?? 0) > 0 && <QuotaRows windows={sub!.windows!} />}
     {usage && (
       <div className="dt-hint dt-provider-today">
         {t("session.provider.today", { calls: plural("usage.calls", today.calls ?? 0), in: fmtTok(today.input_tokens), out: fmtTok(today.output_tokens) })}

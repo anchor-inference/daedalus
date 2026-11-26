@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The icon set is a façade: 131 names that things outside the bundle also use (the navigation
+// The icon set is a façade: 132 names that things outside the bundle also use (the navigation
 // config, a page's manifest, the calendar's types, an answer's flow blocks), each drawn by one glyph
 // of the `lucide` package. These claims keep it honest: every name has its glyph, the two renderers
 // draw the same thing, and a size a screen asks for lands on the scale.
@@ -11,7 +11,7 @@ import { ICON_NAMES, ICON_SIZES, ICON_STROKE, Icon, type IconName, iconSvg, isIc
 /** The name the app has used, and the canonical Lucide export that draws it. `logo` is the product's
  *  mark, not an icon, and keeps its own drawing. */
 const GLYPHS: Record<Exclude<IconName, "logo">, keyof typeof lucide> = {
-  open: "LogIn", info: "Info", gauge: "Gauge", coin: "Coins", brain: "Brain", cut: "Scissors", selectall: "ScanText", hand: "Hand", star: "Star", gift: "Gift", ffwd: "FastForward", utensils: "Utensils", cart: "ShoppingCart",
+  open: "LogIn", info: "Info", gauge: "Gauge", coin: "Coins", brain: "Brain", activity: "Activity", cut: "Scissors", selectall: "ScanText", hand: "Hand", star: "Star", gift: "Gift", ffwd: "FastForward", utensils: "Utensils", cart: "ShoppingCart",
   dumbbell: "Dumbbell", plane: "Plane", home: "House", list: "List", heart: "Heart", book: "Book", chat: "MessageCircle",
   headset: "Headset", database: "Database", mail: "Mail", cloud: "Cloud", checkcircle: "CircleCheck", note: "FileText",
   bold: "LetterB", italic: "Italic", strike: "Strikethrough", code: "Code", heading: "LetterH", quote: "TextQuote",
@@ -43,11 +43,11 @@ const shapes = (svg: string): Shape[] => Array.from(new DOMParser().parseFromStr
 const expected = (glyph: Node[]): Shape[] => glyph.map(([tag, attrs]) => [tag, Object.entries(attrs).sort(byName)]);
 
 describe("the set", () => {
-  // Each of the 131 names is drawn and parsed back by jsdom's DOMParser, and the three loops below do
+  // Each of the 132 names is drawn and parsed back by jsdom's DOMParser, and the three loops below do
   // that again and again: about a tenth of a second on an idle machine, over the default five seconds
   // on a busy one.
-  it("keeps all 131 names, each drawn by the glyph the mapping names", { timeout: 30_000 }, () => {
-    expect(ICON_NAMES.length).toBe(131);
+  it("keeps all 132 names, each drawn by the glyph the mapping names", { timeout: 30_000 }, () => {
+    expect(ICON_NAMES.length).toBe(132);
     expect(new Set(ICON_NAMES)).toEqual(new Set([...Object.keys(GLYPHS), "logo"]));
     for (const [name, exportName] of Object.entries(GLYPHS)) {
       const glyph = lucide[exportName] as unknown as Node[];

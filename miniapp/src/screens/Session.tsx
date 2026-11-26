@@ -4,7 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation, type TranslatingMessage } from "../api";
 import { Chevron, Dot, Status, copyText, fmtInt, fmtUsd, statusWord, timeAgo } from "../ui/components";
 import { MenuItem, OverflowMenu, Sheet, confirmDialog, toast as actionToast } from "../ui/dialogs";
-import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
+import { absDate, absTime, clock, commandPreview, duration, fullTime, planName, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
 import { PrivateBadge, isPrivate } from "../privatechat";
@@ -113,8 +113,8 @@ import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
-import { Overview, QuotaWindows, type OverviewRow, type OverviewStatus } from "../paneloverview";
-import { quotaTone } from "../detailsmodel";
+import { Overview, type OverviewRow, type OverviewStatus, type OverviewUsage } from "../paneloverview";
+import type { DifferenceTarget } from "../overviewfacts";
 import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
@@ -1788,7 +1788,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("files") && hasDetails ? [{ id: "files", icon: "folder" as IconName, label: t("panel.tab.files"), onSelect: () => panel.open("files") }] : []),
     ...(hasDetails ? [{ id: "details", icon: "settings" as IconName, label: t("panel.tab.details"), onSelect: () => { setDetailsFocus("session"); panel.open("details"); } }] : []),
     ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
-    ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
+    ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "activity" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
     ...(panelTabs.includes("notes") ? [{ id: "notes", icon: "note" as IconName, label: t("panel.tab.notes"), count: notesCount || undefined, onSelect: () => panel.open("notes") }] : []),
     ...(boardOffered ? [{ id: "board", icon: "board" as IconName, label: t("panel.tab.board"), count: boardFigures.open || undefined, onSelect: () => panel.open("board") }] : []),
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
@@ -1819,7 +1819,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           "-" as const,
           { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
           ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
-          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "activity" as IconName, onSelect: () => panel.open("jobs") }] : []),
           ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
         ]
       : []),
@@ -1840,7 +1840,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           { label: t("panel.tab.details"), icon: "settings" as IconName, onSelect: () => { setDetailsFocus("session"); panel.open("details"); } },
           ...(panelTabs.includes("files") ? [{ label: t("session.files"), icon: "folder" as IconName, onSelect: () => panel.open("files") }] : []),
           ...(revealer ? [{ label: revealer.label, icon: "external" as IconName, onSelect: revealWorkspace }] : []),
-          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "terminal" as IconName, onSelect: () => panel.open("jobs") }] : []),
+          ...(panelTabs.includes("jobs") ? [{ label: t("panel.tab.jobs"), icon: "activity" as IconName, onSelect: () => panel.open("jobs") }] : []),
           ...(panelTabs.includes("notes") ? [{ label: t("panel.tab.notes"), icon: "note" as IconName, onSelect: () => panel.open("notes") }] : []),
           { label: t("session.mcp"), icon: "plug" as IconName, onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } },
         ]
@@ -1907,17 +1907,33 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   </> : null;
   const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
   const boardTag = `${boardFigures.done}/${boardFigures.all}`;
-  // What the chat's model costs, on the front page: the windows of the subscription it runs on (what
-  // "$0 · today unmetered" said nothing about), else the metered spend. A subscription the host has no
-  // windows for draws nothing rather than zeros; a reading left from another chat's provider is ignored.
+  // What the chat's model costs, on the front page: the subscription it runs on as a block of its
+  // windows (what "$0 · today unmetered" said nothing about), else the metered spend as a row. A
+  // subscription the host has no windows for draws nothing rather than zeros, unless it is signed out
+  // or reports an error, which the reader has to hear; a reading left from another chat's provider is ignored.
   const usageKnown = !!provider && providerUsage?.provider === provider;
   const subscription = usageKnown ? providerUsage!.subscription : undefined;
   const quotaWindows = subscription?.windows ?? [];
+  const usageNote = subscription && !subscription.logged_in ? t("usage.notloggedin") : subscription?.error || "";
+  const overviewUsage: OverviewUsage | null = detail && subscription && (quotaWindows.length > 0 || subscription.limit_reached || usageNote)
+    ? { provider, name: providerLabel(provider), plan: planName(subscription.plan), account: detail.account || undefined, windows: quotaWindows, limit: !!subscription.limit_reached, note: usageNote || undefined }
+    : null;
   const today = detail ? spendToday(detail.usage) : null;
-  const usageRow: OverviewRow | null = !detail || (!usageKnown && !((detail.usage.usd ?? 0) > 0)) ? null
-    : quotaWindows.length ? { tab: "usage", kind: "subscription", name: providerLabel(provider), text: <QuotaWindows windows={quotaWindows} />, tag: subscription?.limit_reached ? t("usage.limitreached") : undefined, tone: subscription?.limit_reached || quotaWindows.some((w) => quotaTone(w.used_percent) !== "ok") ? "attn" : undefined }
+  const usageRow: OverviewRow | null = !detail || overviewUsage || (!usageKnown && !((detail.usage.usd ?? 0) > 0)) ? null
     : subscription && !((detail.usage.usd ?? 0) > 0) ? null
     : { tab: "usage", kind: "spend", name: t("panel.tab.usage"), text: detail.usage.usd_today != null && detail.usage.usd_today > 0 ? `${fmtUsd(detail.usage.usd)} ${today!.short}` : fmtUsd(detail.usage.usd) };
+  // What the Overview's block of differences is built from: what Details shows, plus what waits in the
+  // composer. Its rows open the place their Details line opens.
+  const overviewFacts = detail ? { detail, conductor: orchestrating || main, schedules, approvals: detail.open_approvals?.length ?? 0, queued: queuedInput.length, moving: !!folderMove } : undefined;
+  const openDifference = (target: DifferenceTarget) => {
+    if (!target) return;
+    if ("details" in target) {
+      setDetailsFocus(target.details);
+      panel.open("details");
+      return;
+    }
+    document.querySelector<HTMLElement>(target.composer === "approval" ? ".composer .approval-card button" : ".composer .steer button")?.focus();
+  };
   const overviewRows: OverviewRow[] = !detail ? [] : [
     ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
     ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
@@ -2281,7 +2297,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           context={panelContext}
           figures={panelFigures}
           pages={{
-            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
+            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} usage={panelTabs.includes("usage") ? overviewUsage : null} facts={panelTabs.includes("details") ? overviewFacts : undefined} onDifference={openDifference} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
               onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))}
               onDetails={panelTabs.includes("details") && !panel.state.open.includes("details") ? () => panel.open("details") : undefined} />,
             ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
