@@ -13,7 +13,9 @@ in English and in Russian and refuses:
 - a control outside the composer's pill;
 - a circle that is not whole, not the phone's size, or not at the row's end;
 - a model name cut below a recognisable prefix, or an effort that is missing or cut;
-- the language's pair on the phone's chip, or an access menu without the language row that opens the choice.
+- the language's pair on the phone's chip, or an access menu without the language row that opens the choice;
+- while the agent works: a card of another size than the idle one, or a row without the model chip, which
+  must reach 44 px, show ten characters and open the picker.
 
 A wide desktop window, a desktop composer narrowed by the side panel (at 1024 and 1366) and the two panes of the dual view
 are walked with the same claims, plus the desktop's own: the access chip says the pair ("EN ⇄ RU") where
@@ -112,13 +114,13 @@ def overlaps(controls: list[dict]) -> list[str]:
     return found
 
 
-def judge(facts: dict, where: str, phone: bool, narrow: bool) -> list[str]:
+def judge(facts: dict, where: str, phone: bool, narrow: bool, wanted: tuple[str, ...] = ("plus", "composer-access", "model-select", "ctx-ring", "mic", "primary")) -> list[str]:
     problems: list[str] = []
     box, controls, send = facts["box"], facts["controls"], facts["send"]
     names = [c["name"].split(".") for c in controls]
-    for wanted in ("plus", "composer-access", "model-select", "ctx-ring", "mic", "primary"):
-        if not any(wanted in n for n in names):
-            problems.append(f"{where}: no {wanted} in the row ({[c['name'] for c in controls]})")
+    for control in wanted:
+        if not any(control in n for n in names):
+            problems.append(f"{where}: no {control} in the row ({[c['name'] for c in controls]})")
     problems += [f"{where}: {line}" for line in overlaps(controls)]
     problems += [f"{where}: {part} is drawn outside it" for part in facts["spill"]]
     for c in controls:
@@ -210,6 +212,70 @@ def walk(browser, lang: str, width: int, phone: bool, panel: bool = False, dual:
     return problems
 
 
+def running(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-untyped-def]
+    """The phone's composer while the agent works: the same card, the same row, the model chip in it.
+
+    The chip was left out of a running phone composer, so the model could not be changed from a phone
+    during a turn, and the row's controls, losing the chip that pushed them apart, slid to its left
+    edge. Measured against the idle card at the same width: as tall, the chip present, 44 px to the
+    finger, ten characters of the name, and opening the picker. A draft written during the run puts
+    Stop beside the Queue circle; the context's number gives way to it, never the model."""
+    where = f"{lang} {width} running"
+    problems: list[str] = []
+    context = browser.new_context(viewport={"width": width, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark")
+    page = context.new_page()
+    page.route("**/api/**", stub)
+    cards: dict[str, dict] = {}
+    try:
+        for status in ("idle", "running"):
+            composer.HOST.status = status
+            page.goto(f"{BASE}/agents/{composer.SESSION}?token=t&scheme=dark&lang={lang}")
+            page.wait_for_selector(f".composer .roundbtn.primary[data-action='{'stop' if status == 'running' else 'send'}']", state="attached", timeout=15000)
+            page.wait_for_timeout(300)
+            cards[status] = page.locator(".composer:has(.composer-row)").first.evaluate(FACTS)
+        facts = cards["running"]
+        print(where, json.dumps({k: facts[k] for k in ("label", "shown", "effort")}, ensure_ascii=False), f"card {facts['box']['height']:.0f} (idle {cards['idle']['box']['height']:.0f})")
+        print("   ", " ".join(f"{c['name'].split('.')[-1]}[{c['left']:.0f}–{c['right']:.0f}]" for c in facts["controls"]))
+        problems += judge(facts, where, phone=True, narrow=False)
+        for side in ("height", "width", "left", "bottom"):
+            if abs(facts["box"][side] - cards["idle"]["box"][side]) > 0.5:
+                problems.append(f"{where}: the card's {side} is {facts['box'][side]:.0f}, idle {cards['idle']['box'][side]:.0f}")
+        # The circle keeps the card's right edge: without the chip the row's controls slid to its left.
+        if facts["send"] and cards["idle"]["send"] and abs(facts["send"]["right"] - cards["idle"]["send"]["right"]) > 0.5:
+            problems.append(f"{where}: the circle ends at {facts['send']['right']:.0f}, idle at {cards['idle']['send']['right']:.0f}")
+        chip = next((c for c in facts["controls"] if "model-select" in c["name"].split(".")), None)
+        if chip and chip["height"] < 44 - 0.5:
+            problems.append(f"{where}: the model chip is {chip['height']:.0f} px to the finger, under 44")
+        if SHOTS is not None:
+            SHOTS.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(SHOTS / f"running-{width}-{lang}.png"))
+        if chip:
+            page.locator(".composer .model-select").tap()
+            try:
+                expect(page.locator(".sheet .model-picker")).to_be_visible(timeout=5000)
+            except AssertionError:
+                problems.append(f"{where}: the model chip opens no picker")
+        if SHOTS is not None:
+            page.wait_for_timeout(300)
+            page.screenshot(path=str(SHOTS / f"running-picker-{width}-{lang}.png"))
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        page.locator(".composer .composer-field").first.click()
+        page.keyboard.type("Check the log")
+        page.wait_for_timeout(250)
+        typed = page.locator(".composer:has(.composer-row)").first.evaluate(FACTS)
+        print("    with a draft:", " ".join(f"{c['name'].split('.')[-1]}[{c['left']:.0f}–{c['right']:.0f}]" for c in typed["controls"]), f"model {typed['shown']}")
+        problems += judge(typed, f"{where} with a draft", phone=True, narrow=False, wanted=("plus", "composer-access", "model-select", "mic", "stop-aside", "queue"))
+        if abs(typed["box"]["height"] - cards["idle"]["box"]["height"]) > 0.5:
+            problems.append(f"{where} with a draft: the card is {typed['box']['height']:.0f} high, idle {cards['idle']['box']['height']:.0f}")
+        if SHOTS is not None:
+            page.screenshot(path=str(SHOTS / f"running-draft-{width}-{lang}.png"))
+    finally:
+        composer.HOST.status = "idle"
+        context.close()
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     original_asr = GATES["/api/asr"]
@@ -221,6 +287,7 @@ def run() -> int:
             for lang in ("en", "ru"):
                 for width in (360, 390, 430):
                     problems += walk(browser, lang, width, phone=True)
+                    problems += running(browser, lang, width)
                 problems += walk(browser, lang, 1440, phone=False)
                 problems += walk(browser, lang, 1024, phone=False, panel=True)
                 problems += walk(browser, lang, 1366, phone=False, panel=True)
