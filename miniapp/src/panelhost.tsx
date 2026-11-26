@@ -5,7 +5,7 @@
 // and close. On a desktop it is a column beside the conversation; on a phone the same tabs in a
 // full-height sheet. The state is a value (panel.ts); this file draws it and wires the pointer and keys.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { Sheet, toast as statusToast, useLayer } from "./ui/dialogs";
 import { OverflowMenu, Popover } from "./ui/primitives";
@@ -55,7 +55,7 @@ import {
   togglePanel,
 } from "./panel";
 import { navigate, pathFor } from "./router";
-import { PreviewSource, Viewer, ViewerInfo } from "./preview";
+import { FileName, PreviewSource, Viewer, ViewerInfo } from "./preview";
 import { HtmlNavigation } from "./htmlpreview";
 import { SPLIT_MIN, TREE_W, TREE_W_MIN, TREE_W_MAX } from "./explorer";
 import { PaneHandle, clampWidth, pixelDrag, usePaneWidth, type PaneDrag } from "./layout";
@@ -392,16 +392,19 @@ function Toolbar(props: HostProps) {
       <button className="iconbtn small" onClick={html ? html.back ?? undefined : onBack} disabled={html ? !html.back : !canGoBack(state)} aria-label={t("panel.back")} title={t("panel.back")}><Icon name="back" size={16} /></button>
       <button className="iconbtn small" onClick={html ? html.forward ?? undefined : onForward} disabled={html ? !html.forward : !canGoForward(state)} aria-label={t("panel.forward")} title={t("panel.forward")}><Icon name="forward" size={16} /></button>
       <button className="iconbtn small" onClick={html ? html.reload : local.reload} aria-label={t("panel.reload")} title={t("panel.reload")}><Icon name="reload" size={16} /></button>
-      <div className="panel-crumbs" aria-label={t("panel.crumbs")}>
+      {/* The file's name is what the line is for: it is drawn whole, and the folders above it give
+          way from their start ("… › 31e1d9f9ac29 › name"), the full path in the tooltip. The line
+          used to cut the name ("langpt-") and keep every folder. */}
+      <div className="panel-crumbs" aria-label={t("panel.crumbs")} title={entry ? `${root} / ${html?.path ?? entry.path}` : undefined}>
         {/* A panel without a Files tab shows its root as a name, not a way to a tab it does not
             offer. */}
-        {files !== undefined ? <button className="crumb" onClick={() => onTab("files")} title={t("panel.tab.files")}>{root}</button> : <span className="crumb">{root}</span>}
-        {crumbs.map((c, i) => (
-          <span key={i} className={i === crumbs.length - 1 ? "crumb last" : "crumb"}>
-            <span className="sep">›</span>
-            {c}
+        {files !== undefined ? <button className="crumb root" onClick={() => onTab("files")} title={t("panel.tab.files")}>{root}</button> : <span className="crumb root">{root}</span>}
+        {crumbs.length > 1 && (
+          <span className="crumb dirs">
+            <span dir="ltr">{crumbs.slice(0, -1).map((c, i) => <Fragment key={i}><span className="sep">›</span>{c}</Fragment>)}</span>
           </span>
-        ))}
+        )}
+        {crumbs.length > 0 && <span className="crumb last"><span className="sep">›</span><FileName name={crumbs[crumbs.length - 1]} /></span>}
         {!entry && <span className="sub">{t("panel.preview.none")}</span>}
       </div>
       {entry && (

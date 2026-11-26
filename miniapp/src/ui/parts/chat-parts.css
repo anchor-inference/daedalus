@@ -13,6 +13,10 @@ body.resizing iframe { pointer-events: none; }
 .chat.pane-right { border-left: 1px solid var(--line); }
 .chat.pane .chat-head { padding: 0 12px; }
 .chat.pane .chat-scroll, .chat.pane .composer { padding-left: 16px; padding-right: 16px; }
+/* A phone's composer card stands on the page's 16 px line, as the conversation above it and every
+   page's cards do; at 12 it was the one block of the screen nearer the edge. Here rather than in the
+   composer's own sheet, which this one follows, so the card keeps its own rules in one place. */
+@media (max-width: 1023px) { .composer[data-shape] { padding-inline: var(--gutter); } }
 @media (min-width: 1024px) {
   .app > .dual { grid-area: 1 / 1 / -1 / -1; }
 }
@@ -246,7 +250,11 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .sheet.preview { max-height: 92%; }
 .preview-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-14); font-weight: 600; overflow: hidden; white-space: nowrap; }
 .preview-glyph { display: inline-flex; flex: none; color: var(--fg-2); }
-.preview-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.preview-file { display: flex; min-width: 0; }
+/* A file's name gives way in its middle (preview.tsx, FileName): the head is cut, the end is kept. */
+.file-name { display: inline-flex; min-width: 0; max-width: 100%; }
+.file-name-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.file-name-tail { flex: none; white-space: pre; }
 .preview-name .sub { flex: none; font-weight: 400; color: var(--fg-3); }
 .sheet.preview .sheet-head { gap: 4px; }
 .sheet.preview .sheet-head h3 { flex: 1; min-width: 0; }
@@ -354,13 +362,30 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 }
 @media (prefers-reduced-motion:reduce) { .inline-media-loading { animation:none; } .media-viewer-stage img { transition:none; } }
 .preview-doc { font-size: var(--fs-prose); line-height: var(--lh-prose); }
+/* A document's table in a narrow pane scrolls sideways in its strip, as a sheet's does, rather than
+   folding its columns to a word a line: a 400 px panel drew rows a hundred pixels tall. */
+.preview-doc .tablewrap table { width: max-content; min-width: 100%; }
+.preview-doc .tablewrap :is(th, td) { max-width: 26em; }
 .preview-doc.docx img { max-width: 100%; height: auto; }
 .preview-doc.docx table { border-collapse: collapse; margin: 0 0 10px; }
 .preview-doc.docx td, .preview-doc.docx th { border: 1px solid var(--line); padding: 4px 8px; }
-.preview-grid { flex: 1; overflow: auto; }
-.preview-grid table { width: auto; min-width: 100%; font-size: var(--fs-12); white-space: nowrap; }
-.preview-grid th { position: sticky; top: 0; background: var(--inset); z-index: 1; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
-.preview-grid td, .preview-grid th { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+/* A sheet or a CSV: a framed table that ends at its last row and scrolls both ways inside the frame
+   when it is larger, its head row staying in view. Rows of the lists' 32 px, the text at 13. A cell
+   over a few words wraps in a column of a readable width (preview.tsx marks it `long`); the short ones
+   keep to their line, so a wide sheet scrolls sideways (its far edge fades) instead of folding every
+   column. Cells were cut with an ellipsis at 360 px, which left the end of a sentence unreadable on a
+   touch screen. */
+.preview-grid { flex: 0 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); overscroll-behavior: contain; }
+.preview-grid:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The table's own width fits the frame while its columns' least widths allow, and only then goes wider:
+   as wide as every column's most, it stood 14 px past a 550 px panel with room to wrap. */
+.preview-grid table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-13); }
+.preview-grid th, .preview-grid td { min-height: var(--row-h); box-sizing: border-box; padding: 6px 12px; border-bottom: 1px solid var(--line); line-height: 20px; text-align: left; vertical-align: top; white-space: nowrap; }
+.preview-grid :is(th, td).long { min-width: 14em; max-width: 26em; white-space: normal; overflow-wrap: anywhere; }
+.preview-grid th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.preview-grid :is(th, td).num { width: 1%; color: var(--fg-3); text-align: right; font-variant-numeric: tabular-nums; }
+.preview-grid tbody tr:last-child td { border-bottom: 0; }
+.preview-grid-note { flex: none; padding: 6px 0 0; }
 .preview-tabs { margin-bottom: 8px; overflow-x: auto; flex: none; }
 .preview-tabs .segmented { width: max-content; }
 /* A file the app cannot draw: what it is called, why there is nothing to see, the way to have it. */

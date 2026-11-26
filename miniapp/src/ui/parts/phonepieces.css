@@ -24,7 +24,8 @@
   /* A pinned project's chats hang under its row, indented by the lead's width so the row reads as theirs. */
   .ph-pinkids { padding-left: var(--space-5); }
   .ph-pinchev { display: inline-flex; color: var(--fg-3); }
-  .ph-sec-act { margin-left: auto; display: inline-flex; align-items: center; margin-right: -12px; }
+  /* The link's word ends on the 16 px line; its 8 px of padding hang into the gutter, no more. */
+  .ph-sec-act { margin-left: auto; display: inline-flex; align-items: center; margin-right: -8px; }
   .ph-sec.warn { color: var(--warn); }
   .ph-sec.bad { color: var(--bad); }
   .ph-link { min-width: var(--row-h-touch); min-height: var(--row-h-touch); display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); font-weight: 500; cursor: pointer; }

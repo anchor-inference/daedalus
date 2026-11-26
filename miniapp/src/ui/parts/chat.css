@@ -73,7 +73,8 @@
 
 .chat-body { flex:1; min-height:0; display:flex; position:relative; }
 .chat-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
-.chat-scroll { flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:8px 14px 16px; }
+/* The phone's conversation keeps the page's 16 px gutter (wider screens set their own below). */
+.chat-scroll { flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; padding:8px var(--gutter) 16px; }
 .timeline { display:flex; flex-direction:column; gap:24px; }
 /* The blocks of a turn stand 16 px apart, the operator's message, the summary of the work, the answer,
    its files and its actions alike: one rhythm down the column instead of a gap per kind of thing. */

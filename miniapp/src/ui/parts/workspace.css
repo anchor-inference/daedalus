@@ -27,7 +27,15 @@
 .panel-crumbs .crumb { display: inline-flex; align-items: center; gap: 2px; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-size: var(--fs-12); }
 .panel-crumbs button.crumb { cursor: pointer; }
 .panel-crumbs button.crumb:hover { color: var(--fg); }
-.panel-crumbs .crumb.last { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+/* The name never gives way while anything else can: the folders go first, from their start (the
+   right-to-left box puts the ellipsis at the left and keeps the nearest folder), then the root, then
+   the name's middle. The weights are large rather than the name's small: a shrink factor under 1
+   gives way only that share of the overflow, and the name's end was left cut by the line. */
+.panel-crumbs .crumb.root { display: block; flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.panel-crumbs .crumb.dirs { display: block; flex: 0 1000000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; }
+.panel-crumbs .crumb.dirs > span { unicode-bidi: isolate; }
+.panel-crumbs .crumb.last { flex: 0 1 auto; min-width: 0; color: var(--fg); font-weight: 500; }
+.panel-crumbs .crumb.last > .file-name { min-width: 0; }
 .panel-crumbs .sep { color: var(--fg-3); padding: 0 2px; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 16px; }
 .panel-body.tab-preview { padding: 0; display: flex; flex-direction: column; }

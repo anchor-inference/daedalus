@@ -72,7 +72,7 @@
 .harness-step.skipped { color: var(--fg-3); }
 
 @media (max-width: 1023px) {
-  .pg-list.alone { padding: 8px 12px calc(76px + env(safe-area-inset-bottom)); }
+  .pg-list.alone { padding: 8px var(--gutter) calc(76px + env(safe-area-inset-bottom)); }
   .pg-item { min-height: var(--list-row-h); height: auto; }
   .pg-item-main { padding-block: 8px; }
   .harness-action .btn { min-height: 40px; }
