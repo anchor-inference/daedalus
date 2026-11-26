@@ -1903,6 +1903,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "start.greeting": { en: "What are we working on?", ru: "Чем займёмся?" },
   // The desktop's start screen: where the chat starts, and the chats to pick up again.
   "start.where.label": { en: "Where the chat starts", ru: "Где начать чат" },
+  "start.where.group": { en: "Where and how the chat starts", ru: "Где и как начнётся чат" },
   "start.pick": { en: "Choose a project", ru: "Выбрать проект" },
   "start.pick.search": { en: "Find a project", ru: "Найти проект" },
   "start.pick.none": { en: "No project", ru: "Без проекта" },
