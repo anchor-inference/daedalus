@@ -51,10 +51,11 @@ def main() -> int:
             labels = side.locator(".sb-sec").evaluate_all("els => els.map((e) => e.textContent)")
             check(labels == (["Projects", "Chats"] if lang == "en" else ["Проекты", "Чаты"]), f"{lang}: the list's labels are {labels}")
             check(side.locator(".sb-sec-projects [data-action='all-projects']").count() == 1 and side.locator(".sb-sec-projects .sb-sec-add").count() == 1, f"{lang}: the Projects label leads to every project and carries the +")
-            # Every row one 32 px line with its text 12 px in from the row's edge (36 inside a project).
-            rows = side.evaluate("""el => [...el.querySelectorAll('.sb-list .sb-row')].map((r) => { const b = r.getBoundingClientRect(); const t = r.querySelector('.sb-t').getBoundingClientRect(); const icon = r.querySelector(':scope > .sb-tile'); return { h: Math.round(b.height), x: Math.round(b.left), pad: Math.round((icon ? icon.getBoundingClientRect().left : t.left) - b.left), nested: !!r.closest('.sb-kids') }; })""")
-            bad = [r for r in rows if r["h"] != 32 or r["x"] != 8 or r["pad"] != (36 if r["nested"] else 12)]
-            check(rows and not bad, f"{lang}: every row is 32 px with its text 12 px in ({bad or rows[:1]})")
+            # Every row one 32 px line: a project's folder and a chat's slot 12 px in from the row's edge,
+            # inside a project or not, and a chat's title 36 px in, where a project's chats always began.
+            rows = side.evaluate("""el => [...el.querySelectorAll('.sb-list .sb-row')].map((r) => { const b = r.getBoundingClientRect(); const t = r.querySelector('.sb-t').getBoundingClientRect(); const lead = r.querySelector(':scope > .sb-tile, :scope > .sb-gut'); return { h: Math.round(b.height), x: Math.round(b.left), pad: lead ? Math.round(lead.getBoundingClientRect().left - b.left) : -1, title: Math.round(t.left - b.left), chat: !!r.querySelector(':scope > .sb-gut') }; })""")
+            bad = [r for r in rows if r["h"] != 32 or r["x"] != 8 or r["pad"] != 12 or (r["chat"] and r["title"] != 36)]
+            check(rows and not bad, f"{lang}: every row is 32 px with its glyph 12 px in ({bad or rows[:1]})")
 
             projects = side.locator("[data-project]").evaluate_all("els => els.map((e) => e.dataset.project)")
             check(sorted(projects) == sorted([shots.P1, shots.P3, "5a8d1c0b6e22", shots.PV]), f"{lang}: the projects section holds the projects and Voice ({projects})")
