@@ -1,7 +1,7 @@
 /* ── the start page and the projects page ───────────────────────────────────────────────────── */
 
-/* The start canvas: the question, the composer and the chats to pick up again, one 760 px column
-   (the conversation's own) in the middle of the window. The group is held a little above the middle:
+/* The start canvas: the question, the composer and the chats to pick up again, one column
+   (the conversation's own width) in the middle of the window. The group is held a little above the middle:
    80 px more under it than over it, where the eye already is. It grows with what it holds and the
    page scrolls, rather than being squeezed into the window and clipped at the top. */
 @media (min-width: 1024px) {

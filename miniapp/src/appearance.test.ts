@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DARK_ACCENTS, DEFAULT_PREFS, FONT_CATALOG, LIGHT_ACCENTS, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById, usualProse } from "./appearance";
+import { COLUMN_WIDTH, DARK_ACCENTS, DEFAULT_PREFS, FONT_CATALOG, LIGHT_ACCENTS, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById, usualProse, type Column } from "./appearance";
 
 const dark = { scheme: "dark" as const, prefersDark: true };
 const light = { scheme: "light" as const, prefersDark: false };
@@ -72,9 +72,31 @@ describe("themes", () => {
     expect(appearanceTokens(DEFAULT_PREFS, dark)["--fs-14"]).toBeUndefined();
     expect(appearanceTokens({ ...DEFAULT_PREFS, scale: "lg" }, dark)["--fs-14"]).toBe("15.4px");
     expect(appearanceTokens({ ...DEFAULT_PREFS, scale: "sm" }, dark)["--fs-12"]).toBe("11px");
-    expect(appearanceTokens({ ...DEFAULT_PREFS, column: "narrow" }, dark)["--chat-w"]).toBe("680px");
-    expect(appearanceTokens({ ...DEFAULT_PREFS, column: "wide" }, dark)["--chat-w"]).toBe("920px");
-    expect(appearanceTokens(DEFAULT_PREFS, dark)["--chat-w"]).toBeUndefined();
+  });
+
+  it("draws the conversation at 720, 840, 960 or the whole room, and writes nothing for the usual 840", () => {
+    const stripe = (column: Column) => appearanceTokens({ ...DEFAULT_PREFS, column }, dark);
+    expect(stripe("normal")["--chat-w"]).toBeUndefined();
+    expect(stripe("narrow")["--chat-w"]).toBe("720px");
+    expect(stripe("wide")["--chat-w"]).toBe("960px");
+    expect(stripe("full")["--chat-w"]).toBe("1400px");
+    // Only the whole-room choice moves the side padding, to 32 px.
+    expect(stripe("full")["--chat-pad"]).toBe("32px");
+    for (const column of ["narrow", "normal", "wide"] as const) expect(stripe(column)["--chat-pad"]).toBeUndefined();
+    expect(COLUMN_WIDTH.normal).toBe(840);
+  });
+
+  it("reads a stored narrow, usual or wide choice as the same name at its new width, and anything else as the usual", () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    const read = (column: unknown) => {
+      localStorage.setItem("daedalus.appearance", JSON.stringify({ column }));
+      return readPrefs().column;
+    };
+    expect(["narrow", "normal", "wide", "full"].map(read)).toEqual(["narrow", "normal", "wide", "full"]);
+    expect(read("huge")).toBe("normal");
+    expect(read(undefined)).toBe("normal");
+    vi.unstubAllGlobals();
   });
 
   it("accepts a Google stylesheet or an https woff2 and refuses anything else", () => {

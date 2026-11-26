@@ -208,7 +208,7 @@
 /* The start screen's card sits under "Active now" in the same column and borrows its rows; it is a
    section of its own so a reader of "Active now" never finds these rows among the live chats. */
 @media (min-width: 1024px) {
-  .start-import { width: 100%; max-width: 720px; margin-top: var(--space-6); }
+  .start-import { width: 100%; max-width: var(--chat-w); margin-top: var(--space-6); }
   .si-head { display: flex; align-items: center; gap: 6px; height: var(--ctl-h-sm); padding-inline: 2px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); }
   .si-head .num { color: var(--fg-3); font-weight: 400; }
   .si-head .grow { flex: 1; }
