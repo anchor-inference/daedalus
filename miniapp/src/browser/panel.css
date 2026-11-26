@@ -47,17 +47,29 @@
    phone layout it was still the desktop's 28 px. */
 @media (pointer: coarse) { .btn.bp-control { min-height: 36px; } }
 
-.bp-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.bp-stage-wrap { flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 0 12px 8px; position: relative; }
+.bp-main { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+/* Everything above the actions, sized by the panel and never by what it holds. It was `flex: none`:
+   once a wide panel put the log beside it, it took the width of its longest unbroken line (a request
+   of the agent's, a sign-in reason), ran past the panel's edge, and the picture centred in that
+   width showed a dark band and the page's left half. It shrinks instead, the picture first (down to
+   a frame a page can still be read in), and scrolls when the cards above the picture leave no room. */
+.bp-stage-wrap { flex: 0 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; padding: 0 12px 8px; position: relative; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.bp-stage-wrap > * { flex: none; }
+/* A request and the sign-in form are read, not scanned: a column of a form's width in a wide panel,
+   as the composer's request card is in the conversation, rather than a line across the whole pane. */
+.bp-stage-wrap > .bp-handover, .bp-stage-wrap > .login-card, .bp-stage-wrap > .bp-ownership { align-self: center; width: 100%; max-width: 560px; box-sizing: border-box; }
 /* Fitting the page to the panel gives the picture all the height there is; kept at its own size it is
    as tall as the page is, and the actions under it have the rest. */
 .bp.fit .bp-stage-wrap, .bp.full .bp-stage-wrap { flex: 1; }
 .bp-frame { position: relative; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--term-bg); overflow: hidden; }
+/* The frame is what gives way when the pane is short: the picture inside is letterboxed into it, so
+   the page is drawn whole and smaller, and the foot with its one action stays inside the pane. */
+.bp-stage-wrap > .bp-frame { flex: 0 1 auto; min-height: var(--bp-frame-min, 180px); }
 .bp.fit .bp-frame, .bp.full .bp-frame { flex: 1; }
 .bp-view { position: relative; display: flex; flex-direction: column; min-height: 0; }
 .bp.fit .bp-view, .bp.full .bp-view { flex: 1; }
 /* The picture takes the page's own proportions, as the page is drawn at its own size. */
-.bp:not(.fit):not(.full):not(.phone) .bp-view { aspect-ratio: var(--page-ratio, 16 / 10); }
+.bp:not(.fit):not(.full):not(.phone) .bp-view { flex: 0 1 auto; aspect-ratio: var(--page-ratio, 16 / 10); }
 .bp-view > .bv { flex: 1; }
 .bp-view.editing > .bv, .bp-stage-wrap.editing > .bp-frame { display: none; }
 
@@ -82,6 +94,7 @@
    happened, what it needs, and the one button. */
 .bp-handover { height: auto; flex-direction: column; align-items: stretch; gap: 8px; margin: 0 0 4px; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--card); color: var(--fg); }
 .bp-handover .approval-actions { margin-top: 4px; }
+.bp-handover .approval-actions .grow { flex: 1; }
 .bp-handover .approval-actions .btn { height: var(--ctl-h); }
 
 /* The picture. */
@@ -99,6 +112,10 @@
 .bv-cursor svg { display: block; margin: -3px 0 0 -4px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .45)); overflow: visible; }
 .bv-cursor-arrow { fill: var(--accent); stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
 .bv-cursor-tag { position: absolute; left: 14px; top: 17px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-12); font-weight: 600; line-height: 16px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); }
+/* Near the picture's right or lower edge the name goes to the pointer's other side, so it is read on
+   the picture rather than cut by the frame (overlay.tsx sets the side). */
+.bv-cursor[data-side~="left"] .bv-cursor-tag { left: auto; right: 10px; }
+.bv-cursor[data-side~="up"] .bv-cursor-tag { top: auto; bottom: 8px; }
 .bv-overlay.parked .bv-cursor { opacity: .55; }
 .bv-overlay.parked .bv-cursor-arrow { fill: var(--fg-3); }
 .bv-overlay.parked .bv-cursor-tag { background: var(--surface-3); color: var(--fg-2); }
@@ -139,6 +156,8 @@
    wide page of its own shows it as a column beside the picture. A phone's sheet keeps it under the
    picture (`.page`) and does not fold it. */
 .bp-log { flex: 1; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+/* Open under the picture, the log keeps its head and a few rows however tall the cards above are. */
+.bp:not(.phone) .bp-log.open:not(.page) { min-height: calc(var(--row-h-2) + 3 * var(--row-h)); }
 .bp.fit .bp-log, .bp.full .bp-log { flex: none; }
 .bp.fit .bp-log.open { max-height: 40%; }
 .bp-log:not(.open):not(.page) { flex: none; }
@@ -170,7 +189,10 @@
 .bp-log-frame { flex: none; color: var(--fg-3); display: inline-flex; }
 @container (min-width: 900px) {
   .bp.log-open:not(.phone) .bp-main { flex-direction: row; }
-  .bp.log-open:not(.phone) .bp-log { width: 280px; max-height: none; border-top: 0; border-left: 1px solid var(--line); }
+  /* Beside the log the stage takes what the log leaves, from a basis of nothing: its content's own
+     width must never be what decides it. */
+  .bp.log-open:not(.phone) .bp-stage-wrap { flex: 1 1 0; }
+  .bp.log-open:not(.phone) .bp-log { flex: none; width: 280px; min-height: 0; max-height: none; border-top: 0; border-left: 1px solid var(--line); }
   .bp.log-open:not(.phone) .bp-log .bp-log-rows { display: block; }
 }
 

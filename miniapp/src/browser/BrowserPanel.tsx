@@ -836,6 +836,8 @@ function Banner({ drive, agent, needs, state, control, viewers, foot = false }: 
   }
   let text: ReactNode;
   let action: ReactNode = null;
+  // The foot is one line and cuts what does not fit; the whole sentence is its tooltip.
+  let title = "";
   if (offline) text = t("browser.banner.offline");
   else if (state === "unavailable") text = t("browser.state.gone");
   else if (drive === "you") {
@@ -846,6 +848,7 @@ function Banner({ drive, agent, needs, state, control, viewers, foot = false }: 
     action = <ControlButton control={control} />;
   } else if (drive === "needs") {
     text = <><b>{t("browser.banner.needs")}</b> {needWords(needs)}</>;
+    title = `${t("browser.banner.needs")} ${needWords(needs)}`;
   } else if (drive === "paused") {
     text = t("browser.banner.paused", { name: agent });
     action = <ControlButton control={control} />;
@@ -858,7 +861,7 @@ function Banner({ drive, agent, needs, state, control, viewers, foot = false }: 
   return (
     <div className={`bp-banner ${offline ? "offline" : drive}`} role="status" data-banner={offline ? "offline" : drive}>
       <span className="bp-banner-icon" aria-hidden="true" />
-      <span className="bp-banner-text truncate">{text}</span>
+      <span className="bp-banner-text truncate" title={title || (typeof text === "string" ? text : undefined)}>{text}</span>
       {others.length > 0 && <span className="bp-banner-viewers" title={others.map((o) => o.label).join(", ")}><Icon name="eye" size={12} />{others.map((o) => o.label).join(", ")}</span>}
       {action}
     </div>
@@ -932,7 +935,7 @@ export function ActionLog({ group, recent, open, onToggle, onFocus, agent, page 
             <button type="button" className={`bp-log-row ${focused === row.id || (current && (row.action_id || row.id) === current) ? "on" : ""} ${row.ok === false ? "failed" : ""}`} onClick={() => pick(row)} data-action={row.id}>
               <span className="bp-log-time">{clock(row.at)}</span>
               <span className={`bp-log-actor ${row.actor}`} title={row.actor === "operator" ? t("browser.actor.you") : row.actor === "page" ? t("browser.actor.page") : agent}><Icon name={ACTOR_ICON[row.actor] ?? "bolt"} size={12} /></span>
-              <span className="bp-log-text"><ActionText row={row} agent={agent} /></span>
+              <span className="bp-log-text" title={actionLine(row, agent)}><ActionText row={row} agent={agent} /></span>
               {frameOfRow(frames, row) >= 0 && <span className="bp-log-frame" title={t("browser.replay.row")}><Icon name="image" size={12} /></span>}
               {row.sensitive && <span className={`bp-log-flag ${row.sensitive.decision}`}>{t(`browser.sensitive.${row.sensitive.decision}`)}</span>}
             </button>
@@ -943,9 +946,13 @@ export function ActionLog({ group, recent, open, onToggle, onFocus, agent, page 
   );
 }
 
-function ActionText({ row, agent }: { row: BrowserActionRow; agent: string }) {
+function actionLine(row: BrowserActionRow, agent: string): string {
   const words = actionWords(row);
   const vars = { ...words.vars };
   if (typeof vars.what === "string" && !vars.what) vars.what = t("browser.act.something");
-  return <>{t(words.key, { ...vars, name: agent })}</>;
+  return t(words.key, { ...vars, name: agent });
+}
+
+function ActionText({ row, agent }: { row: BrowserActionRow; agent: string }) {
+  return <>{actionLine(row, agent)}</>;
 }
