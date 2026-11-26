@@ -378,3 +378,25 @@ async def test_proxy_antigravity_models_and_completion(tmp_path: Path, monkeypat
     finally:
         await app["client"].aclose()
         await client.close()
+
+
+def test_a_used_up_window_is_shown_full_rather_than_dropped() -> None:
+    """Proto3 JSON leaves a zero out, so an exhausted quota carries a reset time and no fraction."""
+    reset = "2026-11-26T22:54:37Z"
+    data = {
+        "models": {
+            "gemini-4-carbon-high": {"quotaInfo": {"resetTime": reset}},
+            "gemini-4-argon-high": {"quotaInfo": {"resetTime": reset}},
+            "claude-sonnet-5-5-high": {"quotaInfo": {"remainingFraction": 1, "resetTime": "2026-11-27T01:49:57Z"}},
+            # A quota that says nothing at all is still no window, and a tab model never is one.
+            "gemini-unknown": {"quotaInfo": {}},
+            "tab_flash_lite_preview": {"quotaInfo": {"remainingFraction": 1}},
+        }
+    }
+    view = kp_ag.antigravity_usage_view(data, tier="Pro")
+    windows = {window["name"]: window for window in view["windows"]}
+    assert list(windows) == ["Gemini (5h)", "Gemini 4 Argon (weekly)", "Claude / GPT (5h)"]
+    assert windows["Gemini (5h)"] == {"name": "Gemini (5h)", "used_percent": 100.0, "resets_at": reset}
+    assert windows["Gemini 4 Argon (weekly)"]["used_percent"] == 100.0
+    assert windows["Claude / GPT (5h)"]["used_percent"] == 0.0
+    assert view["limit_reached"] is True
