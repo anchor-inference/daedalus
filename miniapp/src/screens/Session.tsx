@@ -1986,18 +1986,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             doing in the meta size. The model and its thinking left the header for the composer, which
             names them beside the field they apply to; two lines in 52 px read as a second toolbar. */}
         <div className="grow chat-identity">
+          {/* The crumb and its arrow give way together, so a crumb cut to nothing leaves no lone arrow. */}
           {detail?.subagent_of ? (
-            <>
+            <span className="chat-crumbs">
               <button className="leader-link chat-crumb" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
                 <span className="truncate">{detail.leader_title ?? t("session.leader.word")}</span>
               </button>
               <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
-            </>
+            </span>
           ) : detail && isProject(detail.project) && detail.project.name !== detail.title ? (
-            <>
-              <span className="chat-crumb truncate chat-sub-project">{detail.project.name}</span>
+            <span className="chat-crumbs">
+              <span className="chat-crumb truncate chat-sub-project" title={detail.project.name}>{detail.project.name}</span>
               <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
-            </>
+            </span>
           ) : null}
           {editingTitle !== null ? (
             <input
@@ -2017,7 +2018,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <StaffWho staffId={staffId} />
           ) : (
             <span className="chat-title-line">
-              <span className="chat-title truncate">{detail?.title ?? "…"}</span>
+              <span className="chat-title truncate" title={detail?.title}>{detail?.title ?? "…"}</span>
               <HostMark env={detail?.env} />
               <BypassMark on={!!detail?.bypass} />
               <PrivateBadge on={isPrivate(detail)} />
@@ -2030,7 +2031,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {compacting ? <CompactionBar c={compacting} />
                 : (busy || saving) && !remotePaused ? <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} since={detail.run_started_at} onJump={jumpToBottom} />
                 : status === "failed" ? <span className="head-status failed" role="status"><b>{statusWord(status)}</b></span>
-                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button> : null}
+                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))} title={waitingLine}><span className="truncate">{waitingLine}</span></button> : null}
               {ahead && <AheadStatus c={ahead} />}
               {folderMove && <MoveLive job={folderMove} compact />}
             </span>
@@ -2057,7 +2058,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </button>
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
-          {!visit && !!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
+          {!visit && !!sessionCanvases?.length && <CanvasesButton sessionId={id} count={sessionCanvases.length} />}
           {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
           <TerminalButton dock={terminalDock} phone={phone} />
           {/* Search, the panel and the menu close the row in that order on every chat, the three a
@@ -2401,6 +2402,20 @@ function SubagentsButton({ detail, on, onToggle }: { detail: SessionDetail; on: 
       <span className="subagents-count">{children.length}</span>
       {running > 0 && <span className="subagents-live" aria-hidden="true" />}
     </button>
+  );
+}
+
+/** The chat's canvases, in the header's own form: a glyph with how many, the name in the tooltip. A
+ *  labelled button ("Chat canvases (2)") was the widest thing in the row and pushed the title and the
+ *  run's state under the buttons. */
+function CanvasesButton({ sessionId, count }: { sessionId: string; count: number }) {
+  const href = pathFor("canvas", null, { session: sessionId });
+  const label = `${t("canvas.session")} (${count})`;
+  return (
+    <a className="iconbtn canvases-trigger" href={href} aria-label={label} title={label} onClick={(event) => { event.preventDefault(); navigate(href); }}>
+      <Icon name="grid" />
+      <span className="canvases-count" aria-hidden="true">{count}</span>
+    </a>
   );
 }
 

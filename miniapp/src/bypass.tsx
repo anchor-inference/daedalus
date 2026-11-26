@@ -10,7 +10,7 @@ export function BypassMark({ on }: { on: boolean }) {
   return (
     <span className="bypass-mark" data-bypass title={t("session.bypass.title")}>
       <Icon name="alert" size={11} />
-      {t("session.bypass.mark")}
+      <span className="bypass-word">{t("session.bypass.mark")}</span>
     </span>
   );
 }

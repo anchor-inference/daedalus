@@ -12,19 +12,29 @@
    20 px below, and a hairline across the window drew the header as a toolbar over the page. */
 .chat-head { flex:none; position:relative; display:flex; align-items:center; gap:8px; padding:0 8px; border-bottom:1px solid var(--line); height:var(--head-h); min-height:var(--head-h); }
 @media (min-width: 1024px) { .chat-head { border-bottom:0; } }
-.chat-identity { display:flex; align-items:center; gap:8px; min-width:0; }
-.chat-crumb { flex:0 1 auto; min-width:0; max-width:32%; color:var(--fg-3); font-size:var(--fs-14); white-space:nowrap; }
+/* The left group gives way in a fixed order as the window or the right group narrows it: the run's
+   state first, then the crumb, then the title; the chips (Host, BYPASS, private) stay whole. A flex
+   shrink weighted ten thousand to a hundred to one hands nearly all of the shortfall to the state
+   until it is gone, then to the crumb. The group clips what is left over: a state too long for its
+   place once ran on under the buttons at the right, overprinted by the subagents and canvases buttons. */
+.chat-identity { display:flex; align-items:center; gap:8px; min-width:0; overflow:clip; overflow-clip-margin:4px; }
+.chat-crumbs { display:flex; align-items:center; gap:8px; flex:0 100 auto; min-width:0; max-width:32%; overflow:hidden; }
+.chat-crumb { flex:0 1 auto; min-width:0; color:var(--fg-3); font-size:var(--fs-14); white-space:nowrap; }
 .chat-crumb-sep { display:inline-flex; flex:none; color:var(--fg-3); }
 .chat-title-line { display:flex; align-items:center; gap:var(--space-2); flex:0 1 auto; min-width:0; }
-.chat-title { display:block; min-width:0; max-width:100%; color:var(--fg); font:inherit; font-weight:500; font-size:var(--fs-14); text-align:left; white-space:nowrap; }
+.chat-title { display:block; min-width:min(5em, 100%); max-width:100%; color:var(--fg); font:inherit; font-weight:500; font-size:var(--fs-14); text-align:left; white-space:nowrap; }
 .leader-link { display:inline-flex; align-items:center; background:none; border:0; padding:0; color:var(--fg-3); font:inherit; font-size:var(--fs-14); text-align:left; cursor:pointer; }
 .leader-link:hover { color:var(--fg); }
 /* The run, said beside the title in the meta size: what the second line of the old two-line header
    held, without the model, which the composer names. It gives way before the title does. */
-.chat-sub { display:flex; align-items:center; gap:10px; flex:0 100 auto; min-width:0; margin-left:4px; color:var(--fg-3); font-size:var(--fs-13); white-space:nowrap; }
+.chat-sub { display:flex; align-items:center; gap:10px; flex:0 10000 auto; min-width:0; margin-left:4px; overflow:hidden; color:var(--fg-3); font-size:var(--fs-13); white-space:nowrap; }
 .chat-sub:empty { display:none; }
 .chat-sub > * { flex:0 1 auto; min-width:0; }
-.chat-sub .head-status { height:auto; max-width:none; padding:0; gap:var(--space-1); font-size:var(--fs-13); }
+.chat-sub .head-status { height:auto; max-width:none; padding:0; gap:var(--space-1); overflow:hidden; font-size:var(--fs-13); }
+/* Inside the state its step gives way before the state word and the clocks, and each part is cut with
+   an ellipsis rather than left to spill past the button. */
+.chat-sub .head-status > :not(.dot) { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-sub .head-status > .truncate { flex-shrink:100; }
 .chat-sub .head-status b { font-weight:500; }
 .chat-sub .head-status .dot { display:none; }
 .chat-sub .head-status.livebar:hover { background:none; color:var(--fg); }
@@ -50,7 +60,16 @@
 @media (prefers-reduced-motion: reduce) { .head-progress.busy i { width:100%; } }
 .title-edit { width:100%; font:inherit; font-weight:600; font-size:var(--fs-14); letter-spacing:-0.01em; background:var(--card); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--radius-xs); padding:2px 8px; outline:none; }
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--info); animation:pulse 1.2s ease-in-out infinite; }
-.head-actions { display:flex; gap:2px; flex:none; }
+/* The right group stands on the header's own ground, so a button can never be read through, whatever
+   reaches its edge. */
+/* A header squeezed by the panel (a 1280 window with the panel open is under 600 px) keeps the BYPASS
+   mark as its glyph in the danger colour, its words in the tooltip, so the title keeps a few words. */
+.chat-head { container:chathead / inline-size; }
+@container chathead (max-width: 680px) {
+  .chat-title-line .bypass-mark { padding:0 4px; }
+  .chat-title-line .bypass-mark .bypass-word { display:none; }
+}
+.head-actions { position:relative; z-index:1; display:flex; gap:2px; flex:none; background:var(--chat-bg); }
 
 .chat-body { flex:1; min-height:0; display:flex; position:relative; }
 .chat-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
