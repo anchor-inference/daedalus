@@ -428,7 +428,9 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
    touch screen. */
 .preview-grid { flex: 0 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); overscroll-behavior: contain; }
 .preview-grid:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.preview-grid table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-13); }
+/* The table's own width fits the frame while its columns' least widths allow, and only then goes wider:
+   as wide as every column's most, it stood 14 px past a 550 px panel with room to wrap. */
+.preview-grid table { width: auto; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-13); }
 .preview-grid th, .preview-grid td { min-height: var(--row-h); box-sizing: border-box; padding: 6px 12px; border-bottom: 1px solid var(--line); line-height: 20px; text-align: left; vertical-align: top; white-space: nowrap; }
 .preview-grid :is(th, td).long { min-width: 14em; max-width: 26em; white-space: normal; overflow-wrap: anywhere; }
 .preview-grid th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
