@@ -6,7 +6,7 @@
 
 import { createElement } from "react";
 import {
-  Archive, ArrowDown, Brain, Coins, Gauge, Info, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
+  Activity, Archive, ArrowDown, Brain, Coins, Gauge, Info, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleQuestionMark, ClipboardPaste, Clock, Cloud, Code,
   Columns2, Compass, Copy, Crop, Database, Diamond, Dot, Download, Dumbbell, Ellipsis, EllipsisVertical,
   ExternalLink, Eye, EyeOff, FastForward, File, FileText, Flag, Folder, FolderPlus, Gift, GitBranch, GitBranchPlus,
@@ -32,7 +32,7 @@ export type IconName =
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
   | "note" | "bold" | "italic" | "strike" | "code" | "heading" | "quote" | "olist" | "tasks" | "table" | "hr"
   | "open" | "cut" | "selectall"
-  | "info" | "gauge" | "coin" | "brain";
+  | "info" | "gauge" | "coin" | "brain" | "activity";
 
 /** One glyph as Lucide ships it: the SVG elements of a 24-unit drawing, each a tag and its attributes. */
 type IconNode = readonly (readonly [tag: string, attrs: Readonly<Record<string, string | number | undefined>>])[];
@@ -50,6 +50,7 @@ const NODES: Record<IconName, IconNode> = {
   gauge: Gauge,
   coin: Coins,
   brain: Brain,
+  activity: Activity,
   cut: Scissors,
   selectall: ScanText,
   hand: Hand,

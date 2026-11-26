@@ -186,7 +186,7 @@ function Column(props: HostProps) {
 }
 
 export const TAB_ICON: Record<PanelTab, IconName> = {
-  overview: "grid", details: "info", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder",
+  overview: "grid", details: "info", files: "folder", preview: "eye", jobs: "activity", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder",
   questions: "ask", browser: "globe", sources: "link", agents: "bots", changes: "changes", context: "gauge", usage: "coin", memory: "brain", canvas: "pen", attachments: "attach",
 };
 
