@@ -208,6 +208,13 @@ def run() -> list[str]:
     return problems
 
 
+def scrolled(page: Page) -> Page:
+    """The answer from its first line, so the picture shows its table and its code rather than the end of it."""
+    page.evaluate("() => { const s = document.querySelector('.chat-scroll'); s.scrollTop = document.querySelector('.answer').offsetTop - 12; }")
+    page.wait_for_timeout(250)
+    return page
+
+
 def shoot(browser) -> None:  # type: ignore[no-untyped-def]
     out = Path(SHOTS)
     out.mkdir(parents=True, exist_ok=True)
@@ -215,12 +222,12 @@ def shoot(browser) -> None:  # type: ignore[no-untyped-def]
         for choice in CHOICES:
             context = browser.new_context(viewport={"width": 1920, "height": 1080}, color_scheme=scheme)
             choose(context, choice, False)
-            page = open_chat(context, lang, scheme, False)
+            page = scrolled(open_chat(context, lang, scheme, False))
             page.screenshot(path=str(out / f"chat-{choice}-{scheme}-{lang}-1920.png"))
             context.close()
         context = browser.new_context(viewport={"width": 1366, "height": 768}, color_scheme=scheme)
         choose(context, "normal", True)
-        page = open_chat(context, lang, scheme, True)
+        page = scrolled(open_chat(context, lang, scheme, True))
         page.screenshot(path=str(out / f"chat-normal-panel-{scheme}-{lang}-1366.png"))
         context.close()
 
