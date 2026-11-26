@@ -49,7 +49,9 @@ MEASURE = """strip => {
   const add = strip.closest('.panel-tabs').querySelector('.panel-add');
   const addBox = add ? add.getBoundingClientRect() : null;
   return { fade: strip.dataset.fade || '', fit: strip.dataset.fit, scroll: strip.scrollWidth, client: strip.clientWidth, left: box.left, right: box.right, tabs, gaps,
-           edge: pills.length ? Math.round(pills[0].left - row.left) : 99, add: addBox ? Math.round(addBox.left - (pills.length ? pills[pills.length - 1].right : 0)) : -1,
+           // A strip that scrolls clips its tabs at its own edge: with the open tab near its start (Details
+           // stands second) the last tab lies scrolled out past that edge, under no other control.
+           edge: pills.length ? Math.round(pills[0].left - row.left) : 99, add: addBox ? Math.round(addBox.left - (pills.length ? Math.min(pills[pills.length - 1].right, box.right) : 0)) : -1,
            addInside: !!addBox && addBox.right <= row.right + 1 };
 }"""
 

@@ -22,6 +22,7 @@ import { go } from "./shell";
 import { openUpdate, releaseVersion, useUpdates } from "./updates";
 import { type MenuItem, Menu, OverflowMenu, Tooltip, useContextActions } from "./ui/primitives";
 import { openImport } from "./imports/ImportExplorer";
+import { Mascot } from "./ui/mascot";
 
 const SessionsScreen = lazy(retried(() => import("./screens/Sessions"), (m) => ({ default: m.SessionsScreen })));
 
@@ -95,7 +96,7 @@ export function SidebarHead({ onSearch, searching = false }: { onSearch?: () => 
   return (
     <div className="sidebar-head">
       <a className="sb-mark" href={home} onClick={(e) => go(e, home)} aria-label={t("side.home")} title="Daedalus">
-        <Icon name="logo" size={14} />
+        <Mascot />
       </a>
       <Menu label={t("side.mode.label")} side="bottom" align="start" items={modes} trigger={
         <button type="button" className="sb-mode" data-mode={f.mode} aria-label={t("side.mode.current", { mode: t(`mode.${f.mode}`) })}>

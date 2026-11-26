@@ -113,7 +113,8 @@ import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
-import { Overview, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { Overview, QuotaWindows, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { quotaTone } from "../detailsmodel";
 import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
@@ -1906,6 +1907,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   </> : null;
   const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
   const boardTag = `${boardFigures.done}/${boardFigures.all}`;
+  // What the chat's model costs, on the front page: the windows of the subscription it runs on (what
+  // "$0 · today unmetered" said nothing about), else the metered spend. A subscription the host has no
+  // windows for draws nothing rather than zeros; a reading left from another chat's provider is ignored.
+  const usageKnown = !!provider && providerUsage?.provider === provider;
+  const subscription = usageKnown ? providerUsage!.subscription : undefined;
+  const quotaWindows = subscription?.windows ?? [];
+  const today = detail ? spendToday(detail.usage) : null;
+  const usageRow: OverviewRow | null = !detail || (!usageKnown && !((detail.usage.usd ?? 0) > 0)) ? null
+    : quotaWindows.length ? { tab: "usage", kind: "subscription", name: providerLabel(provider), text: <QuotaWindows windows={quotaWindows} />, tag: subscription?.limit_reached ? t("usage.limitreached") : undefined, tone: subscription?.limit_reached || quotaWindows.some((w) => quotaTone(w.used_percent) !== "ok") ? "attn" : undefined }
+    : subscription && !((detail.usage.usd ?? 0) > 0) ? null
+    : { tab: "usage", kind: "spend", name: t("panel.tab.usage"), text: detail.usage.usd_today != null && detail.usage.usd_today > 0 ? `${fmtUsd(detail.usage.usd)} ${today!.short}` : fmtUsd(detail.usage.usd) };
   const overviewRows: OverviewRow[] = !detail ? [] : [
     ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
     ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
@@ -1917,7 +1929,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("notes") ? [{ tab: "notes" as PanelTab, name: t("panel.tab.notes"), text: notesCount ? plural("panel.ov.notes", notesCount) : t("panel.ov.notes.none"), tag: notesCount ? String(notesCount) : undefined }] : []),
     ...(sessionCanvases?.length ? [{ tab: "canvas" as PanelTab, name: t("panel.tab.canvas"), text: sessionCanvases[0].title || t("panel.canvas.untitled"), tag: String(sessionCanvases.length) }] : []),
     ...(detail.context ? [{ tab: "context" as PanelTab, name: t("panel.tab.context"), text: detail.context.window > 0 ? t("strip.context.of", { used: fmtTok(detail.context.tokens), window: fmtTok(detail.context.window) }) : fmtTok(detail.context.tokens), tag: contextPct !== null ? `${contextPct}%` : undefined, tone: contextPct !== null && contextPct >= 80 ? "attn" as const : undefined }] : []),
-    { tab: "usage" as PanelTab, name: t("panel.tab.usage"), text: detail.usage.usd_today != null ? `${fmtUsd(detail.usage.usd)} · ${spendToday(detail.usage).short}` : fmtUsd(detail.usage.usd) },
+    ...(usageRow ? [usageRow] : []),
   ].filter((row) => panelTabs.includes(row.tab));
   const panelFigures: Partial<Record<PanelTab, string>> = {
     ...(changedFiles.length ? { changes: String(changedFiles.length) } : {}),
@@ -1986,18 +1998,19 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             doing in the meta size. The model and its thinking left the header for the composer, which
             names them beside the field they apply to; two lines in 52 px read as a second toolbar. */}
         <div className="grow chat-identity">
+          {/* The crumb and its arrow give way together, so a crumb cut to nothing leaves no lone arrow. */}
           {detail?.subagent_of ? (
-            <>
+            <span className="chat-crumbs">
               <button className="leader-link chat-crumb" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
                 <span className="truncate">{detail.leader_title ?? t("session.leader.word")}</span>
               </button>
               <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
-            </>
+            </span>
           ) : detail && isProject(detail.project) && detail.project.name !== detail.title ? (
-            <>
-              <span className="chat-crumb truncate chat-sub-project">{detail.project.name}</span>
+            <span className="chat-crumbs">
+              <span className="chat-crumb truncate chat-sub-project" title={detail.project.name}>{detail.project.name}</span>
               <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
-            </>
+            </span>
           ) : null}
           {editingTitle !== null ? (
             <input
@@ -2017,7 +2030,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <StaffWho staffId={staffId} />
           ) : (
             <span className="chat-title-line">
-              <span className="chat-title truncate">{detail?.title ?? "…"}</span>
+              <span className="chat-title truncate" title={detail?.title}>{detail?.title ?? "…"}</span>
               <HostMark env={detail?.env} />
               <BypassMark on={!!detail?.bypass} />
               <PrivateBadge on={isPrivate(detail)} />
@@ -2030,7 +2043,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {compacting ? <CompactionBar c={compacting} />
                 : (busy || saving) && !remotePaused ? <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} since={detail.run_started_at} onJump={jumpToBottom} />
                 : status === "failed" ? <span className="head-status failed" role="status"><b>{statusWord(status)}</b></span>
-                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button> : null}
+                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))} title={waitingLine}><span className="truncate">{waitingLine}</span></button> : null}
               {ahead && <AheadStatus c={ahead} />}
               {folderMove && <MoveLive job={folderMove} compact />}
             </span>
@@ -2057,7 +2070,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </button>
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
-          {!visit && !!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
+          {!visit && !!sessionCanvases?.length && <CanvasesButton sessionId={id} count={sessionCanvases.length} />}
           {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
           <TerminalButton dock={terminalDock} phone={phone} />
           {/* Search, the panel and the menu close the row in that order on every chat, the three a
@@ -2269,7 +2282,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           figures={panelFigures}
           pages={{
             overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
-              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
+              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))}
+              onDetails={panelTabs.includes("details") && !panel.state.open.includes("details") ? () => panel.open("details") : undefined} />,
             ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
             context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
             usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,
@@ -2401,6 +2415,20 @@ function SubagentsButton({ detail, on, onToggle }: { detail: SessionDetail; on: 
       <span className="subagents-count">{children.length}</span>
       {running > 0 && <span className="subagents-live" aria-hidden="true" />}
     </button>
+  );
+}
+
+/** The chat's canvases, in the header's own form: a glyph with how many, the name in the tooltip. A
+ *  labelled button ("Chat canvases (2)") was the widest thing in the row and pushed the title and the
+ *  run's state under the buttons. */
+function CanvasesButton({ sessionId, count }: { sessionId: string; count: number }) {
+  const href = pathFor("canvas", null, { session: sessionId });
+  const label = `${t("canvas.session")} (${count})`;
+  return (
+    <a className="iconbtn canvases-trigger" href={href} aria-label={label} title={label} onClick={(event) => { event.preventDefault(); navigate(href); }}>
+      <Icon name="grid" />
+      <span className="canvases-count" aria-hidden="true">{count}</span>
+    </a>
   );
 }
 

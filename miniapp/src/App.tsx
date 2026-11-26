@@ -25,7 +25,7 @@ import { projectPath } from "./folders";
 import { ChangeStrip } from "./change";
 import { MaintenanceNotice } from "./maintenance";
 import { SCREENS } from "./router";
-import { peek, useOffline, useQuery } from "./store";
+import { listOf, peek, useOffline, useQuery } from "./store";
 import { t, useLang } from "./i18n";
 import { startPresence } from "./presence";
 import { insideTerminal } from "./terminal/keys";
@@ -310,7 +310,9 @@ export function App() {
   // A schedule the agent asks for counts on the Inbox like an unread entry: it waits for the operator
   // there, and a request with no counter anywhere is one nobody answers.
   const waitingSchedules = usePendingSchedules(!!authed);
-  const counts: Counts = { inbox: notifications.unseen + waitingSchedules.length, changes: (proposals.data ?? []).filter((p) => p.status === "pending").length };
+  // Read as defensively as the capabilities above (see `listOf`): this count is one number in the
+  // sidebar, and an answer that was not a list once took the whole shell down with it.
+  const counts: Counts = { inbox: notifications.unseen + waitingSchedules.length, changes: listOf(proposals.data).filter((p) => p?.status === "pending").length };
   useShortcuts(openPalette, selfdev);
   const nav = useNav(selfdev, counts, !!authed);
   // The More launcher's Frequent tiles learn from where the operator goes, outside a chat.

@@ -45,7 +45,9 @@
 .sidebar { display: flex; flex-direction: column; background: var(--bg); }
 /* The head: the mark, the mode menu, search, the fold. */
 .sidebar-head { display: flex; align-items: center; gap: var(--space-2); flex: none; height: var(--head-h); padding: 0 10px 0 14px; }
-.sb-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-xs); background: var(--primary); color: var(--primary-ink); }
+/* The mark is Daedalus's face on the frame itself, with no tile behind it: a coloured square says
+   "an app" and nothing about which one. */
+.sb-mark { display: grid; place-items: center; flex: none; height: 22px; border-radius: var(--radius-xs); }
 .sb-mark:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .sb-mode { position: relative; display: flex; align-items: center; gap: var(--space-1); flex: 1; min-width: 0; height: var(--ctl-h); margin-left: -6px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; text-align: left; cursor: pointer; }
 .sb-mode > .ic { flex: none; color: var(--fg-3); }

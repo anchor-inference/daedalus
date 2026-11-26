@@ -62,6 +62,9 @@ export type ModelSelectProps = {
   anchor?: HTMLElement | null;
   /** Whether the chip itself is drawn; the list can still be opened from an outside anchor without it. */
   pill?: boolean;
+  /** How many letters of the model's name the chip shows before it cuts. A chat's composer shares its
+   *  row with more and keeps 22; the start page gives the model a row of its own. */
+  labelMax?: number;
 };
 
 /** Whether a preset is the one the session is set to: by its label, or by its provider/model pair. */
@@ -70,7 +73,7 @@ function isCurrent(id: string, p: Preset, model: string): boolean {
   return model === id || model === p.label || model === p.model || model === `${p.provider}/${p.model}`;
 }
 
-export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, effort, thinking, onChooseEffort, account, anchor = null, pill = true }: ModelSelectProps) {
+export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, effort, thinking, onChooseEffort, account, anchor = null, pill = true, labelMax = 22 }: ModelSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -113,9 +116,11 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, eff
       <span className="model-to truncate">{shortModel(fallback.to, 18)}</span>
       <span className="model-from truncate">{t("session.model.fallback", { from: shortModel(fallback.from, 18) })}</span>
     </>
-  ) : shortModel(model, 22);
+  ) : shortModel(model, labelMax);
   const reason = fallback ? (DICT[`session.model.reason.${fallback.reason}`] ? t(`session.model.reason.${fallback.reason}`) : fallback.reason) : "";
-  const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : t("composer.model.title");
+  // The tooltip names the model whole before what the chip does: the chip may cut the name, by its
+  // letter cap or by the room its row leaves it.
+  const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : model ? `${model} — ${t("composer.model.title")}` : t("composer.model.title");
   const ownOpen = open && !anchor;
   return (
     <>

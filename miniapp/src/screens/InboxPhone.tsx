@@ -15,7 +15,7 @@ import { absTime, relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
-import { hold, invalidate, prime, release, useOffline, useQuery } from "../store";
+import { hold, invalidate, listOf, prime, release, useOffline, useQuery } from "../store";
 import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
 import { act, afterChange, byDay, categoryLabel, entryPath, listKey, markAllSeen, markSeen, markUnseen, noticeIcon, noticeLine, projectNames, resolutionLabel, toneClass, type ActResult } from "../notifications";
@@ -69,7 +69,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   const entries = (data?.entries ?? []).filter((e) => !e.needs_you && !answered.has(e.id));
   // A proposal or a schedule carries no project and no failure: only the views that could hold one show it.
   const extras = project === null && (filter === "all" || filter === "needs");
-  const allPending = project === null ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const allPending = project === null ? listOf(proposals.data).filter((p) => p.status === "pending") : [];
   const pending = extras ? allPending : [];
   const waitingSchedules = usePendingSchedules();
   const schedules = extras ? waitingSchedules : [];
@@ -231,7 +231,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   const chosen = [...shown].map((id) => byId.get(id)).filter((e): e is Notification => !!e);
   const toAllow = chosen.filter(allowable);
   const current = open?.kind === "entry" ? byId.get(open.id) : undefined;
-  const proposal = open?.kind === "proposal" ? (proposals.data ?? []).find((p) => p.id === open.id) : undefined;
+  const proposal = open?.kind === "proposal" ? listOf(proposals.data).find((p) => p.id === open.id) : undefined;
 
   return (
     <div className={`ph-page ph-inbox ${selected ? "selecting" : ""}`}>

@@ -34,6 +34,7 @@ import { Button, IconButton, Menu, Sheet, type MenuItem } from "../ui/primitives
 import { connectShell, ShellError, type Current, type PageInfo, type Shell } from "./bridge";
 import { cropRect, dataFile, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelListing, type PanelSession, type Rect } from "./model";
 import "./sidepanel.css";
+import { Mascot } from "../ui/mascot";
 
 type Status = "idle" | "running" | "waiting" | "failed" | "compacting";
 
@@ -132,7 +133,7 @@ export function SidePanel() {
   if (outside) {
     return (
       <div className="sidepanel sp-outside">
-        <Icon name="logo" size={28} />
+        <Mascot size={28} />
         <p>{t("sidepanel.outside")}</p>
       </div>
     );

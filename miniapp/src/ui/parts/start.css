@@ -11,9 +11,22 @@
   .start-composer, .start-resume, .start-import { width:100%; max-width:var(--chat-w); }
   /* The chat's composer pads itself off the conversation's edges; here the box is the column. */
   .start-composer.composer { padding:0; }
-  /* With no conversation above it the card is the page's one object, so its field is given room: 36 px
-     between the words and the row of controls, where a chat's own composer keeps 14. */
-  .start-composer .composer-box { gap:36px; padding-top:16px; }
+  /* With no conversation above it the card is the page's one object, so its field is given room: 28 px
+     between the words and the controls, where a chat's own composer keeps 14. The controls are two
+     rows, so the card is already a row taller than the chat's and the field needs less air to lead. */
+  .start-composer .composer-box { gap:28px; padding-top:16px; }
+  /* Where and how the chat starts, then the chat composer's own row. Every chip of the first row keeps
+     its whole word and the row wraps when they do not fit: only the project's name, which is the
+     operator's own and can be any length, is cut, and its tooltip holds the whole path. The model's
+     chip below has the row's width, so a long name is cut only after everything else is whole. */
+  .start-controls { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .start-controls[hidden] { display:none; }
+  .composer-where { display:flex; flex-wrap:wrap; align-items:center; gap:4px; min-width:0; margin-left:-8px; }
+  .composer-where > * { flex:none; max-width:100%; }
+  .composer-where > .composer-project { flex:0 1 auto; max-width:min(100%, 320px); }
+  .composer-where > .composer-mode, .composer-where > .composer-access { max-width:100%; }
+  .start-controls .composer-tools { flex:1 1 auto; }
+  .start-controls .model-select { max-width:100%; }
 }
 
 /* "Continue": 56 px cards, a dot for the state, the title over a line that says it in words, when,
