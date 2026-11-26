@@ -1,5 +1,5 @@
 /* Settings: a page of its own on a desktop (the list of sections where the sidebar was, the open
-   section in a centred 880 px column), a two-level stack on a phone. The rows inside are
+   section in a centred 960 px column), a two-level stack on a phone. The rows inside are
    settingsrow.tsx's and keep their own rules in ui/parts, since other screens draw them too; this file
    is the frame around them, what is Settings' alone (the changed-value mark, the search), and the
    cards a section is drawn in (`.set-label`, `.set-card`, `.set-row`). */
@@ -101,9 +101,11 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
   .settings-head { display: flex; flex: none; align-items: center; gap: 8px; height: var(--head-h); padding: 0 12px 0 24px; }
   h1.settings-title { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-15); font-weight: 600; letter-spacing: 0; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; text-wrap: nowrap; }
   .settings-main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  /* Every section reads in one centred column the conversation's own way, 880 px or the pane less
-     its 24 px sides, whichever is less. */
-  .settings-page .settings-col { box-sizing: border-box; width: min(880px, 100% - 48px); margin: 0 auto; padding: var(--space-5) 0 var(--space-6); }
+  /* Every section reads in one centred column, 960 px or the pane less its 24 px sides, whichever is
+     less. Wider than the lists of the other pages because a row here is a label at one edge and a
+     control at the other, and the controls (a four-way choice, a model picker, a path) need the room;
+     the sentences of help stay at their own reading measure (72 characters) inside it. */
+  .settings-page .settings-col { box-sizing: border-box; width: min(960px, 100% - 48px); margin: 0 auto; padding: var(--space-5) 0 var(--space-6); }
   .settings-page .settings-col > .card:first-child, .settings-page .settings-col > .section-title:first-child { margin-top: 0; }
   .settings-page .settings-col > .settings-about { margin: 0 0 16px; }
 }
