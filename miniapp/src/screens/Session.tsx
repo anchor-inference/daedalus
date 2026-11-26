@@ -113,7 +113,8 @@ import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
-import { Overview, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { Overview, QuotaWindows, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { quotaTone } from "../detailsmodel";
 import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
@@ -1906,6 +1907,17 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   </> : null;
   const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
   const boardTag = `${boardFigures.done}/${boardFigures.all}`;
+  // What the chat's model costs, on the front page: the windows of the subscription it runs on (what
+  // "$0 · today unmetered" said nothing about), else the metered spend. A subscription the host has no
+  // windows for draws nothing rather than zeros; a reading left from another chat's provider is ignored.
+  const usageKnown = !!provider && providerUsage?.provider === provider;
+  const subscription = usageKnown ? providerUsage!.subscription : undefined;
+  const quotaWindows = subscription?.windows ?? [];
+  const today = detail ? spendToday(detail.usage) : null;
+  const usageRow: OverviewRow | null = !detail || (!usageKnown && !((detail.usage.usd ?? 0) > 0)) ? null
+    : quotaWindows.length ? { tab: "usage", kind: "subscription", name: providerLabel(provider), text: <QuotaWindows windows={quotaWindows} />, tag: subscription?.limit_reached ? t("usage.limitreached") : undefined, tone: subscription?.limit_reached || quotaWindows.some((w) => quotaTone(w.used_percent) !== "ok") ? "attn" : undefined }
+    : subscription && !((detail.usage.usd ?? 0) > 0) ? null
+    : { tab: "usage", kind: "spend", name: t("panel.tab.usage"), text: detail.usage.usd_today != null && detail.usage.usd_today > 0 ? `${fmtUsd(detail.usage.usd)} ${today!.short}` : fmtUsd(detail.usage.usd) };
   const overviewRows: OverviewRow[] = !detail ? [] : [
     ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
     ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
@@ -1917,7 +1929,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("notes") ? [{ tab: "notes" as PanelTab, name: t("panel.tab.notes"), text: notesCount ? plural("panel.ov.notes", notesCount) : t("panel.ov.notes.none"), tag: notesCount ? String(notesCount) : undefined }] : []),
     ...(sessionCanvases?.length ? [{ tab: "canvas" as PanelTab, name: t("panel.tab.canvas"), text: sessionCanvases[0].title || t("panel.canvas.untitled"), tag: String(sessionCanvases.length) }] : []),
     ...(detail.context ? [{ tab: "context" as PanelTab, name: t("panel.tab.context"), text: detail.context.window > 0 ? t("strip.context.of", { used: fmtTok(detail.context.tokens), window: fmtTok(detail.context.window) }) : fmtTok(detail.context.tokens), tag: contextPct !== null ? `${contextPct}%` : undefined, tone: contextPct !== null && contextPct >= 80 ? "attn" as const : undefined }] : []),
-    { tab: "usage" as PanelTab, name: t("panel.tab.usage"), text: detail.usage.usd_today != null ? `${fmtUsd(detail.usage.usd)} · ${spendToday(detail.usage).short}` : fmtUsd(detail.usage.usd) },
+    ...(usageRow ? [usageRow] : []),
   ].filter((row) => panelTabs.includes(row.tab));
   const panelFigures: Partial<Record<PanelTab, string>> = {
     ...(changedFiles.length ? { changes: String(changedFiles.length) } : {}),

@@ -13,10 +13,45 @@ import { Elapsed } from "./details";
 import type { BoardTask } from "./board/tasks";
 import { useQuery } from "./store";
 import { taskSub } from "./jobs";
-import { commandPreview } from "./format";
+import { absTime, commandPreview, untilShort } from "./format";
+import { quotaTone } from "./detailsmodel";
 
-/** One row: the tool, what it holds in a few words, and a figure at its end in the tone of what it says. */
-export type OverviewRow = { tab: PanelTab; name: string; text: ReactNode; tag?: string; tone?: "live" | "attn" | "add" };
+/** One row: the tool, what it holds in a few words, and a figure at its end in the tone of what it says.
+ *  `kind` tells two rows of one tool apart for a reader of the page (the Usage tool's row is either the
+ *  subscription's windows or the metered spend). */
+export type OverviewRow = { tab: PanelTab; name: string; text: ReactNode; tag?: string; tone?: "live" | "attn" | "add"; kind?: string };
+
+/** A subscription window as the host reports it: its name ("5h", "weekly"), how much of it is used, when it starts again. */
+export type QuotaWindow = { name: string; used_percent: number; resets_at?: number | string | null };
+
+/** The windows of the subscription the chat's model runs on, each a thin meter and its percentage, in
+ *  the attention colour once the app judges it near its limit; when it starts again is in its tooltip. */
+export function QuotaWindows({ windows }: { windows: QuotaWindow[] }) {
+  return (
+    <span className="ov-quota">
+      {windows.map((w) => {
+        const percent = Math.round(w.used_percent);
+        const tone = quotaTone(w.used_percent);
+        const resets = resetDate(w.resets_at);
+        const title = [`${w.name}: ${percent}%`, resets ? `${t("details.quota.resets")} ${untilShort(resets)} (${absTime(resets)})` : ""].filter(Boolean).join(" · ");
+        return (
+          <span key={w.name} className={`ov-window ${tone === "ok" ? "" : tone}`} data-quota={w.name} data-tone={tone} title={title}>
+            <span className="ov-window-name">{w.name}</span>
+            <span className="ov-meter" aria-hidden><i style={{ width: `${Math.max(0, Math.min(100, w.used_percent))}%` }} /></span>
+            <span className="ov-window-pct num">{percent}%</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** The host sends a reset as seconds since the epoch or as an ISO date. */
+function resetDate(at: number | string | null | undefined): Date | null {
+  if (at === null || at === undefined || at === "") return null;
+  const date = new Date(typeof at === "number" && at < 1e12 ? at * 1000 : at);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 export type OverviewStatus = { tone: "live" | "attn" | "bad" | "idle"; word: string; since?: string | null };
 
@@ -51,7 +86,7 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
       </div>
       <div className="ov-rows">
         {all.map((row) => (
-          <button key={row.tab} type="button" className="ov-row" data-row={row.tab} onClick={() => onOpen(row.tab)}>
+          <button key={row.tab} type="button" className="ov-row" data-row={row.tab} data-kind={row.kind} onClick={() => onOpen(row.tab)}>
             <Icon name={TAB_ICON[row.tab]} size={16} />
             <span className="ov-row-name">{row.name}</span>
             <span className="ov-row-text">{row.text}</span>
