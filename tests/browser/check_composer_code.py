@@ -33,7 +33,9 @@ from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 SHOTS = os.environ.get("SHOTS_DIR", "")
-LONG = "return a + b  # a comment long enough to run past the right edge of the card on any screen"
+# Long enough to pass the card's right edge at the widest conversation column a desktop draws by
+# default (840 px): the line that was long for a 760 px card fitted the wider one and scrolled nowhere.
+LONG = "return a + b  # a comment long enough to run past the right edge of the card on any screen, however wide the conversation is drawn by default"
 FIELD = ".start-composer .composer-field"
 
 
