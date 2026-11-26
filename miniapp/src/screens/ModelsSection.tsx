@@ -19,7 +19,7 @@ import { healthAlert, modelItems } from "../modelitems";
 import { ON_DEMAND_CHOICES, REASONING_EFFORTS, type RouteListing, onDemandGroups } from "../models";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ProviderLimit } from "./ProviderLimit";
-import { ProviderMark, providerName } from "../ui/provider-mark";
+import { ProviderMark, providerName, providerState } from "../ui/provider-mark";
 import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { accountName, type SubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
 import { settingTarget } from "../settinglink";
@@ -55,23 +55,6 @@ export function providerKind(conf: ProviderConf | undefined, s: Pick<Settings, "
   if ((conf && LOCAL_KINDS.has(conf.kind)) || keys?.key_kind === "endpoint") return "local";
   if (conf && GATEWAY_KINDS.has(conf.kind)) return "gateway";
   return "key";
-}
-
-type Status = { word: string; tone: "live" | "attention" | "idle" };
-
-/** What stands between a provider and an answer, as the key proxy and the subscription accounts say:
- *  nothing, a sign-in, a key, or a key proxy that does not answer. */
-export function providerStatus(conf: ProviderConf | undefined, s: Pick<Settings, "provider_keys">, id: string, accounts?: SubscriptionUpstream): Status {
-  if (!conf) return { word: t("prov.status.missing"), tone: "attention" };
-  const keys = s.provider_keys?.[id];
-  const signedOut = accounts && accounts.sign_in === "terminal" && accounts.accounts.length > 0 && !accounts.accounts.some((a) => a.configured);
-  if (signedOut) return { word: t("prov.status.signin"), tone: "attention" };
-  if (keys?.ready) return { word: t("prov.status.ready"), tone: "live" };
-  if (!keys) return conf.api_key_set ? { word: t("settings.provider.keystored"), tone: "idle" } : { word: t("prov.status.unknown"), tone: "idle" };
-  if (keys.key_held === null) return { word: t("prov.status.proxy"), tone: "attention" };
-  if (keys.key_kind === "cli_login") return { word: t("prov.status.signin"), tone: "attention" };
-  if (keys.key_kind === "endpoint") return { word: t("prov.status.down"), tone: "attention" };
-  return { word: t("prov.status.nokey"), tone: "attention" };
 }
 
 /** A context window as the list prints it: 128K, 1M. */
@@ -474,7 +457,7 @@ type ProviderProps = {
 function ProviderRow({ id, conf, s, presets, kinds, accounts, open, onToggle, take, toast, onPatchProvider, onPatchPreset, onRemove, onRemovePreset, onRefreshWindow, onLookup, onDefault }: ProviderProps) {
   const upstream = accounts?.upstreams.find((u) => u.providers.includes(id));
   const name = providerName(id, conf);
-  const status = providerStatus(conf, s, id, upstream);
+  const status = providerState(conf, s, id, upstream);
   const kind = conf ? providerKind(conf, s, id) : null;
   // Opened at its key when a link to the key brought the operator here: the field is behind Connection.
   const [editing, setEditing] = useState(() => settingTarget() === `providers.${id}.api_key`);

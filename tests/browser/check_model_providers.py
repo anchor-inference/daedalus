@@ -1,8 +1,11 @@
-"""The model picker's tabs, its search across providers and its keys, through the real composer commands.
+"""The model picker's providers, its search across them and its keys, through the real composer commands.
 
-The picker is one box of one size: Favourites first, a tab per provider, the free models last; a search
-spans every provider; the side arrows walk the tabs from an empty search, up and down walk the rows,
-Enter picks and Escape gives the keyboard back to the chip. A phone has the same box as a sheet.
+The picker is one box of one size: a column of providers by name (Favourites first, each provider, the
+free models last) beside the chosen one's models; a search spans every provider; the left arrow crosses
+from the search to the providers, up and down walk them, the right arrow comes back to the models, up
+and down walk the rows, Enter picks and Escape gives the keyboard back to the chip. A phone has the same
+box as a sheet, its providers a row of named chips. The operator's full set of fourteen providers is
+check_picker_providers.py.
 """
 from __future__ import annotations
 
@@ -35,11 +38,15 @@ def main() -> int:
             phone = width < 1024
             tabs = page.locator(".model-picker [role=tab]")
             page.wait_for_selector(".model-picker [role=option]")
-            # Favourites, then each provider with its mark, then the free models.
+            # Favourites, then each provider with its mark and name, then the free models.
             expect(tabs).to_have_count(5)
             assert tabs.first.get_attribute("data-tab") == "favourites"
             assert tabs.last.get_attribute("data-tab") == "free"
             expect(page.locator(".model-picker [role=tab][data-provider] .provider-mark")).to_have_count(3)
+            for tab in tabs.all():
+                name = tab.locator(".model-prov-name")
+                expect(name).to_have_text(tab.get_attribute("aria-label") or "")
+                assert name.evaluate("el => el.getBoundingClientRect().width > 8"), f"{width}: a provider without a visible name"
             expect(tabs.first).to_have_attribute("aria-selected", "true")
             rows = page.locator(".model-picker [role=option]")
             expect(rows).to_have_count(1)
@@ -71,14 +78,23 @@ def main() -> int:
             assert composer.reached(page, "/model", before, "search selection", problems)
             assert composer.posts("/model")[-1][2] == {"preset": "flash"}
             if not phone:
-                # The keyboard alone: the arrows walk the tabs and the rows, Enter picks, Escape leaves.
+                # The keyboard alone: left into the providers, down them, right back to the models,
+                # down the rows, Enter picks, Escape leaves.
                 trigger.click()
                 page.wait_for_selector(".model-picker [role=option]")
                 expect(search).to_be_focused()
-                page.keyboard.press("ArrowRight")
+                page.keyboard.press("ArrowLeft")
+                expect(tabs.first).to_be_focused()
+                page.keyboard.press("ArrowDown")
                 expect(page.locator(".model-picker [role=tab][data-provider='local']")).to_have_attribute("aria-selected", "true")
+                page.keyboard.press("ArrowDown")
+                claude = page.locator(".model-picker [role=tab][data-provider='claude']")
+                expect(claude).to_have_attribute("aria-selected", "true")
+                expect(claude).to_be_focused()
+                if size:
+                    assert box(page) == size, f"{width}: walking the providers changed the box from {size} to {box(page)}"
                 page.keyboard.press("ArrowRight")
-                expect(page.locator(".model-picker [role=tab][data-provider='claude']")).to_have_attribute("aria-selected", "true")
+                expect(search).to_be_focused()
                 page.keyboard.press("ArrowDown")
                 active = page.locator(".model-picker [role=option].active")
                 expect(active).to_have_count(1)
@@ -91,7 +107,9 @@ def main() -> int:
                 assert composer.posts("/model")[-1][2] == {"preset": chosen}, composer.posts("/model")[-1]
                 trigger.click()
                 page.wait_for_selector(".model-picker [role=option]")
-                # Tab goes round the box (the reasoning, the settings) and back, never out of it.
+                # Tab goes round the box (the providers, the reasoning, the settings) and back, never out of it.
+                page.keyboard.press("Tab")
+                expect(page.locator(".model-picker [role=tab][aria-selected='true']")).to_be_focused()
                 page.keyboard.press("Tab")
                 expect(page.locator(".model-picker .model-effort-seg [aria-checked='true']")).to_be_focused()
                 page.keyboard.press("Tab")
