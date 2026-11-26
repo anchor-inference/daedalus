@@ -41,6 +41,7 @@ import orchestrationColumn from "./orchestration.tsx?raw";
 import projectColumn from "./project/ProjectSidebar.tsx?raw";
 import mainEntry from "./main/MainEntry.tsx?raw";
 import app from "./App.tsx?raw";
+import sessions from "./screens/Sessions.tsx?raw";
 import canvasList from "./canvas/CanvasList.tsx?raw";
 import canvasEditor from "./canvas/CanvasEditor.tsx?raw";
 import schedulesBrowser from "./schedules/SchedulesBrowser.tsx?raw";
@@ -748,10 +749,20 @@ describe("the sidebar", () => {
     expect(wide(".sidebar-foot")).toContain("height: var(--head-h)");
     expect(wide(".sb-nav")).toContain("height: var(--row-h)");
     expect(wide(".sb-row")).toContain("height: var(--row-h)");
-    // Inside a project a chat's text starts where the project's name does: 12 + 16 + 8 of the row.
-    expect(wide(".sb-kids > .sb-row")).toContain("padding-left: 36px");
-    // A subagent under its unfolded leader is one short line, quieter than a chat: the dense row.
-    expect(wide(".sb-sub")).toContain("height: var(--row-h-dense)");
+    // Every chat row — in a project, outside one, a subagent under its leader — is the slot, the
+    // title and one trailing item: a 16 px slot 12 px in and the title 8 px after it, where a
+    // project's chats always started (12 + 16 + 8). The indent that pushed a project's chats 36 px
+    // in stood empty; the slot is in its place and holds the chat's one glyph, so no row draws its
+    // marks between the title and the time any more.
+    expect(wide(".sb-chat")).toContain("padding: 0 10px 0 var(--space-3)");
+    expect(wide(".sb-chat")).toContain("gap: var(--space-2)");
+    expect(wide(".sb-gut")).toContain("width: 16px");
+    expect(wide(".sb-kids > .sb-row")).toBe("");
+    expect(wide(".sb-marks")).toBe("");
+    // A subagent is quieter by its type, not its height: the 32 px pitch of every row keeps its tree
+    // line one stroke and the windowed list's estimate one number.
+    expect(wide(".sb-sub")).not.toMatch(/(^|;)\s*height:/);
+    expect(sessions).toMatch(/estimate=\{34\}/);
     // No second line and no plate is left to pin a two-line height on.
     expect(declared()).not.toContain("--row-h-kid");
     expect(wide(".sb-plate")).toBe("");
