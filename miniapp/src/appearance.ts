@@ -86,7 +86,13 @@ export const FONT_CATALOG: { family: string; google?: string; local?: boolean }[
 
 export type Scale = "sm" | "md" | "lg" | "xl";
 export type Leading = "tight" | "normal" | "open";
-export type Column = "narrow" | "normal" | "wide";
+/** The conversation's width: 720, 840 or 960 px, or the whole room between the sidebar and the panel up to 1400 px.
+ *  The first three keep the names the earlier narrow, usual and wide choices were stored under, so a stored
+ *  choice keeps its meaning without a conversion. */
+export type Column = "narrow" | "normal" | "wide" | "full";
+export const COLUMNS: readonly Column[] = ["narrow", "normal", "wide", "full"];
+/** The stripe each choice draws, in pixels; the usual one is the stylesheet's own and writes nothing. */
+export const COLUMN_WIDTH: Record<Column, number> = { narrow: 720, normal: 840, wide: 960, full: 1400 };
 export type Radius = "sharp" | "normal" | "round";
 /** Answer text in pixels, one per step; `null` is "usual", which follows the interface step. */
 export const PROSE_MIN = 12;
@@ -249,7 +255,7 @@ export function readPrefs(): Prefs {
     scale: oneOf(stored.scale, ["sm", "md", "lg", "xl"] as const, DEFAULT_PREFS.scale),
     prose: proseFromStored(stored.prose),
     leading: oneOf(stored.leading, ["tight", "normal", "open"] as const, DEFAULT_PREFS.leading),
-    column: oneOf(stored.column, ["narrow", "normal", "wide"] as const, DEFAULT_PREFS.column),
+    column: oneOf(stored.column, COLUMNS, DEFAULT_PREFS.column),
     radius: oneOf(stored.radius, ["sharp", "normal", "round"] as const, DEFAULT_PREFS.radius),
     motion: oneOf(stored.motion, ["full", "reduce"] as const, DEFAULT_PREFS.motion),
     contrast: oneOf(stored.contrast, ["normal", "high"] as const, DEFAULT_PREFS.contrast),
@@ -338,8 +344,9 @@ export function appearanceTokens(prefs: Prefs, env: AppearanceEnv): Record<strin
   if (prefs.prose !== null) out["--fs-prose"] = `${prefs.prose}px`;
   if (prefs.leading === "tight") out["--lh-prose"] = "1.45";
   if (prefs.leading === "open") out["--lh-prose"] = "1.8";
-  if (prefs.column === "narrow") out["--chat-w"] = "680px";
-  if (prefs.column === "wide") out["--chat-w"] = "920px";
+  if (prefs.column !== "normal") out["--chat-w"] = `${COLUMN_WIDTH[prefs.column]}px`;
+  // The whole room keeps a little more of it on each side than a fixed stripe needs to.
+  if (prefs.column === "full") out["--chat-pad"] = "32px";
   if (prefs.radius === "sharp") {
     out["--radius-xs"] = "2px";
     out["--radius-sm"] = "4px";

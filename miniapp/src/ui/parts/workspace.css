@@ -254,8 +254,8 @@
   .screen { padding: 4px 24px 32px; }
   /* The title 24 px in from the main's edge, as every page's; the buttons 12 px from the other. */
   .chat-head { padding: 0 12px 0 24px; }
-  .chat-scroll { padding: 20px 24px 16px; }
-  .composer { padding: 8px 24px 16px; }
+  .chat-scroll { padding: 20px var(--chat-pad) 16px; }
+  .composer { padding: 8px var(--chat-pad) 16px; }
   /* The panel stands beside the whole chat at the window's full height, its tab row level with the
      chat's header rather than under a header drawn across both. The chat keeps the room on its right
      as padding, so the header, the conversation and the composer centre in what is left; the panel
@@ -282,7 +282,7 @@
      else and the conversation uses the room the window gives it. */
   .answer, .msg-wrap, .thinking-head, .activity, .artifacts { max-width: 100%; }
 }
-/* The conversation keeps one measure at every width: 760 px at 15/1.6 is about 85 characters, and a
+/* The conversation keeps one measure at every width: the chosen stripe, 840 px by default, and a
    stripe that grew to 1120 and 1320 on a wide window made every line of an answer a long return trip
    for the eye. The room a wide window has is the margin around the column, as in a book. */
 @media (min-width: 1600px) {

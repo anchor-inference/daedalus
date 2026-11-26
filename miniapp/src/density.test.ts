@@ -938,15 +938,23 @@ describe("rows and controls", () => {
     expect(wide).not.toMatch(/\.answer[^{]*\{[^}]*max-width: var\(--reading-w\)/);
   });
 
-  it("holds the stripe at 760 px at every window width", () => {
-    // One measure, 760 px at 15/1.6 (about 85 characters), on a
-    // laptop and on a 2560 screen alike. The stripe once widened to 1120 and 1320 on wide windows, and
-    // every line of an answer became a long return trip for the eye. One declaration, no media rule
-    // that moves it; the Appearance setting's narrow and wide columns are the operator's own choice.
+  it("holds the stripe at the chosen width, 840 px by default, at every window width", () => {
+    // One measure on a laptop and on a 2560 screen alike. 840 px at 15 px Inter is about 95 characters a
+    // line, the upper edge of a comfortable measure; it is where it is because answers here carry tables
+    // and code more than prose. The stripe once widened to 1120 and 1320 on wide windows, and every line
+    // of an answer became a long return trip for the eye. One declaration, no media rule that moves it;
+    // Appearance sets 720, 960 or the whole room (up to 1400) on the same token and nothing else.
     const stripes = all.filter((r) => /--chat-w:/.test(r.body) && /(^|[\s,]):root($|[\s,])/.test(r.selector));
     expect(stripes.map((r) => r.media)).toEqual([""]);
-    expect(stripes[0].body).toMatch(/--chat-w: 760px/);
-    // The operator's bubble reads at the answer's size and stops at three quarters of the stripe.
+    expect(stripes[0].body).toMatch(/--chat-w: 840px/);
+    expect(stripes[0].body).toMatch(/--chat-pad: 24px/);
+    // The side padding of the scroller and of the composer is that token, so the whole-room choice can widen it.
+    const desktop = all.filter((r) => r.media.includes("min-width: 1024px")).map((r) => `${r.selector}{${r.body}}`).join("\n");
+    expect(desktop).toMatch(/\.chat-scroll\{[^}]*padding: 20px var\(--chat-pad\) 16px/);
+    expect(desktop).toMatch(/\.composer\{[^}]*padding: 8px var\(--chat-pad\) 16px/);
+    // The start page's import card follows the same column rather than a width of its own.
+    expect(all.filter((r) => selectors(r).includes(".start-import")).map((r) => r.body).join(";")).not.toMatch(/max-width: 720px/);
+    // A message you sent reads at the answer's size and stops at 560 px.
     expect(decl(".msg.user")).toContain("max-width: min(560px, 100%)");
     expect(decl(".msg.user")).toContain("font-size: var(--fs-prose)");
     expect(decl(".msg.user")).toContain("border-radius: var(--radius-bubble)");

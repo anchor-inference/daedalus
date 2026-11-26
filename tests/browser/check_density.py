@@ -747,14 +747,15 @@ def judge(m: dict) -> list[str]:
     if not phone and m["userW"] and (m["userFs"] != 15 or m["userW"]["w"] > 560):
         problems.append(f"{m['vw']}: the operator's bubble is {m['userW']['w']}px wide at {m['userFs']}px, not 15 px within 560")
     if m["timeline"]:
-        # The conversation and the field that answers it are one column, 760 px at every width (the
-        # owner's measure; it widened to 1120 and 1320 on wide windows before). Three claims: the stripe
-        # is never exceeded, it is the whole 760 wherever the scroller has the room, and the field is
-        # exactly as wide as the conversation above it (they were offset against each other once).
-        if m["timeline"]["w"] > 760:
-            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the 760 stripe")
-        if not phone and m["scrollRoom"] is not None and m["scrollRoom"] >= 760 and m["timeline"]["w"] != 760:
-            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 760")
+        # The conversation and the field that answers it are one column at the chosen width, 840 px by
+        # default, at every window width (it widened to 1120 and 1320 on wide windows before; the choices
+        # are check_chat_width.py's). Three claims: the stripe is never exceeded, it is the whole 840
+        # wherever the scroller has the room, and the field is exactly as wide as the conversation above
+        # it (they were offset against each other once).
+        if m["timeline"]["w"] > 840:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the 840 stripe")
+        if not phone and m["scrollRoom"] is not None and m["scrollRoom"] >= 840 and m["timeline"]["w"] != 840:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 840")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
         # Beside the 432 px panel a 1440 window keeps the conversation's whole stripe: 1440 less the
@@ -812,7 +813,7 @@ START = """
 
 def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
     """The desktop's start screen and projects page, at 1440: the question in 28 px over a composer in
-    the conversation's own 760 px column, the primary a 32 px circle, the chips of the composer's row
+    the conversation's own 840 px column, the primary a 32 px circle, the chips of the composer's row
     28 px like every small chip, the chats to continue and the project rows 56 px cards, in the page
     chrome's 880 px list."""
     problems: list[str] = []
@@ -828,8 +829,8 @@ def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
     start["projectRows"] = projects["projectRows"]
     start["projectList"] = projects["projectList"]
     context.close()
-    if not start["composer"] or start["composer"]["w"] != 760:
-        problems.append(f"start: the composer is {start['composer']}, not 760 wide")
+    if not start["composer"] or start["composer"]["w"] != 840:
+        problems.append(f"start: the composer is {start['composer']}, not 840 wide")
     if not start["heading"] or start["heading"]["size"] != "28px" or start["heading"]["weight"] != "500":
         problems.append(f"start: the question is {start['heading']}, not 28/500")
     if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
