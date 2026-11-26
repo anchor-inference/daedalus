@@ -437,7 +437,11 @@ def antigravity_usage_view(data: dict[str, Any], tier: str = "") -> dict[str, An
             if not isinstance(info, dict) or model_id.startswith("tab_") or model_id.endswith("-disabled"):
                 continue
             qi = info.get("quotaInfo")
-            if not isinstance(qi, dict) or "remainingFraction" not in qi:
+            # The answer is proto3 JSON, which leaves a zero out: a window that is used up arrives as
+            # ``{"resetTime": …}`` with no ``remainingFraction`` at all. Reading that as "no quota
+            # here" dropped the Gemini windows from the usage at exactly the moment they ran out. A
+            # quota with a reset and no fraction is an empty one; one with neither says nothing.
+            if not isinstance(qi, dict) or ("remainingFraction" not in qi and not qi.get("resetTime")):
                 continue
             if model_id.startswith("gemini-4-argon") or model_id == "gemini-pro-orchestrator-g1-pro":
                 family = "Gemini 4 Argon (weekly)"
