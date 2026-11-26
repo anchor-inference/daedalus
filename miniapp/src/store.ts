@@ -119,6 +119,13 @@ export function useOffline(): boolean {
 
 export type Query<T> = { data: T | undefined; error: string | null; loading: boolean; updatedAt: number | null; refresh: () => Promise<void> };
 
+/** A list read from a query, or an empty one for anything that is not a list. A route the app reads as a
+ *  list can still answer something else (a host mid-upgrade, a proxy's page, a paged object): a reader
+ *  that called `.filter` on it threw, and when the reader was the shell the whole page went blank. */
+export function listOf<T>(data: T[] | null | undefined): T[] {
+  return Array.isArray(data) ? data : [];
+}
+
 /**
  * `key` is the API path. `pollMs` refreshes while the component is mounted and the tab is visible;
  * `staleMs` decides whether the cached copy is fresh enough to skip the first request.

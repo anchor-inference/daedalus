@@ -6,7 +6,7 @@ import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api } from "./api";
-import { invalidate, prime, retryDelay, useQuery } from "./store";
+import { invalidate, listOf, prime, retryDelay, useQuery } from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -126,5 +126,17 @@ describe("a screen that mounts while another reader's request is on the way", ()
     act(() => root.render(<><Member path="/api/projects/p1/budget?gap" pollMs={0} /><Answer /></>));
     expect(get).not.toHaveBeenCalled();
     expect(box.textContent).toBe("Ira");
+  });
+});
+
+describe("a list read from a query", () => {
+  it("is the list itself, or empty for anything that is not one", () => {
+    const rows = [{ status: "pending" }];
+    expect(listOf(rows)).toBe(rows);
+    expect(listOf(undefined)).toEqual([]);
+    expect(listOf(null)).toEqual([]);
+    // A paged object or an error body where a list was expected: the reader gets nothing to filter, not a throw.
+    expect(listOf({ items: rows } as unknown as typeof rows)).toEqual([]);
+    expect(listOf("<html>" as unknown as typeof rows)).toEqual([]);
   });
 });
