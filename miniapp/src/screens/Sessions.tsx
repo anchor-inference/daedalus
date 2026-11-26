@@ -568,6 +568,10 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   const unfolded = useSubsShown();
   const shown = useMemo(() => withSubs(chats, unfolded), [chats, unfolded]);
   const keys = useMemo(() => shown.map(lineKey), [shown]);
+  const more = hidden > 0 || (all && all_lines.length > KIDS_SHOWN);
+  // Where the project's guide line ends: at the "show more" row when there is one, else at its last
+  // chat, past that chat's unfolded subagents only when another chat follows them.
+  const lastChat = useMemo(() => shown.reduce((at, l, i) => (l.sub ? at : i), -1), [shown]);
   const state = folderState(folder.rows);
   // Where the project's chats run, said on its line when it is the host; a chat that runs elsewhere
   // than the rest says so in its own slot.
@@ -585,7 +589,7 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
     } else if (e.key === "ArrowLeft" && showing) { e.preventDefault(); toggle(false); }
   };
   return (
-    <section ref={section} data-project={folder.key} className={`sb-project ${showing ? "open" : ""} ${folder.system ? "system" : ""}`}>
+    <section ref={section} data-project={folder.key} className={`sb-project ${showing ? "open" : ""} ${folder.system ? "system" : ""} ${shown.length > 0 ? "kids" : ""}`}>
       {/* A chat dragged onto the row moves into the project; the keyboard and the phone use Move. */}
       <div ref={head} className={`sb-row sb-prow ${dropping ? "drop" : ""}`} data-nav="project" data-project-head="" role="button" tabIndex={0} aria-expanded={showing}
         aria-label={[t(showing ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), ruleWords].filter(Boolean).join(", ")} title={[projectPath(folder.project), ruleWords].filter(Boolean).join("\n")}
@@ -610,11 +614,11 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
         <div className={`sb-kids ${showing ? "" : "peek"}`}>
           {showing && folder.rows.length === 0 && <div className="sb-empty sub">{filtered ? t("common.nothing") : t("agents.folder.none")}</div>}
           <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={34} render={(i) => shown[i].sub ? (
-            <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} nested />
+            <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} nested through={more || i < lastChat} />
           ) : (
-            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} envRule={rule?.env} />
+            <ChatRow row={shown[i].row} fork={shown[i].fork} nested tail={!more && i === lastChat} onOpen={onOpen} current={current} projectName={folder.name} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} envRule={rule?.env} />
           )} />
-          {(hidden > 0 || (all && all_lines.length > KIDS_SHOWN)) && (
+          {more && (
             <button type="button" className="sb-more" onClick={() => setAll((v) => !v)}>
               {hidden > 0 ? t("side.more", { n: hidden }) : t("side.fewer")}
             </button>
@@ -642,8 +646,11 @@ type RowProps = {
   onOpen: (id: string) => void;
   current?: string;
   fork?: { of: string; seq: number };
-  /** Inside a project's fold: a quiet dot in the slot when the chat has no glyph of its own. */
+  /** Inside a project's fold: one step in, on the project's guide line, with a quiet dot in the slot
+   *  when the chat has no glyph of its own. */
   nested?: boolean;
+  /** The last row on the project's guide line, where the line ends. */
+  tail?: boolean;
   projectName: string;
   onNewIn?: () => void;
   /** Where Left goes from a chat inside a project: to the project's row. */
@@ -729,7 +736,7 @@ function glyphOf(s: SessionSummary, o: { kind: ChatKind; kindClass: string; kind
  * Hovering or focusing it shows "Open beside" and the menu over the right edge; the right click opens
  * the same menu, with the commands of the phone's sheet. A leader's slot folds its helpers.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, onNewIn, onParent, pin, subsOpen, chat, envRule: rule }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, tail, projectName, onNewIn, onParent, pin, subsOpen, chat, envRule: rule }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   // The project's own settings are the project row's to offer; in a chat's menu they were one more
@@ -816,7 +823,7 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
       : pip && <span className={`sb-pip ${pip}`} aria-hidden />}
   </>;
   return (
-    <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""} ${s.match ? "match" : ""}`}
+    <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${tail ? "tail" : ""} ${fork ? "fork" : ""} ${s.match ? "match" : ""}`}
       title={`${name}\n${facts.join(" · ")}`} aria-label={`${name}, ${facts.join(", ")}`} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
       draggable onDragStart={(e) => startChatDrag(e, s)} onDragEnd={endChatDrag}>
       {kids.length > 0 ? (
@@ -857,12 +864,13 @@ function subState(s: SessionSummary): "running" | "waiting" | "failed" | "idle" 
 }
 
 /**
- * A subagent under its unfolded leader: a quieter line whose slot is the tree line from the leader's,
- * with the helper's state as a dot on it, and its title where every title starts. It opens beside
- * the leader, in the Subagents tab; its full chat is the tab's button and the row's menu. The arrows
- * walk it like any row, and Left goes to the leader.
+ * A subagent under its unfolded leader: a quieter line one step in from the leader, on a guide line
+ * that drops from the leader's slot, with the helper's state as the dot in its own slot. Under a chat
+ * inside a project it is two steps in, and the project's line runs on past it while another chat of
+ * the project follows (`through`). It opens beside the leader, in the Subagents tab; its full chat is
+ * the tab's button and the row's menu. The arrows walk it like any row, and Left goes to the leader.
  */
-const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { kid: SessionSummary; leader: SessionSummary; last: boolean; nested?: boolean }) {
+const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested, through }: { kid: SessionSummary; leader: SessionSummary; last: boolean; nested?: boolean; through?: boolean }) {
   const route = useRoute();
   const here = route.session === leader.id && route.query.get("panel") === "subagents" && route.query.get("sub") === kid.id;
   const state = subState(kid);
@@ -878,12 +886,13 @@ const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { k
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); box.current?.parentElement?.querySelector<HTMLElement>(`[data-session="${CSS.escape(leader.id)}"]`)?.focus(); }
   };
+  // The tooltip leads with the helper's name: a step deeper than a chat, its title is the one cut first.
   const name = agentName(kid);
   const facts = [state !== "idle" ? stateWord(state) : relTimeLong(kid.last_message_at), kid.model ?? ""].filter(Boolean);
   return (
     <div ref={box} data-subagent={kid.id} data-nav="chat" role="link" tabIndex={0} aria-current={here ? "page" : undefined} aria-label={`${name}, ${facts.join(", ")}`}
-      className={`sb-row sb-sub ${here ? "current" : ""} ${last ? "last" : ""} ${nested ? "nested" : ""}`} title={kid.model ? `${kid.model} · ${kid.id}` : kid.id} onClick={open} onKeyDown={onKey}>
-      <span className={`sb-gut sb-tree ${last ? "last" : ""}`} aria-hidden><span className={`sub-dot ${state}`} /></span>
+      className={`sb-row sb-sub ${here ? "current" : ""} ${last ? "tail" : ""} ${nested ? "nested" : ""} ${nested && through ? "through" : ""}`} title={`${name}\n${kid.model ? `${kid.model} · ` : ""}${kid.id}`} onClick={open} onKeyDown={onKey}>
+      <span className="sb-gut" aria-hidden><span className={`sub-dot ${state}`} /></span>
       <span className="sb-t">{name}</span>
       {state !== "idle" ? <span className={`sb-word ${state}`}>{stateWord(state)}</span> : <span className="sb-time num">{relTime(kid.last_message_at)}</span>}
     </div>

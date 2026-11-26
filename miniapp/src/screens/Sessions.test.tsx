@@ -300,6 +300,23 @@ describe("the sidebar", { timeout: 30_000 }, () => {
     expect(host.querySelectorAll(".sb-sub")).toHaveLength(0);
   });
 
+  it("hangs a project's chats on its guide line, and a leader's subagents a step further in", async () => {
+    // h1 leads two helpers; h2 follows it in the project, so the project's line runs on past the
+    // helpers to h2, where it ends.
+    listing.data.sessions = [...listing.data.sessions,
+      chat("k1", "home", 0.3, { title: "[sub] lint", metadata: { subagent_of: "h1", subagent_name: "lint" } }),
+      chat("k2", "home", 0.3, { title: "[sub] build", metadata: { subagent_of: "h1", subagent_name: "build" } })];
+    localStorage.setItem("daedalus.folder.home", "1");
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-session="h1"] .sb-fold')!.click());
+    const section = host.querySelector('[data-project="home"]')!;
+    expect(section.classList.contains("kids")).toBe(true);
+    const lined = Array.from(section.querySelectorAll<HTMLElement>(".sb-kids > .sb-row")).map((r) => [r.dataset.session ?? r.dataset.subagent, r.className.split(/\s+/).filter((c) => ["nested", "tail", "through"].includes(c)).join(" ")]);
+    expect(lined).toEqual([["h1", "nested"], ["k1", "nested through"], ["k2", "tail nested through"], ["h2", "nested tail"]]);
+    // A loose chat stands outside every line.
+    expect(host.querySelector('[data-session="c1"]')!.classList.contains("nested")).toBe(false);
+  });
+
   it("lists what is pinned in a block above both sections, and not again below it", async () => {
     listing.data.projects = listing.data.projects.map((p) => p.id === "esp" ? { ...p, pinned_at: "2026-10-01T09:00:00Z" } : p.id === "c2" ? { ...p, pinned_at: "2026-10-02T09:00:00Z" } : p);
     await render();

@@ -145,7 +145,7 @@
 .sb-row:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
 .sb-t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sb-row.unread .sb-t { font-weight: 500; }
-.sb-tile { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
+.sb-tile { position: relative; display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
 .sb-project.system .sb-tile { color: var(--fg); }
 .sb-prow.open .sb-t, .sb-project.open > .sb-prow .sb-t { font-weight: 500; }
 /* A project's name is as long as it is, so the lock that says its chats run on the host stands right
@@ -164,12 +164,49 @@
 .sb-word.waiting, .sb-word.failed { color: var(--attention); }
 .sb-word.running { color: var(--live); }
 
-/* A chat's row: the slot, the title, one thing at the right edge. Every chat row, in a project or not,
-   draws the slot 12 px in and its title 8 px after it, so every title starts where a project's chats'
-   always did (12 + 16 + 8) and a long list reads down one edge. Inside a project the slot holds a
-   quiet dot when the chat has no glyph: the nesting is said there, where the indent used to stand
-   empty, and the title keeps the width. */
+/* A chat's row: the slot, the title, one thing at the right edge. A chat outside a project draws the
+   slot 12 px in and its title 8 px after it, so the loose chats read down one edge. */
 .sb-chat, .sb-sub { gap: var(--space-2); padding: 0 10px 0 var(--space-3); }
+/* The tree. A chat inside a project, and a subagent under its leader, stands one 16 px step right of
+   what it belongs to, on a guide line that drops from under the parent's glyph with a short tick to
+   each row; a subagent of a chat inside a project is two steps in, on its own line, with the
+   project's line running on past it to the next chat. With every title at one x a project's name
+   read as one more chat, and a loose chat between two projects as a member of the one above it.
+   The line is drawn per row, by its ::before, never by one tall element on the group: the rows are
+   windowed (virtual.tsx), and a line on the container would end where the mounted rows did. Each
+   row's line reaches 1 px into the 2 px gap on either side, so neighbours join; the spacers that
+   stand for unmounted rows carry the project's line too. It is drawn over the hover and selected
+   fill, which spans the whole row as on every other row, so the line reads unbroken through them.
+   --sb-depth is the row's step; --sb-gx is where its own line stands, under its parent's slot. */
+.sidebar { --sb-pad: var(--space-3); --sb-slot: 16px; --sb-step: 16px; }
+.sb-chat, .sb-sub, .sb-more {
+  --sb-indent: calc(var(--sb-pad) + var(--sb-depth, 0) * var(--sb-step));
+  --sb-gx: calc(var(--sb-indent) - var(--sb-step) + var(--sb-slot) / 2);
+  --sb-tick: calc(var(--sb-step) - var(--sb-slot) / 2 - 2px);
+}
+.sb-chat.nested, .sb-sub { --sb-depth: 1; padding-left: var(--sb-indent); }
+.sb-more { --sb-depth: 1; }
+.sb-sub.nested { --sb-depth: 2; }
+.sb-chat.nested::before, .sb-sub::before, .sb-more::before {
+  content: ""; position: absolute; top: -1px; bottom: -1px; left: 0; width: var(--sb-indent); pointer-events: none;
+  background:
+    linear-gradient(var(--line-strong) 0 0) var(--sb-gx) 0 / 1px 100% no-repeat,
+    linear-gradient(var(--line-strong) 0 0) var(--sb-gx) 50% / var(--sb-tick) 1px no-repeat;
+}
+/* The last row on a line: the line stops at its tick. */
+.sb-chat.nested.tail::before, .sb-sub.tail::before, .sb-more::before { background-size: 1px 50%, var(--sb-tick) 1px; }
+/* A project's line passing a subagent of one of its chats, on to the next chat. */
+.sb-sub.through::before {
+  background:
+    linear-gradient(var(--line-strong) 0 0) var(--sb-gx) 0 / 1px 100% no-repeat,
+    linear-gradient(var(--line-strong) 0 0) var(--sb-gx) 50% / var(--sb-tick) 1px no-repeat,
+    linear-gradient(var(--line-strong) 0 0) calc(var(--sb-pad) + var(--sb-slot) / 2) 0 / 1px 100% no-repeat;
+}
+.sb-sub.through.tail::before { background-size: 1px 50%, var(--sb-tick) 1px, 1px 100%; }
+/* An open project's line starts under its folder, as a leader's starts under its slot. */
+.sb-project.kids > .sb-prow > .sb-tile::after { content: ""; position: absolute; left: 50%; top: calc(100% + 2px); bottom: calc((100% - var(--row-h)) / 2); width: 1px; background: var(--line-strong); }
+.sb-kids > .win-pad { position: relative; flex: none; }
+.sb-kids > .win-pad::before { content: ""; position: absolute; top: -1px; bottom: -1px; left: calc(var(--sb-pad) + var(--sb-slot) / 2); width: 1px; background: var(--line-strong); }
 .sb-gut { position: relative; display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--fg-2); }
 .sb-gut .ic { display: block; }
 .sb-nest { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-3); opacity: .6; }
@@ -221,24 +258,20 @@
 .sb-snip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 0; color: var(--fg-3); font-size: var(--fs-12); }
 .sb-acts .iconbtn.small { width: 28px; height: 28px; min-width: 0; min-height: 0; border-radius: var(--radius-xs); background: transparent; color: var(--fg-2); }
 .sb-acts .iconbtn.small:hover { background: var(--hover); color: var(--fg); }
-/* A subagent under its unfolded leader: a quieter line, its slot the tree line down from the leader's
-   with the helper's state as a dot on it, its title where every title starts. The line runs through
-   the 2 px gaps and stops at the last helper's dot. The row keeps the 32 px pitch of every row, so the
-   line is one stroke and the windowed list measures one height. */
+/* A subagent under its unfolded leader: a quieter line on the tree (above), the helper's state the
+   dot in its slot. The row keeps the 32 px pitch of every row, so the line is one stroke and the
+   windowed list measures one height. */
 .sb-sub { color: var(--fg-2); font-size: var(--fs-13); }
-.sb-gut.sb-tree { align-self: stretch; height: auto; }
-.sb-tree::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; margin-left: -0.5px; background: var(--line-strong); }
-.sb-tree.last::before { bottom: 50%; }
-.sb-tree > .sub-dot { position: relative; box-shadow: 0 0 0 2px var(--sb-row-bg, var(--bg)), inset 0 0 0 1.5px var(--fg-3); background: var(--sb-row-bg, var(--bg)); }
-.sb-tree > .sub-dot.running, .sb-tree > .sub-dot.waiting, .sb-tree > .sub-dot.failed { box-shadow: 0 0 0 2px var(--sb-row-bg, var(--bg)); }
-.sb-tree > .sub-dot.running { background: var(--live); }
-.sb-tree > .sub-dot.waiting, .sb-tree > .sub-dot.failed { background: var(--attention); }
-/* The leader's slot starts the line while its helpers are out. */
-.sb-fold[aria-expanded="true"]::before { content: ""; position: absolute; left: 50%; top: calc(100% + 1px); height: 9px; width: 1px; margin-left: -0.5px; background: var(--line-strong); }
+.sb-gut > .sub-dot.running { background: var(--live); }
+.sb-gut > .sub-dot.waiting, .sb-gut > .sub-dot.failed { background: var(--attention); }
+/* The leader's slot starts the line while its helpers are out, from its middle: the rows' lines stand
+   on the slot's middle pixel, and a stroke half a pixel off it was drawn as two faint ones. */
+.sb-fold[aria-expanded="true"]::before { content: ""; position: absolute; left: 50%; top: calc(100% + 1px); height: 9px; width: 1px; background: var(--line-strong); }
 .sb-sub .sb-t { color: var(--fg-2); }
 .sb-sub:hover .sb-t, .sb-sub.current .sb-t { color: var(--fg); }
 .sb-empty { padding: 6px var(--space-3); font-size: var(--fs-12); }
-.sb-more { display: flex; align-items: center; height: var(--row-h); width: 100%; padding: 0 var(--space-3) 0 36px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+/* "Show more" stands on the project's line, its words where its chats' titles start. */
+.sb-more { position: relative; display: flex; align-items: center; flex: none; height: var(--row-h); width: 100%; padding: 0 var(--space-3) 0 calc(var(--sb-indent) + var(--sb-slot) + var(--space-2)); margin: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-3); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
 .sb-more:hover { background: var(--hover); color: var(--fg); }
 .sidebar .iconbtn.quiet { background: transparent; color: var(--fg-2); }
 .sidebar .iconbtn.quiet:hover { background: var(--hover); color: var(--fg); }
@@ -274,7 +307,9 @@
   .sb-sec-link { height: var(--row-h-touch); }
   .sb-sec .iconbtn.sb-sec-add { width: var(--row-h-touch); height: var(--row-h-touch); border-radius: 12px; }
   .sb-sec .iconbtn.sb-sec-add > .ic { width: 20px; height: 20px; }
+  .sidebar { --sb-slot: 20px; }
   .sb-chat, .sb-sub { gap: 10px; }
+  .sb-more { padding-left: calc(var(--sb-indent) + var(--sb-slot) + 10px); }
   .sb-gut { width: 20px; height: 20px; }
   .sb-gut .ic, .sidebar .sb-row .sb-gut > .sb-kind[data-kind] { width: 18px; height: 18px; }
   .sb-fold::after { inset: -12px; }
