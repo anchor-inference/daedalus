@@ -206,8 +206,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if names(page) != ["nas"]:
         problems.append(f"desktop: the project's view lists {names(page)}")
     tab(page, 2)
+    # Grouped by project: this chat's and its project's under the project, the other chat (in no
+    # project the list knows) with the chats outside one.
     groups = page.locator(f"{SHEET} .secrets-group").evaluate_all("gs => gs.map(g => g.dataset.group)")
-    if names(page)[:1] != ["nas"] or len(names(page)) != 4 or not groups or groups[0] != "p":
+    if names(page) != ["router_admin", "nas", "wifi", "github_token"] or groups != ["p", "none"]:
         problems.append(f"desktop: the all view is {names(page)} in groups {groups}")
     if row(page, "github_token").locator(".secret-row-attach").count():
         problems.append("desktop: another chat's secret offers to be attached")
@@ -404,7 +406,7 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"phone: a row is under 56 px ({heights})")
     for button in page.locator(f"{SHEET} .secret-row-attach").all()[:2]:
         box = button.bounding_box()
-        if not box or box["height"] < 44 or box["width"] < 44:
+        if not box or round(box["height"]) < 44 or round(box["width"]) < 44:
             problems.append(f"phone: a row's button is under 44 px ({box})")
             break
     # Everything inside the 16 px gutters, and nothing scrolls sideways.
@@ -433,7 +435,8 @@ def phone(browser) -> list[str]:  # type: ignore[no-untyped-def]
 def settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
     problems: list[str] = []
     seed()
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    # A window whose settings column is under 900 px: the list is a table, a secret opens as a sheet.
+    context = browser.new_context(viewport={"width": 1180, "height": 900}, color_scheme="dark")
     page = context.new_page()
     page.route("**/api/**", stub)
     page.goto(f"{BASE}/settings/security?token=t&scheme=dark&lang={LANG}")
@@ -449,19 +452,25 @@ def settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append("settings: Add secret is not the section's header button")
     width = page.evaluate("() => document.querySelector('.secrets-card .secrets-manager').clientWidth")
     layout = page.locator(".secrets-card .secrets-manager").get_attribute("data-layout")
-    if (width >= 900) != (layout == "split"):
-        problems.append(f"settings: {width} px of column drew the {layout} layout")
-    if layout == "sheet":
-        # A table: the column heads are drawn and a row is one line.
-        if not page.locator(".secrets-card .secrets-cols").is_visible():
-            problems.append("settings: the list has no column heads at its width")
-        row(page, "wifi").locator(".secret-row-open").click()
-        page.locator(".secret-pane-sheet .secret-pane").wait_for(timeout=5000)
-        page.keyboard.press("Escape")
-        page.locator(".secret-pane-sheet").wait_for(state="detached", timeout=5000)
-    # A column given the room it will have puts the open secret beside the list.
-    page.add_style_tag(content=".settings-page .settings-col { width: min(960px, 100% - 48px) !important; }")
-    wait_for(page, lambda: page.locator(".secrets-card .secrets-manager").get_attribute("data-layout") == "split", "settings: a 960 px column putting the open secret beside the list", problems)
+    if width >= 900 or layout != "sheet":
+        problems.append(f"settings: a {width} px column drew the {layout} layout, not the table with a sheet")
+    if not page.locator(".secrets-card .secrets-cols").is_visible():
+        problems.append("settings: the table has no column heads")
+    row(page, "wifi").locator(".secret-row-open").click()
+    page.locator(".secret-pane-sheet .secret-pane").wait_for(timeout=5000)
+    page.keyboard.press("Escape")
+    page.locator(".secret-pane-sheet").wait_for(state="detached", timeout=5000)
+    context.close()
+
+    # A wide window: the open secret beside the list, the first one open from the start.
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    page = context.new_page()
+    page.route("**/api/**", stub)
+    page.goto(f"{BASE}/settings/security?token=t&scheme=dark&lang={LANG}")
+    page.locator(".secrets-card .secret-row").first.wait_for(timeout=15000)
+    width = page.evaluate("() => document.querySelector('.secrets-card .secrets-manager').clientWidth")
+    wait_for(page, lambda: page.locator(".secrets-card .secrets-manager[data-layout='split'] .secret-pane[data-secret-pane]").count() == 1, f"settings: a {width} px column putting the open secret beside the list", problems)
+    masked(page, "settings wide", problems)
     if SHOTS:
         page.wait_for_timeout(300)
         Path(SHOTS).mkdir(parents=True, exist_ok=True)

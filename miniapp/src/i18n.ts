@@ -9274,6 +9274,7 @@ Object.assign(DICT, {
   "secret.rotate.hint": { en: "The name, the note and every message that names it stay; the old value stops working as soon as you save.", ru: "Имя, заметка и сообщения, где он упомянут, остаются; старое значение перестаёт действовать сразу после сохранения." },
   "secret.rotate.unreadable": { en: "The stored value cannot be opened any more. Give it a new one to use it again.", ru: "Сохранённое значение больше не открывается. Задайте новое, чтобы снова им пользоваться." },
   "secret.copied": { en: "Copied the value of {name}", ru: "Значение {name} скопировано" },
+  "secret.clipboard.clear": { en: "Clear the clipboard", ru: "Очистить буфер" },
   "secret.usage": { en: "Usage", ru: "Использование" },
   "secret.fact.used": { en: "Last used", ru: "Последнее использование" },
   "secret.fact.times": { en: "{n} time|{n} times", ru: "{n} раз|{n} раза|{n} раз" },

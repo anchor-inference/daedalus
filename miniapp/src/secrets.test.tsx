@@ -374,6 +374,9 @@ describe("the open secret", () => {
     expect(inPage(SHOWN)).toBe(false);
     expect(document.body.textContent).toContain(t("secret.copied", { name: "wifi" }));
     expect(pane()!.querySelector(".secret-copy .ic-check")).not.toBeNull();
+    // The line offers to take the value off the clipboard again.
+    await act(async () => button(t("secret.clipboard.clear")).click());
+    expect(written).toEqual([SHOWN, " "]);
   });
 
   it("says where it is used: the tool and chat that used it last, the conversations that name it, and its trail", async () => {

@@ -16,7 +16,7 @@ import { navigate, pathFor } from "./router";
 import { useQuery } from "./store";
 import { errorText } from "./ui";
 import { Sheet, toast } from "./ui/dialogs";
-import { timeAgo, useCopied } from "./ui/components";
+import { copyText, timeAgo, useCopied } from "./ui/components";
 import { Button, Field, IconButton, Kbd, Segmented, Select, confirmDialog } from "./ui/primitives";
 import { Row, SetGroup } from "./settingsrow";
 import {
@@ -226,7 +226,10 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onDe
   async function copy(secret: SecretView) {
     try {
       const { value } = await api.post<{ value: string }>(`/api/secrets/${secret.id}/reveal`, { purpose: "copy" });
-      if (await copyValue(value, secret.id)) toast(t("secret.copied", { name: secret.name }));
+      // The line says so without the value, and offers to take it off the clipboard again: a secret
+      // left there is pasted into the next field by accident. A space rather than nothing, because the
+      // old copy command a webview falls back to copies nothing from an empty field.
+      if (await copyValue(value, secret.id)) toast(t("secret.copied", { name: secret.name }), { action: { label: t("secret.clipboard.clear"), run: () => void copyText(" ") } });
       else toast(t("secret.row.copy.failed"));
     } catch (e) {
       toast(errorText(e));
@@ -328,6 +331,18 @@ export function SecretsManager({ sessionId, phone, attached = [], onAttach, onDe
     // The first row of the moment the room appeared; a later choice of nothing is the reader's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat, layout, list]);
+
+  // And when the column narrows under it, the secret open beside the list is not thrown up as a sheet
+  // the reader never asked for: it closes, unless it holds unsaved edits, which then stay in the sheet.
+  const wasSplit = useRef(false);
+  useEffect(() => {
+    if (chat) return;
+    if (wasSplit.current && layout === "sheet" && !dirty.current) {
+      hide();
+      setSelected(null);
+    }
+    wasSplit.current = layout === "split";
+  }, [chat, layout, hide]);
 
   // Over a chat on a desktop the keyboard starts in the list, on the open row, so ↑ ↓ and Enter work at once.
   useLayoutEffect(() => {
