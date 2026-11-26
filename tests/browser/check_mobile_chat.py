@@ -18,7 +18,8 @@ def run() -> None:
             assert page.locator(".thinking-head").last.get_attribute("aria-expanded") == "false"
             assert page.locator(".activity").count() == 0
             assert page.locator(".composer .composer-field").get_attribute("placeholder") == "Message for after this turn…"
-            assert page.locator(".composer .model-select").count() == 0
+            # The model chip stays while the agent works: the choice is for the next turn.
+            assert page.locator(".composer .model-select").is_visible()
             assert page.locator(".composer .effort-select").count() == 0
             assert page.locator(".head-actions > button[aria-pressed]").count() == 0
             page.locator(".thinking-head").last.click()

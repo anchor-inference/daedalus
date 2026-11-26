@@ -348,6 +348,11 @@
   .composer[data-shape] .model-select > .ic:last-child { flex: none; color: var(--fg-3); }
   .composer[data-shape] .model-select .model-from { font-size: var(--fs-12); }
   .composer[data-shape] .ctx-ring { position: relative; justify-content: center; min-width: var(--row-h-touch); height: var(--row-h-touch); padding: 0 4px; }
+  /* A draft written during a run puts Stop beside the circle, which turned to Queue: one control more
+     than the row holds with the model's name still readable (six letters at 360 px, nine at 430). The
+     context's number gives way then, not the model; the panel says the context too, and it returns
+     with the draft sent. */
+  .composer[data-shape] .composer-row:has(.stop-aside) .ctx-ring { display: none; }
   .composer[data-shape] .upload-progress, .composer[data-shape] .ph-hint { padding: 2px 10px 0; font-size: var(--fs-13); color: var(--fg-3); }
   .composer[data-shape] .attachments { margin: 4px 4px 2px; gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .composer[data-shape] .attachment-open { min-height: 64px; border: 0; border-radius: 12px; background: var(--surface-2); }
@@ -415,6 +420,10 @@
 @media (max-width: 400px) {
   .composer[data-shape] .iconbtn.plus, .composer[data-shape] .composer-tools > .mic, .composer[data-shape] .composer-access { width: 38px; min-width: 38px; }
   .composer[data-shape] .iconbtn.plus::after, .composer[data-shape] .composer-tools > .mic::after, .composer[data-shape] .composer-access::after { content: ""; position: absolute; inset: 0 -3px; }
+  /* Stop beside the Queue circle, the row's fullest state, is drawn as narrow as the context's number
+     it stands in for. */
+  .composer[data-shape] .stop-aside { width: 32px; min-width: 32px; }
+  .composer[data-shape] .stop-aside::after { content: ""; position: absolute; inset: 0 -6px; }
   .composer[data-shape] .ctx-ring { min-width: 32px; padding: 0; }
   .composer[data-shape] .ctx-ring::after { content: ""; position: absolute; inset: 0 -6px; }
 }
