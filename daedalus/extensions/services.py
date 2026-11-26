@@ -499,8 +499,12 @@ class Services:
             proc = subprocess.Popen(argv, cwd=str(workdir), env=env, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)  # noqa: S603
         self._procs[(session_id, name)] = proc
         await self.app.db.execute(
-            "INSERT INTO services(session_id, name, command, cwd, port, pid, status, restart, log_path, note, started_at, stopped_at, pid_start) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, NULL, ?, NULL, ?)"
-            " ON CONFLICT(session_id, name) DO UPDATE SET command = excluded.command, cwd = excluded.cwd, port = excluded.port, pid = excluded.pid, status = 'running', restart = excluded.restart, log_path = excluded.log_path, note = NULL, started_at = excluded.started_at, stopped_at = NULL, pid_start = excluded.pid_start",
+            "INSERT INTO services(session_id, name, command, cwd, port, pid, status, restart, log_path, note, started_at, stopped_at, machine, address, pid_start) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, NULL, ?, NULL, NULL, NULL, ?)"
+            " ON CONFLICT(session_id, name) DO UPDATE SET command = excluded.command, cwd = excluded.cwd, port = excluded.port, pid = excluded.pid, status = 'running', restart = excluded.restart, log_path = excluded.log_path, note = NULL, started_at = excluded.started_at, stopped_at = NULL,"
+            # A row last started on the host keeps its machine unless it is cleared here: the watch then asked the
+            # host about this container's pid, called a running service dead within seconds, and Stop signalled the
+            # host's pid of that number while the server here ran on, a second start leaving it orphaned on its port.
+            " machine = NULL, address = NULL, pid_start = excluded.pid_start",
             (session_id, name, command, str(workdir), chosen, proc.pid, int(restart), str(log_path), _now(), start_mark(proc.pid)),
         )
         # A command that dies within a moment is a broken command, not a service: say so with the log.

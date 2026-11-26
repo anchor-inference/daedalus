@@ -208,6 +208,30 @@ async def test_a_stranger_holding_a_services_pid_is_neither_running_nor_signalle
 
 
 @pytest.mark.usefixtures("brief_start_grace")
+async def test_a_service_started_here_after_one_on_the_host_is_this_machines(app: Any) -> None:
+    """A session that once ran its service on the host and now runs it here: the row is this machine's.
+
+    The local start used to leave ``machine`` and ``address`` as the host start wrote them, so the watch
+    asked the host about this container's pid, called the running server dead, and Stop never reached it."""
+    services = Services(app)
+    state = await app.manager.create_session("host")
+    sid = state.session.id
+    await app.db.execute(
+        "INSERT INTO services(session_id, name, command, cwd, port, pid, status, restart, log_path, started_at, stopped_at, machine, address, pid_start)"
+        " VALUES (?, 'web', 'sleep 30', '/', 18100, 4242, 'stopped', 0, '/tmp/web.log', '2026-01-01T00:00:00+00:00', '2026-01-01T00:01:00+00:00', 'host', '10.0.0.1', 'boot:1')",
+        (sid,),
+    )
+    s = await services.start(sid, name="web", command="sleep 30", port="none")
+    row = await services.get(sid, "web") or {}
+    assert row["machine"] is None and row["address"] is None and s["status"] == "running"
+    await services.reconcile_local()
+    assert (await services.get(sid, "web") or {})["status"] == "running" and (await services.list(sid))[0]["status"] == "running"
+    stopped = await services.stop(sid, "web")
+    assert stopped["status"] == "stopped" and not pid_alive(s["pid"]), "Stop reached the process it started"
+    await services.stop_all(sid)
+
+
+@pytest.mark.usefixtures("brief_start_grace")
 async def test_a_service_that_dies_wakes_its_session_once_and_a_stopped_one_does_not(app: Any) -> None:
     services = Services(app)
     told = recording_submits(app)
