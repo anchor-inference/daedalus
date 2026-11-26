@@ -1,0 +1,47 @@
+/* The Overview's own blocks under its tool rows (paneloverview.tsx); the head, the rows and the tasks
+   block are drawn by panel.css beside the rest of the panel. A block has the tasks block's measure: a
+   12 px label line, then rows on the panel's 12 + 12 px gutter, so its text lines up with the rows'. */
+
+/* The subscription: the provider by its whole name with the plan, the way to the Usage tool, then
+   one line a window (quotarow.css). */
+.ov-usage { display: flex; flex-direction: column; margin: 12px 12px 0; padding: 0 12px; }
+.ov-usage-head { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.ov-usage-head > .ic:first-child { flex: none; color: var(--fg-2); }
+.ov-usage-name { flex: 0 1 auto; min-width: 0; color: var(--fg); font-size: var(--fs-14); font-weight: 500; overflow-wrap: anywhere; }
+.ov-usage-plan { flex: 0 1 auto; min-width: 0; color: var(--fg-3); font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-usage-tag { flex: none; color: var(--bad); font-size: var(--fs-12); font-weight: 500; }
+.ov-usage-open { display: inline-flex; flex: none; align-items: center; gap: 2px; margin-left: auto; padding: 0 2px 0 6px; height: 28px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.ov-usage-open:hover { background: var(--hover); color: var(--fg); }
+.ov-usage-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ov-usage-note { margin: 0 0 4px; color: var(--fg-2); font-size: var(--fs-13); }
+.ov-usage .qrows { padding-left: 24px; }
+/* What sets the chat apart (overviewfacts.ts): a label line, then 32 px rows of the panel's menu rows'
+   height, the name in a column of its own so the values start on one line, the value cut with its
+   whole text in the tooltip. A row that opens a page of Details ends in a chevron; a fact with no page
+   (a private chat) is the same row without one. */
+.ov-diff { display: flex; flex-direction: column; margin: 12px 12px 0; }
+/* Written against the phone sheet's own heading rule (.sheet h3, 17/600), which would otherwise make a
+   label of this block a sheet's title. */
+.ov-diff .ov-diff-title { display: flex; align-items: flex-end; min-height: 36px; margin: 0; padding: 0 12px 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; letter-spacing: normal; }
+.ov-diff-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.ov-diff-row { display: flex; align-items: center; gap: 12px; width: 100%; height: var(--row-h); padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; }
+button.ov-diff-row { cursor: pointer; }
+button.ov-diff-row:hover { background: var(--hover); }
+button.ov-diff-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ov-diff-row > .ic:first-child { flex: none; color: var(--fg-2); }
+.ov-diff-row > .ic:last-child { flex: none; color: var(--fg-3); }
+.ov-diff-name { flex: none; width: clamp(112px, 30%, 152px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-diff-value { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-diff-value.live { color: var(--live); }
+.ov-diff-value.attn { color: var(--attention); }
+.ov-diff-value.bad { color: var(--bad); }
+.ov-diff-row.more .ov-diff-name { flex: 1; width: auto; padding-left: 28px; color: var(--fg-3); font-size: var(--fs-13); }
+
+/* On a phone the blocks keep the rows' narrower gutter, as the tasks block does, and a row is a touch
+   target's height. */
+@media (max-width: 1023px) {
+  .panel-sheet .ov-usage { margin: 12px 8px 0; }
+  .panel-sheet .ov-diff { margin: 12px 8px 0; }
+  .panel-sheet .ov-diff-row { height: var(--row-h-touch); }
+  .panel-sheet .ov-diff-name { width: 124px; }
+}
