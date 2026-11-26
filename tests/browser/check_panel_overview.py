@@ -1,4 +1,4 @@
-"""The panel's Overview says what the chat's subscription has left.
+"""The panel's Overview says what the chat's subscription has left, and Details is a tab beside it.
 
 The Overview is the panel's front page, and its Usage row said "$0 · today unmetered" for a model on a
 subscription, which tells nothing. Now:
@@ -8,6 +8,10 @@ subscription, which tells nothing. Now:
   colour on a window near its limit; the row opens the Usage tool;
 - a metered model keeps its spend, without the "today unmetered" words;
 - a subscription the host has no windows for draws no row at all rather than zeros.
+
+Details was reached only through "+". It is now the panel's second tab in every ordinary chat, until the
+reader closes it: the closing is remembered across chats and reloads, and the Overview's head then offers
+a quiet "Details" link that brings the tab back in its place. The strip still fits at 1366.
 
     APP_URL=http://127.0.0.1:<port>/app python tests/browser/check_panel_overview.py
 
@@ -58,6 +62,51 @@ def overview(browser, lang: str, usage: dict, name: str):  # type: ignore[no-unt
     return context, page
 
 
+def tabs(page) -> list[str]:  # type: ignore[no-untyped-def]
+    return page.locator(".panel .panel-tablist .panel-tab").evaluate_all("els => els.map((e) => e.dataset.tab)")
+
+
+def details_tab(browser, lang: str) -> list[str]:  # type: ignore[no-untyped-def]
+    where = f"{lang} 1366 details"
+    words = {"en": "Details", "ru": "Подробнее"}[lang]
+    problems: list[str] = []
+    context = browser.new_context(viewport={"width": 1366, "height": 768}, color_scheme="dark")
+    page = context.new_page()
+    serve(page, shots.PROVIDER_USAGE)
+    page.goto(f"{BASE}/agents/{shots.S1}?token=t&scheme=dark&lang={lang}")
+    page.wait_for_selector(".panel [data-tool-page='overview']", timeout=15000)
+    page.wait_for_timeout(400)
+    order = tabs(page)
+    if order[:2] != ["overview", "details"]:
+        problems.append(f"{where}: a fresh panel's tabs are {order}, not the Overview then Details")
+    strip = page.locator(".panel .panel-tablist").evaluate("e => ({ over: e.scrollWidth - e.clientWidth, right: e.getBoundingClientRect().right, tabs: [...e.querySelectorAll('.panel-tab')].map((t) => t.getBoundingClientRect().right) })")
+    if strip["over"] > 0 or any(right > strip["right"] + 0.5 for right in strip["tabs"]):
+        problems.append(f"{where}: the strip does not fit ({strip})")
+    if page.locator(".panel .ov-details-link").count():
+        problems.append(f"{where}: the Overview offers Details while its tab is there")
+    # Closed by the reader: gone in this chat and in the next, with the Overview's link in its place.
+    page.locator(".panel .panel-tab[data-tab='details']").click()
+    page.locator(".panel .panel-tab-close").click()
+    page.wait_for_timeout(200)
+    page.goto(f"{BASE}/agents/{shots.S2}?token=t&scheme=dark&lang={lang}&panel=overview")
+    page.wait_for_selector(".panel [data-tool-page='overview']", timeout=15000)
+    page.wait_for_timeout(400)
+    if "details" in tabs(page):
+        problems.append(f"{where}: Details came back in the next chat after it was closed ({tabs(page)})")
+    link = page.locator(".panel .ov-head .ov-details-link")
+    if link.count() != 1 or link.inner_text().strip() != words:
+        problems.append(f"{where}: the Overview's head has no {words!r} link once Details is closed")
+    else:
+        if SHOTS is not None:
+            page.locator(".panel").screenshot(path=str(SHOTS / f"overview-details-closed-{lang}.png"))
+        link.click()
+        page.wait_for_selector(".panel .panel-tab.on[data-tab='details']", timeout=5000)
+        if tabs(page)[:2] != ["overview", "details"]:
+            problems.append(f"{where}: the link put Details at {tabs(page)}, not second")
+    context.close()
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     subscription = copy.deepcopy(shots.PROVIDER_USAGE)
@@ -69,6 +118,7 @@ def run() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         for lang in ("en", "ru"):
+            problems += details_tab(browser, lang)
             words = WORDS[lang]
             where = f"{lang} subscription"
             context, page = overview(browser, lang, subscription, "subscription")

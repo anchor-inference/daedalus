@@ -230,6 +230,27 @@ describe("the tab a session opens on", () => {
     expect(readPanelState(1440, storage)).toEqual({ tab: null, open: ["changes", "jobs"] });
   });
 
+  it("holds Details beside the Overview until the reader closes it, and remembers the closing", () => {
+    const kept = new Map<string, string>();
+    const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) };
+    // A first visit, and a state saved before Details stood there, both open with it second.
+    expect(readPanelState(1440, storage)).toEqual({ tab: "overview", open: ["details"] });
+    kept.set("daedalus.session.panel", "files|files,notes");
+    expect(readPanelState(1440, storage).open).toEqual(["details", "files", "notes"]);
+    // Opened later from the "+" menu, it still stands right after the Overview.
+    kept.set("daedalus.session.panel", "files|files,details");
+    expect(readPanelState(1440, storage).open).toEqual(["details", "files"]);
+    // Closed, it stays closed in the next chat; opened again, it is back in its place.
+    rememberPanel({ tab: "files", open: ["files"] }, storage);
+    expect(kept.get("daedalus.panel.details")).toBe("closed");
+    expect(readPanelState(1440, storage).open).toEqual(["files"]);
+    rememberPanel({ tab: "details", open: ["files", "details"] }, storage);
+    expect(readPanelState(1440, storage).open).toEqual(["details", "files"]);
+    // The orchestrator and the main chat lead with their questions and gain nothing.
+    expect(readPanelState(1440, storage, "orchestrator").open).toEqual(["questions"]);
+    expect(readPanelState(1440, storage, "main").open).toEqual(["questions"]);
+  });
+
   it("reads a bare tab as that one tool open, and drops what is not a tool", () => {
     expect(parseStoredPanel("details")).toEqual({ tab: "details", open: ["details"] });
     expect(parseStoredPanel("overview|changes,nonsense,changes")).toEqual({ tab: "overview", open: ["changes"] });

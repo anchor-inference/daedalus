@@ -43,6 +43,12 @@
 /* The Overview: the state in its colour, the title, what the chat runs on, then a 48 px row a tool. */
 .ov { display: flex; flex-direction: column; padding-bottom: 16px; }
 .ov-head { display: flex; flex-direction: column; gap: 4px; padding: 8px 24px 16px; }
+.ov-head-line { display: flex; align-items: center; gap: 12px; min-height: 20px; }
+.ov-head-line > .ov-status { flex: 1; min-width: 0; }
+/* The way back to Details once its tab was closed: a quiet word at the head's end, not a button. */
+.ov-details-link { flex: none; padding: 0; border: 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.ov-details-link:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.ov-details-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 .ov-status { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; font-variant-numeric: tabular-nums; }
 .ov-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
 .ov-status.live { color: var(--live); }

@@ -2282,7 +2282,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           figures={panelFigures}
           pages={{
             overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
-              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
+              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))}
+              onDetails={panelTabs.includes("details") && !panel.state.open.includes("details") ? () => panel.open("details") : undefined} />,
             ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
             context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
             usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,

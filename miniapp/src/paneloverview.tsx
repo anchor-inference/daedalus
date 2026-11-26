@@ -55,7 +55,7 @@ function resetDate(at: number | string | null | undefined): Date | null {
 
 export type OverviewStatus = { tone: "live" | "attn" | "bad" | "idle"; word: string; since?: string | null };
 
-export function Overview({ sessionId, board, status, title, meta, rows, jobs, onOpen, onBoard }: {
+export function Overview({ sessionId, board, status, title, meta, rows, jobs, onOpen, onBoard, onDetails }: {
   sessionId: string;
   /** The chat's tasks (what it and its helpers made), or undefined until they are read. */
   board: BoardTask[] | undefined;
@@ -68,6 +68,8 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
   onOpen: (tab: PanelTab) => void;
   /** The way to the chat's tasks (its Board tab); left out, the block has no way there. */
   onBoard?: () => void;
+  /** Details, for a reader who closed its tab beside the Overview; left out while the tab is there. */
+  onDetails?: () => void;
 }) {
   const tasks = useQuery<{ tasks: TaskView[] }>(jobs ? `/api/sessions/${encodeURIComponent(sessionId)}/tasks` : null, { staleMs: 5000 }).data?.tasks;
   const job = jobRow(tasks);
@@ -77,9 +79,12 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
   return (
     <div className="ov" data-tool-page="overview">
       <div className="ov-head">
-        <div className={`ov-status ${status.tone}`} data-status={status.tone}>
-          <span className="ov-dot" aria-hidden />
-          <span>{status.word}{status.since ? <> · <Elapsed since={status.since} /></> : null}</span>
+        <div className="ov-head-line">
+          <div className={`ov-status ${status.tone}`} data-status={status.tone}>
+            <span className="ov-dot" aria-hidden />
+            <span>{status.word}{status.since ? <> · <Elapsed since={status.since} /></> : null}</span>
+          </div>
+          {onDetails && <button type="button" className="ov-details-link" onClick={onDetails} title={t("panel.ov.details.title")}>{t("panel.ov.details")}</button>}
         </div>
         <h2 className="ov-title">{title}</h2>
         <div className="ov-meta">{meta}</div>

@@ -5840,6 +5840,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "panel.group.project": { en: "Project", ru: "Проект" },
   "panel.group.info": { en: "About", ru: "Сведения" },
   "panel.ov.idle": { en: "Done", ru: "Готово" },
+  "panel.ov.details": { en: "Details", ru: "Подробнее" },
+  "panel.ov.details.title": { en: "Open the chat's details", ru: "Открыть детали чата" },
   "panel.ov.fresh": { en: "Nothing asked yet", ru: "Пока ничего не поручено" },
   "panel.ov.bypass": { en: "full access", ru: "полный доступ" },
   "panel.ov.asks": { en: "asks first", ru: "спрашивает" },
