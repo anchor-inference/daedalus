@@ -298,10 +298,10 @@ def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
     """Settings' frame, column and rows as drawn: a page whose list of sections is the sidebar's 300 px,
-    a 52 px header, the section in a centred 880 px column (the pane less 24 px a side when that is
+    a 52 px header, the section in a centred 960 px column (the pane less 24 px a side when that is
     narrower), a row at least the touch height, and a phone that does not scroll sideways."""
     problems: list[str] = []
-    for width, height, mobile in ((1920, 1080, False), (1180, 820, False), (390, 844, True)):
+    for width, height, mobile in ((1920, 1080, False), (1366, 768, False), (1180, 820, False), (390, 844, True)):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
         page = open_page(context, "settings/chat", ".settings-row")
         m = page.evaluate("""() => {
@@ -321,7 +321,7 @@ def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
         }""")
         print(f"settings-{width}", json.dumps({k: v for k, v in m.items() if k != "rows"}), f"{len(m['rows'])} rows")
         if m["pane"]:
-            want = min(880, m["pane"]["w"] - 48)
+            want = min(960, m["pane"]["w"] - 48)
             if abs(m["col"]["w"] - want) > 1:
                 problems.append(f"settings {width}: the column is {m['col']['w']}px, not {want}")
             if m["nav"] != 300:

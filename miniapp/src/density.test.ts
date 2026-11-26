@@ -992,14 +992,15 @@ describe("settings", () => {
   // outside any media query and only the column's own (the grid, the fold, the hover) inside the wide one.
   const wide = (selector: string) => all.filter((r) => (!r.media || r.media.includes("min-width: 1024px")) && selectors(r).includes(selector)).map((r) => r.body).join(";");
 
-  it("is a page: the list of sections in the sidebar's 300 px, the section in a centred 880 px column", () => {
+  it("is a page: the list of sections in the sidebar's 300 px, the section in a centred 960 px column", () => {
     // Settings was a dialog over the screen it was opened from, its list 248 px and its section the
     // dialog's whole width. It is a page of its own now: the list stands where the sidebar was and is
     // as wide, a 52 px header carries the section's title, and the section reads in the same centred
-    // 880 px column (less 24 px a side on a narrower window) at every width.
+    // 960 px column (less 24 px a side on a narrower window) at every width. The other pages' lists
+    // keep 880: only a section of Settings puts a label at one edge and its control at the other.
     expect(wide(".settings-nav")).toContain("width: 300px");
     expect(wide(".settings-head")).toContain("height: var(--head-h)");
-    expect(wide(".settings-page .settings-col")).toContain("width: min(880px, 100% - 48px)");
+    expect(wide(".settings-page .settings-col")).toContain("width: min(960px, 100% - 48px)");
     expect(wide(".settings-page .settings-col")).toContain("margin: 0 auto");
     expect(wide(".settings-nav .settings-link")).toContain("height: var(--row-h)");
   });
