@@ -105,6 +105,8 @@ def installation(agents: int, folders: int) -> dict:
 
 class Stub(BaseHTTPRequestHandler):
     listing: dict = {}
+    # What the shell's count of pending changes reads; a check sets it to something that is not a list.
+    proposals: object = []
     served: list[tuple[str, int]] = []
     unhandled = Unhandled()
     lock = threading.Lock()
@@ -127,6 +129,9 @@ class Stub(BaseHTTPRequestHandler):
             return [{**p, "sessions": []} for p in Stub.listing["projects"]]
         if path == "/api/settings":
             return {"presets": {}, "model": {}}
+        if path == "/api/proposals":
+            # The shell counts the pending changes for the sidebar; the host answers a list.
+            return Stub.proposals
         if path == "/api/imports/harnesses":
             # No other program's sessions on this machine: the start screen draws no import card.
             return {"harnesses": []}

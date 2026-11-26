@@ -111,10 +111,12 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     box = composer.locator(".composer-box").bounding_box()
     check(bool(box) and round(box["width"]) == 760, f"{where}: the composer is the conversation's 760 px column ({box and box['width']})")
 
-    # Where the chat starts: a chip in the row, "No project" first, with the run-on choice.
-    chip = composer.locator(".composer-row .composer-project")
+    # Where the chat starts: a chip inside the card, in the row of where and how the chat starts above
+    # the model's row, "No project" first, with the run-on choice.
+    chip = composer.locator(".composer-box .composer-where .composer-project")
     check(chip.count() == 1 and words["none"] in chip.inner_text(), f"{where}: the chip in the composer's row says {words['none']!r}")
-    check(page.locator(".start-where").count() == 0, f"{where}: no row of chips under the composer")
+    row_of_chips, row_of_model = composer.locator(".composer-where").bounding_box(), composer.locator(".composer-row").bounding_box()
+    check(bool(row_of_chips and row_of_model) and row_of_chips["y"] + row_of_chips["height"] <= row_of_model["y"] + 0.5, f"{where}: the chips' row stands above the model's ({row_of_chips}, {row_of_model})")
     check(composer.locator(".runon-select").count() == 1, f"{where}: a chat of its own offers Container or Host")
     chip.click()
     search = page.locator(".project-menu input[type='search']")

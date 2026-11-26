@@ -53,7 +53,9 @@
 /* The row's two chips: words on a 28 px line that take a wash under the pointer, never a box. */
 .composer-access, .model-select, .composer-mode, .composer-project, .runon-select { display:inline-flex; align-items:center; gap:6px; height:var(--ctl-h-sm); min-width:0; padding:0 8px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--fg-2); font:inherit; font-size:var(--fs-13); cursor:pointer; transition:background var(--t-fast), color var(--t-fast); }
 .composer-access:hover, .composer-access[aria-expanded="true"], .model-select:hover, .model-select[aria-expanded="true"], .composer-mode:hover, .composer-mode[aria-expanded="true"], .composer-project:hover, .composer-project[aria-expanded="true"], .runon-select:hover, .runon-select[aria-expanded="true"] { background:var(--hover); color:var(--fg); }
-.composer-access { flex:0 1 auto; max-width:260px; }
+/* The access chip keeps its words, and the language pair with them: the model's name beside it is
+   what gives way. Shrinking both cut the access to "With chec…" while the model still showed 20 letters. */
+.composer-access { flex:none; max-width:260px; }
 .composer-access > .ic { flex:none; }
 .composer-access .access-more { flex:none; color:var(--fg-3); }
 .composer-access .access-more::before { content:"·"; margin-right:6px; }

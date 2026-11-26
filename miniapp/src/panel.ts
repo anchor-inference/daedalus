@@ -118,9 +118,10 @@ export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab
 }
 
 /** `tab` on screen, joined to the open tools when it is not among them yet. The Overview is never in
- *  the list: it is the panel's own first tab, not a tool that was opened. */
+ *  the list: it is the panel's own first tab, not a tool that was opened. Details joins at the front,
+ *  right after the Overview, where a chat's panel holds it by default; any other tool at the end. */
 export function openTab(s: PanelState, tab: PanelTab): PanelState {
-  const open = tab === "overview" || s.open.includes(tab) ? s.open : [...s.open, tab];
+  const open = tab === "overview" || s.open.includes(tab) ? s.open : tab === "details" ? [tab, ...s.open] : [...s.open, tab];
   return s.tab === tab && open === s.open ? s : { ...s, tab, open };
 }
 
@@ -360,6 +361,33 @@ function defaultTabs(context: PanelContext): PanelTab[] {
   return [first, ...tabs.filter((tab) => tab !== first)];
 }
 
+// ── Details beside the Overview ──────────────────────────────────────────────────────────────
+
+const DETAILS_KEY = "daedalus.panel.details";
+
+/** Whether a chat's panel holds Details as its second tab: an ordinary chat's, and a member's inside a
+ *  project. The orchestrator and the main chat lead with what waits for the operator instead. */
+function detailsByDefault(context: PanelContext): boolean {
+  return context === "session" || context === "member";
+}
+
+/** Details is open beside the Overview unless the reader closed its tab: the closing is what is kept
+ *  ("closed"), not the opening, so a panel state saved before Details stood there still gains it, and
+ *  one closed on purpose stays closed in every chat until Details is opened again. */
+function detailsClosed(storage: Pick<Storage, "getItem"> | null): boolean {
+  try {
+    return storage?.getItem(DETAILS_KEY) === "closed";
+  } catch {
+    return false;
+  }
+}
+
+/** The open tools with Details first, directly after the Overview, when it is open by default. */
+function withDetails(open: PanelTab[], context: PanelContext, storage: Pick<Storage, "getItem"> | null): PanelTab[] {
+  if (!detailsByDefault(context) || detailsClosed(storage)) return open;
+  return ["details", ...open.filter((tab) => tab !== "details")];
+}
+
 /** The state a session opens with: the tab and the tools as they were left. A tool kept from a chat
  *  that had it is offered or left out by the panel that draws the tabs. */
 export function readPanelState(viewportWidth: number, storage: Pick<Storage, "getItem"> | null = safeStorage(), context: PanelContext = "session"): Pick<PanelState, "tab" | "open"> {
@@ -371,7 +399,7 @@ export function readPanelState(viewportWidth: number, storage: Pick<Storage, "ge
   }
   const kept = parseStoredPanel(stored);
   const firstOpen = context === "orchestrator" || context === "main" ? ["questions" as PanelTab] : [];
-  const open = stored === null ? firstOpen : kept.open;
+  const open = withDetails(stored === null ? firstOpen : kept.open, context, storage);
   return { tab: defaultPanelTab(stored, viewportWidth, defaultTabs(context), readPanelPinned(storage)), open };
 }
 
@@ -396,6 +424,8 @@ export function rememberPanel(s: Pick<PanelState, "tab" | "open">, storage: (Pic
   }
   try {
     storage?.setItem(panelTabKey(context), storedPanel({ tab, open: s.open }));
+    // Details leaves the open tools only by the reader closing its tab, so its absence is that choice.
+    if (detailsByDefault(context)) storage?.setItem(DETAILS_KEY, s.open.includes("details") ? "open" : "closed");
   } catch {
     /* private mode */
   }

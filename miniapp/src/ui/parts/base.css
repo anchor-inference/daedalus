@@ -125,3 +125,21 @@ a { color: var(--accent); text-decoration: none; }
      nothing under its last row. */
   .screen { padding: 4px var(--gutter) calc(var(--space-6) + env(safe-area-inset-bottom)); }
 }
+/* Daedalus's face (ui/mascot.tsx). The head stays the brand's dark grey in every theme; on the dark
+   frame its edge would melt into the ground, so it carries the icon's lighter rim. The mint is the
+   icon's on dark; on a light ground that mint reads at under 2:1, so the light scheme takes the
+   darker steps of the same three feathers. */
+.mascot { display: block; flex: none; overflow: visible; }
+.mascot-head { fill: #282a30; stroke: #5a5f6b; stroke-width: 12; }
+.mascot-eye { fill: #f6f6f4; }
+.mascot-pupil { fill: #121316; }
+/* Each mint piece is drawn twice as thick as the icon by a stroke of its own colour (see mascot.tsx). */
+.mascot-mint { stroke-width: 16; stroke-linejoin: round; }
+.mascot-crest { stroke-width: 10; }
+.mascot-mint-1 { fill: #5ee2c4; stroke: #5ee2c4; }
+.mascot-mint-2 { fill: #46bea5; stroke: #46bea5; }
+.mascot-mint-3 { fill: #329684; stroke: #329684; }
+:root[data-scheme="light"] .mascot-head { stroke: #282a30; }
+:root[data-scheme="light"] .mascot-mint-1 { fill: #2aa98c; stroke: #2aa98c; }
+:root[data-scheme="light"] .mascot-mint-2 { fill: #208c75; stroke: #208c75; }
+:root[data-scheme="light"] .mascot-mint-3 { fill: #19705e; stroke: #19705e; }

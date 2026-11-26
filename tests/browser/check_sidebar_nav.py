@@ -85,6 +85,24 @@ def box(page: Page, selector: str) -> dict:
     return found
 
 
+def mark(page: Page, selector: str, where: str) -> None:
+    """The head's mark is Daedalus's face, drawn: the head, two eyes, the crest and six feathers, 22 px
+    tall, on the frame itself. A tile of the accent colour with a generic glyph said nothing about which
+    product this is."""
+    found = page.locator(selector).evaluate(
+        """a => { const svg = a.querySelector('svg.mascot'); const box = svg && svg.getBoundingClientRect();
+                 return svg && { height: box.height, width: box.width, head: svg.querySelectorAll('.mascot-head').length,
+                   eyes: svg.querySelectorAll('.mascot-eye').length, pupils: svg.querySelectorAll('.mascot-pupil').length,
+                   mint: svg.querySelectorAll('.mascot-mint').length, ground: getComputedStyle(a).backgroundColor,
+                   glyph: a.querySelectorAll('svg.ic').length, headFill: getComputedStyle(svg.querySelector('.mascot-head')).fill }; }"""
+    )
+    assert found, f"{where}: the mark draws no face"
+    assert round(found["height"]) == 22 and 28 <= found["width"] <= 34, f"{where}: the mark is {found['width']}x{found['height']}, not 22 px tall"
+    assert (found["head"], found["eyes"], found["pupils"], found["mint"]) == (1, 2, 2, 7), f"{where}: the face is not whole: {found}"
+    assert found["glyph"] == 0 and found["ground"] in ("rgba(0, 0, 0, 0)", "transparent"), f"{where}: the mark still sits on a tile or a glyph: {found}"
+    assert found["headFill"] == "rgb(40, 42, 48)", f"{where}: the head is {found['headFill']}, not the brand's dark grey"
+
+
 def mode_to(page: Page, lang: str, mode: str) -> None:
     """Choose a mode from the menu at the top of the sidebar."""
     page.locator(".sidebar-head .sb-mode").click()
@@ -104,6 +122,7 @@ def desktop(page: Page, lang: str) -> None:
     assert column["x"] == 0 and column["width"] == 300, f"{lang}: the sidebar is {column}, not 300 px at the left edge"
     assert round(box(page, ".main")["x"]) == 300, f"{lang}: the screen does not start where the sidebar ends"
     assert round(box(page, ".sidebar-head")["height"]) == 52 and round(box(page, ".sidebar-foot")["height"]) == 52, f"{lang}: the head or the foot is not 52 px"
+    mark(page, ".sidebar-head .sb-mark", lang)
     pinned = side.locator(".sb-pinned-nav [data-nav]")
     order = pinned.evaluate_all("els => els.map(e => e.dataset.nav)")
     assert order == ORDER, f"{lang}: the pinned rows are {order}"
@@ -237,6 +256,7 @@ def phone(page: Page, lang: str) -> None:
     menu.click()
     drawer = page.locator(".ph-drawer-root.open .ph-drawer")
     expect(drawer).to_be_visible()
+    mark(page, ".ph-drawer-root.open .sidebar-head .sb-mark", f"{lang} phone drawer")
     side = drawer.locator("nav.sidebar")
     expect(side.locator(".sidebar-head .sb-mode")).to_contain_text(words["agents"])
     order = side.locator(".sb-pinned-nav [data-nav]").evaluate_all("els => els.map(e => e.dataset.nav)")

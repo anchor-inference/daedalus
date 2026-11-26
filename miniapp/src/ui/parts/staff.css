@@ -21,7 +21,8 @@
 .staff-who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .staff-who .staff-head-name { min-width: 60px; }
 .chat > .staff-facts { flex: none; border-top: 0; border-bottom: 1px solid var(--line); }
-.chat-head:has(.staff-controls) { container: chathead / inline-size; }
+/* The member's controls lose their words in a narrow header (chat.css makes every chat header the
+   `chathead` container). */
 @container chathead (max-width: 899px) {
   .staff-controls .staff-control-word { display: none; }
   .staff-controls .btn { width: var(--ctl-h-sm); padding: 0; justify-content: center; }

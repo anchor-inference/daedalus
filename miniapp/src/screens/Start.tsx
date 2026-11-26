@@ -45,6 +45,7 @@ import { type ChatKind, type KindOffers, KindMark, KindSelect, kindIcon, kindPla
 import { USER_STATUS } from "../browser/yourchrome";
 import { confirmAsync } from "../ui";
 import { CodeField, type CodeFieldHandle } from "../codefield";
+import { Mascot } from "../ui/mascot";
 
 /** Every project a chat could start in, the most recently used first and the installation's own last;
  *  a scratch folder of a single chat is not one. */
@@ -87,8 +88,8 @@ function useAgentMode(): [boolean, (on: boolean) => void] {
 
 /**
  * A desktop's new chat: the question, the composer in the middle of the window where the eye already
- * is, and under it the chats to pick up again. Where the chat starts is a chip in the composer's own
- * row, beside what it will be, rather than a second row of chips under the field. The phone's home
+ * is, and under it the chats to pick up again. Where the chat starts is a chip inside the card, in the
+ * row of what it will be, where it runs and its access, between the field and the model. The phone's home
  * holds the same things in a column ending at the composer; a desktop keeps the composer under the
  * question, because the field at the bottom of a large window is where nobody looks.
  */
@@ -238,7 +239,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       <div className="ph-page-body">
         <div className={`ph-hero ${offline ? "offline" : ""}`}>
-          <Icon name="logo" size={36} />
+          <Mascot size={36} />
           <h1>{t(agent ? "start.greeting.agent" : "start.greeting")}</h1>
           <div className="ph-hero-picks">
             <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
@@ -626,25 +627,32 @@ function StartComposer({ phone, project, toast, model, run, kind, onKind, offers
           {nameInput}
           {input}
           {chosenLine}
-          <div className="composer-row" hidden={voiceBar}>
-            <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
-            {plusButtonNode}
-            {plusMenu}
-            {/* What the chat will be, where it starts and where it runs read together on the left, as
-                the chat's own composer has its access there; the model and the circle keep the right. */}
-            {where && <ProjectChip projects={where.projects} target={project} onPick={where.onPick} />}
-            <KindSelect kind={kind} offers={offers} onChoose={onKind} agent={agent} onAgent={onAgent} />
-            <RunOnSelect run={run} />
-            <AccessSelect bypass={bypass} onBypass={setBypass} />
-            <PrivateChip on={secret} onClear={() => setSecret(false)} />
-            {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} />{t("newagent.loop")}<Icon name="close" size={12} /></button>}
-            <div className="composer-tools">
-              <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose}
-                effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
-              {asr?.configured && <MicButton note={note} />}
-              {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
-                  not offered here: it is a beta with a chat of its own, and a new chat offers dictation. */}
-              <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || idle || blocked} aria-label={sendLabel} title={sendLabel}><Icon name="up" /></button>
+          {/* Two rows of controls under the field. The first says where and how the chat starts (the
+              project, what it will be, where it runs, its access) and wraps rather than cutting a word:
+              in one row with the model, a long project or model name cut every chip to a letter or
+              two. The second is the chat composer's own row: +, the model with its effort, the
+              microphone and Send, so the model has the row's width before its name is cut. */}
+          <div className="start-controls" hidden={voiceBar}>
+            <div className="composer-where" role="group" aria-label={t("start.where.group")}>
+              {where && <ProjectChip projects={where.projects} target={project} onPick={where.onPick} />}
+              <KindSelect kind={kind} offers={offers} onChoose={onKind} agent={agent} onAgent={onAgent} />
+              <RunOnSelect run={run} />
+              <AccessSelect bypass={bypass} onBypass={setBypass} />
+              <PrivateChip on={secret} onClear={() => setSecret(false)} />
+              {agent && extra.loop.on && <button type="button" className="chip start-agent-chip" data-option="loop" onClick={() => editLoop({ on: false })} title={t("start.agent.loop.off")} aria-label={t("start.agent.loop.off")}><Icon name="loop" size={12} />{t("newagent.loop")}<Icon name="close" size={12} /></button>}
+            </div>
+            <div className="composer-row">
+              <input ref={fileInput} type="file" multiple hidden onChange={(event) => { addFiles(event.target.files ?? []); event.target.value = ""; }} />
+              {plusButtonNode}
+              {plusMenu}
+              <div className="composer-tools">
+                <ModelSelect model={modelLabel} fallback={null} open={modelOpen} onOpenChange={setModelOpen} onChoose={choose} labelMax={40}
+                  effort={shownEffort.thinking ? shownEffort.effort : undefined} thinking={shownEffort.thinking} onChooseEffort={chooseEffort} account={account} />
+                {asr?.configured && <MicButton note={note} />}
+                {/* One white circle, as on the phone: Send, greyed while the field is empty. Voice mode is
+                    not offered here: it is a beta with a chat of its own, and a new chat offers dictation. */}
+                <button type="button" className="roundbtn primary" data-action="send" onClick={() => void send()} disabled={busy || idle || blocked} aria-label={sendLabel} title={sendLabel}><Icon name="up" /></button>
+              </div>
             </div>
           </div>
         </div>

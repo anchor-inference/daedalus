@@ -1903,6 +1903,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "start.greeting": { en: "What are we working on?", ru: "Чем займёмся?" },
   // The desktop's start screen: where the chat starts, and the chats to pick up again.
   "start.where.label": { en: "Where the chat starts", ru: "Где начать чат" },
+  "start.where.group": { en: "Where and how the chat starts", ru: "Где и как начнётся чат" },
   "start.pick": { en: "Choose a project", ru: "Выбрать проект" },
   "start.pick.search": { en: "Find a project", ru: "Найти проект" },
   "start.pick.none": { en: "No project", ru: "Без проекта" },
@@ -5839,6 +5840,8 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "panel.group.project": { en: "Project", ru: "Проект" },
   "panel.group.info": { en: "About", ru: "Сведения" },
   "panel.ov.idle": { en: "Done", ru: "Готово" },
+  "panel.ov.details": { en: "Details", ru: "Подробнее" },
+  "panel.ov.details.title": { en: "Open the chat's details", ru: "Открыть детали чата" },
   "panel.ov.fresh": { en: "Nothing asked yet", ru: "Пока ничего не поручено" },
   "panel.ov.bypass": { en: "full access", ru: "полный доступ" },
   "panel.ov.asks": { en: "asks first", ru: "спрашивает" },

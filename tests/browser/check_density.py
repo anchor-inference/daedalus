@@ -800,7 +800,7 @@ START = """
     composer: box(document.querySelector('.start-composer .composer-box')),
     circle: box(circle),
     radius: circle ? getComputedStyle(circle).borderRadius : null,
-    chips: [...document.querySelectorAll('.start-composer .composer-row > button.composer-project, .start-composer .composer-row > button.composer-mode, .start-composer .composer-row > button.composer-access')].map((el) => box(el).h),
+    chips: [...document.querySelectorAll('.start-composer .composer-where > button.composer-project, .start-composer .composer-where > button.composer-mode, .start-composer .composer-where > button.composer-access')].map((el) => box(el).h),
     cards: [...document.querySelectorAll('.resume-card')].map((el) => box(el).h),
     heading: (() => { const el = document.querySelector('h1.start-greeting'); return el ? { size: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight } : null; })(),
     projectRows: [...document.querySelectorAll('.projects-row')].map((el) => box(el).h),

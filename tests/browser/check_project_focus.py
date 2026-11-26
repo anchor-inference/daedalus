@@ -249,7 +249,8 @@ def desktop(page: Page, lang: str, width: int) -> None:
     # Its panel keeps the project's tools the operator opened beside the orchestrator, and its "+" menu
     # offers both sets: the session's own (its terminal) and the project's.
     member_tabs = page.locator(".panel .panel-tab").evaluate_all("(tabs) => tabs.map((t) => t.dataset.tab)")
-    assert member_tabs == ["overview", "board", "brief", "wakeups", "folders"], member_tabs
+    # Details stands second in a chat's panel until the reader closes it, a member's chat included.
+    assert member_tabs == ["overview", "details", "board", "brief", "wakeups", "folders"], member_tabs
     page.locator(".panel .panel-add").click()
     expect(page.locator(".panel-tools [data-tool='jobs']")).to_have_count(1)
     expect(page.locator(".panel-tools [role='group']", has=page.locator("[data-tool='board']"))).to_have_attribute("aria-label", words["project"])

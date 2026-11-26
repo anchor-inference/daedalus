@@ -15,9 +15,9 @@ in English and in Russian and refuses:
 - a model name cut below a recognisable prefix, or an effort that is missing or cut;
 - the language's pair on the phone's chip, or an access menu without the language row that opens the choice.
 
-A wide desktop window, a desktop composer narrowed by the side panel and the two panes of the dual view
+A wide desktop window, a desktop composer narrowed by the side panel (at 1024 and 1366) and the two panes of the dual view
 are walked with the same claims, plus the desktop's own: the access chip says the pair ("EN ⇄ RU") where
-the composer is wide, and gives up its words for its shield in a narrow pane.
+the composer is wide, with its word whole, and gives up its words for its shield in a narrow pane.
 
     APP_URL=http://127.0.0.1:<port>/app python tests/browser/check_composer_fit.py
 
@@ -68,6 +68,7 @@ FACTS = """(composer) => {
   const label = composer.querySelector('.model-select .model-label');
   const effort = composer.querySelector('.model-select .model-effort');
   const chip = composer.querySelector('.composer-access .access-lang');
+  const word = composer.querySelector('.composer-access .access-word');
   const send = composer.querySelector('.roundbtn.primary');
   // How much of the name is in view: the share of its width the pill shows, in characters.
   const shown = label ? Math.floor(label.textContent.replace('…', '').length * Math.min(1, label.clientWidth / Math.max(1, label.scrollWidth))) : 0;
@@ -79,6 +80,7 @@ FACTS = """(composer) => {
     effort: effort && effort.getClientRects().length ? effort.textContent : null,
     effortCut: effort ? effort.scrollWidth > effort.clientWidth + 1 : null,
     chip: chip && chip.getClientRects().length ? chip.innerText.trim() : null,
+    accessCut: word && word.getClientRects().length ? word.scrollWidth > word.clientWidth + 1 : false,
     send: send ? rect(send) : null,
     last: controls.length ? name(controls[controls.length - 1]) : null,
     // The phone's send circle is 40 px drawn in its 44 px place, as the approved phone frame draws it.
@@ -143,6 +145,10 @@ def judge(facts: dict, where: str, phone: bool, narrow: bool) -> list[str]:
     # A narrow pane keeps the access chip's shield alone; its title and menu still name the pair.
     if not phone and facts["chip"] != (None if narrow else "EN ⇄ RU"):
         problems.append(f"{where}: the desktop's access chip reads {facts['chip']!r} for the language")
+    # The access keeps its words beside the pair; the model's name is what gives way. At 1366 with the
+    # panel open the chip once read "With chec…" while the model still showed twenty letters.
+    if facts["accessCut"]:
+        problems.append(f"{where}: the access chip's word is cut")
     return problems
 
 
@@ -217,6 +223,7 @@ def run() -> int:
                     problems += walk(browser, lang, width, phone=True)
                 problems += walk(browser, lang, 1440, phone=False)
                 problems += walk(browser, lang, 1024, phone=False, panel=True)
+                problems += walk(browser, lang, 1366, phone=False, panel=True)
                 problems += walk(browser, lang, 1280, phone=False, dual=True)
             browser.close()
     finally:

@@ -7,7 +7,7 @@ import { Icon } from "../icons";
 import { navigate, pathFor } from "../router";
 import { PageHeader, screenTitle, useMedia } from "../ui/index";
 import { Button, IconButton, Select, Sheet, Tabs } from "../ui/primitives";
-import { hold, invalidate, prime, release, useQuery } from "../store";
+import { hold, invalidate, listOf, prime, release, useQuery } from "../store";
 import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
 import { byDay, categoryLabel, listKey, markAllSeen, markSeen, markUnseen, noticeIcon, projectNames, useSummary, whereLine } from "../notifications";
@@ -67,7 +67,7 @@ function DesktopInbox({ toast, onOpen }: { toast: (t: string) => void; onOpen: (
   // one for what waits show them.
   const outside = project === null;
   const extras = outside && (filter === "all" || filter === "needs");
-  const allPending = outside ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const allPending = outside ? listOf(proposals.data).filter((p) => p.status === "pending") : [];
   const pending = extras ? allPending : [];
   const proposed = extras ? schedules : [];
 
