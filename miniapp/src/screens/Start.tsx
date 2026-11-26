@@ -45,6 +45,7 @@ import { type ChatKind, type KindOffers, KindMark, KindSelect, kindIcon, kindPla
 import { USER_STATUS } from "../browser/yourchrome";
 import { confirmAsync } from "../ui";
 import { CodeField, type CodeFieldHandle } from "../codefield";
+import { Mascot } from "../ui/mascot";
 
 /** Every project a chat could start in, the most recently used first and the installation's own last;
  *  a scratch folder of a single chat is not one. */
@@ -238,7 +239,7 @@ function PhoneHome({ onOpen, toast, project, projects, model }: { onOpen: (id: s
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
       <div className="ph-page-body">
         <div className={`ph-hero ${offline ? "offline" : ""}`}>
-          <Icon name="logo" size={36} />
+          <Mascot size={36} />
           <h1>{t(agent ? "start.greeting.agent" : "start.greeting")}</h1>
           <div className="ph-hero-picks">
             <button type="button" className="ph-btn sm ph-where" onClick={() => setPicking(true)} aria-haspopup="dialog" aria-label={`${t("start.where.label")}: ${picked ? picked.name : t("start.pick.none")}`}>
