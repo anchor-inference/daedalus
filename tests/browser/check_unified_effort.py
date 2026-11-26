@@ -36,7 +36,10 @@ def main() -> int:
             if width < 1024:
                 choices.last.click()
             else:
-                # From the keyboard: Tab from the search reaches the chosen effort, the arrow moves on.
+                # From the keyboard: Tab from the search crosses the providers' column and reaches the
+                # chosen effort; the arrow moves on.
+                page.keyboard.press("Tab")
+                expect(page.locator(".model-picker [role=tab][aria-selected='true']")).to_be_focused()
                 page.keyboard.press("Tab")
                 expect(choices.nth(3)).to_be_focused()
                 page.keyboard.press("ArrowRight")

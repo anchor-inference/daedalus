@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { ProviderConf } from "../api";
+import type { ProviderConf, Settings } from "../api";
+import type { SubscriptionUpstream } from "../accounts";
 import { t } from "../i18n";
 import { ICON_STROKE } from "../icons";
 
@@ -27,9 +28,19 @@ export function providerName(id: string, conf?: ProviderConf): string {
   return conf?.name || (WORDED[key] ? t(WORDED[key]) : NAMES[key]) || id;
 }
 
-/** The tile's letter: the first letter or digit of the name the operator sees. */
-function initial(name: string): string {
-  return (/[\p{L}\p{N}]/u.exec(name)?.[0] ?? "?").toLocaleUpperCase();
+/**
+ * The tile's letters: the first letters of the first two words of the name the operator sees ("WT" for
+ * Work-test-vllm), or the first two of a name of one word ("AB" for abliteration). One letter was not
+ * enough: "test-a" and "test-b", or two local servers, were the same tile twice.
+ */
+export function monogram(name: string): string {
+  // Words split at anything that is not a letter or a digit, at a lower-to-upper step ("myVllm") and
+  // where letters meet digits ("test1"), so a numbered endpoint keeps its number.
+  const words = name.replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2").replace(/([\p{L}])([\p{N}])|([\p{N}])([\p{L}])/gu, "$1$3 $2$4")
+    .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length) return "?";
+  const letters = words.length > 1 ? [...words[0]][0] + [...words[1]][0] : [...words[0]].slice(0, 2).join("");
+  return letters.toLocaleUpperCase();
 }
 
 const ANTHROPIC = <path d="M5 18L10 6l5 12M7 14h6M17 6l3 12" />;
@@ -72,21 +83,35 @@ export function FamilyGlyph({ family, size = 20 }: { family: string; size?: numb
 }
 
 /**
- * Local vector marks distinguish endpoint families without fetching third-party assets.
- *
- * Given the provider's display `name`, an endpoint with no brand mark of its own (a vLLM or llama.cpp
- * server, any custom address) is drawn as a tile with the name's initial instead of the shared
- * terminal or crosshair glyph: on a phone list two such endpoints side by side ("vLLM",
- * "Work-test-vllm") were otherwise one picture twice. The desktop picker passes no name and keeps
- * its glyphs.
+ * A provider's mark: the brand's monochrome stroke for a family that has one, and for every other
+ * endpoint (a vLLM or llama.cpp server, any custom address) a neutral tile with the letters of its
+ * name. Those endpoints used to share one terminal or crosshair glyph, and a list of fourteen
+ * providers showed four identical pictures side by side. `name` defaults to the provider's own.
  */
 export function ProviderMark({ id, kind, name, className = "" }: { id: string; kind?: string; name?: string; className?: string }) {
   const key = family(id, kind);
-  const local = ["vllm", "llamacpp", "ollama"].includes(key);
-  if (name && (local || !BRANDS.has(key))) {
-    return <span className={`provider-mark provider-letter ${className}`} aria-hidden="true">{initial(name)}</span>;
+  if (["vllm", "llamacpp", "ollama"].includes(key) || !BRANDS.has(key)) {
+    const letters = monogram(name ?? providerName(id));
+    return <span className={`provider-mark provider-letter ${className}`.trim()} data-letters={letters.length} aria-hidden="true"><span>{letters}</span></span>;
   }
   return <span className={`provider-mark provider-${key} ${className}`.trim()} aria-hidden="true">
     <FamilyGlyph family={key} />
   </span>;
+}
+
+export type ProviderState = { word: string; tone: "live" | "attention" | "idle" };
+
+/** Whether a provider can answer, in the word Settings → Models and providers shows beside it and the
+ *  model picker beside its name: connected, no key, needs sign-in, not answering. */
+export function providerState(conf: ProviderConf | undefined, s: Pick<Settings, "provider_keys">, id: string, accounts?: SubscriptionUpstream): ProviderState {
+  if (!conf) return { word: t("prov.status.missing"), tone: "attention" };
+  const keys = s.provider_keys?.[id];
+  const signedOut = accounts && accounts.sign_in === "terminal" && accounts.accounts.length > 0 && !accounts.accounts.some((a) => a.configured);
+  if (signedOut) return { word: t("prov.status.signin"), tone: "attention" };
+  if (keys?.ready) return { word: t("prov.status.ready"), tone: "live" };
+  if (!keys) return conf.api_key_set ? { word: t("settings.provider.keystored"), tone: "idle" } : { word: t("prov.status.unknown"), tone: "idle" };
+  if (keys.key_held === null) return { word: t("prov.status.proxy"), tone: "attention" };
+  if (keys.key_kind === "cli_login") return { word: t("prov.status.signin"), tone: "attention" };
+  if (keys.key_kind === "endpoint") return { word: t("prov.status.down"), tone: "attention" };
+  return { word: t("prov.status.nokey"), tone: "attention" };
 }

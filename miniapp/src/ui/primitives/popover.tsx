@@ -28,6 +28,10 @@ export type PopoverProps = {
   role?: "menu" | "dialog";
   /** The window width below which it is a sheet. */
   sheetBelow?: number;
+  /** The narrowest column the box may hang from and still float, where that is less than its width: a
+      box that floats over the page may overhang the column it opens from, and a wide one would
+      otherwise turn into a sheet in a chat's panel or a narrow composer on a desktop window. */
+  room?: number;
   className?: string;
   children: ReactNode;
 };
@@ -36,8 +40,8 @@ export type PopoverProps = {
     current choice, else the first control. */
 const FIRST = ".model-search, [aria-checked='true'], input:checked, button[aria-current='true'], button:not(:disabled), input, textarea, [role='slider']";
 
-export function Popover({ anchor, open = true, onClose, label, side, align = "start", width, height, offset, role = "menu", sheetBelow = SHEET_BELOW, className = "", children }: PopoverProps) {
-  const sheet = useSheetForm(anchor, sheetBelow, width);
+export function Popover({ anchor, open = true, onClose, label, side, align = "start", width, height, offset, role = "menu", sheetBelow = SHEET_BELOW, room, className = "", children }: PopoverProps) {
+  const sheet = useSheetForm(anchor, sheetBelow, room ?? width);
   if (!open) return null;
   if (sheet) {
     return (
@@ -49,7 +53,7 @@ export function Popover({ anchor, open = true, onClose, label, side, align = "st
   return <Floating anchor={anchor} onClose={onClose} label={label} side={side} align={align} width={width} height={height} offset={offset} role={role} className={className}>{children}</Floating>;
 }
 
-function Floating({ anchor, onClose, label, side, align, width, height, offset = 6, role = "menu", className, children }: Omit<PopoverProps, "open" | "sheetBelow">) {
+function Floating({ anchor, onClose, label, side, align, width, height, offset = 6, role = "menu", className, children }: Omit<PopoverProps, "open" | "sheetBelow" | "room">) {
   const isTop = useLayer(onClose);
   const popup = useRef<HTMLDivElement>(null);
   const element = anchorElement(anchor);

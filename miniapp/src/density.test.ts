@@ -278,9 +278,11 @@ const CONTENT_BOXES = [
   // An importable session is the same large row: its name over a line of where it ran, how long it is and how
   // big, with the program's mark; the folder rows of the same list stay at the row token.
   { selector: ".imp-srow", property: "min-height", max: 56 },
-  // The model picker's list is a window onto six 32 px rows (six and the five 1 px gaps between them),
-  // the same height whatever the tab or the search holds, so the box around it never changes size.
-  { selector: ".model-picker-list", property: "height", max: 197 },
+  // The model picker's two columns are one fixed band, the same height whatever the provider or the
+  // search holds, so the box around it never changes size: nine 28 px provider rows beside the chosen
+  // one's name and seven 32 px model rows. A phone's sheet stacks them and gives the list six 44 px rows.
+  { selector: ".model-picker-main", property: "height", max: 265 },
+  { selector: ".model-picker-list", property: "height", max: 264 },
   // The More launcher's row is a name over a line saying what it is, 44 px, with its pin; its search
   // field is a 40 px row. The palette's field is a 48 px row.
   { selector: ".launch-q", property: "height", max: 40 },

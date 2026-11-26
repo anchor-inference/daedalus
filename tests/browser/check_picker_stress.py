@@ -2,8 +2,9 @@
 
 An installation used for a while holds fourteen providers of six models each and more. The picker is
 opened and closed thirty times under a four-times CPU throttle, half of them closed before the list has
-drawn; then, opened once more, a search is typed a letter at a time, the side arrows walk every tab and
-the down arrow the rows. It asks four things: no task held the main thread for a second, the page still
+drawn; then, opened once more, a search is typed a letter at a time, the left arrow crosses into the
+providers' column and the down arrow walks every provider in it, then the right arrow comes back and the
+down arrow walks the rows. It asks four things: no task held the main thread for a second, the page still
 answers a frame within two seconds, the box never changed its size through any of it, and a pick still
 reaches the host.
 
@@ -93,9 +94,11 @@ def run() -> int:
             size()
         page.keyboard.press("Control+A")
         page.keyboard.press("Backspace")
+        page.keyboard.press("ArrowLeft")
         for _ in range(len(PROVIDERS) + 2):
-            page.keyboard.press("ArrowRight")
+            page.keyboard.press("ArrowDown")
             size()
+        page.keyboard.press("ArrowRight")
         for _ in range(8):
             page.keyboard.press("ArrowDown")
         size()
@@ -113,7 +116,7 @@ def run() -> int:
         deadline = time.monotonic() + 5
         while len(chosen) == before and time.monotonic() < deadline:
             page.wait_for_timeout(50)
-        print(f"{ROUNDS} opens and closes, a search typed, {len(PROVIDERS) + 2} tabs walked, at {THROTTLE}x throttle in {spent:.1f}s; "
+        print(f"{ROUNDS} opens and closes, a search typed, {len(PROVIDERS) + 2} providers walked, at {THROTTLE}x throttle in {spent:.1f}s; "
               f"long tasks {count}, longest {longest:.0f} ms; a frame after them in {answered:.0f} ms; box sizes {sorted(sizes)}")
         if answered < 0:
             problems.append("the page did not answer a frame within two seconds")
