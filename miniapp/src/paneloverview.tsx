@@ -1,7 +1,8 @@
 // The panel's front page: how the chat stands in one line (working for six minutes, waiting for the
 // operator, failed), its title, what it runs on, then one row a tool with what is behind it — two
-// files changed, a helper at work, the context a fifth full — and the chat's tasks with their
-// progress. Every row opens its tool as a tab, so the Overview is both the summary and the way in.
+// files changed, a helper at work, the context a fifth full — then the subscription's windows, and
+// the chat's tasks with their progress. Every row opens its tool as a tab, so the Overview is both the
+// summary and the way in.
 
 import type { ReactNode } from "react";
 import type { TaskView } from "./api";
@@ -13,49 +14,43 @@ import { Elapsed } from "./details";
 import type { BoardTask } from "./board/tasks";
 import { useQuery } from "./store";
 import { taskSub } from "./jobs";
-import { absTime, commandPreview, untilShort } from "./format";
+import { commandPreview } from "./format";
 import { quotaTone } from "./detailsmodel";
+import { QuotaRows, type QuotaWindow } from "./quotarow";
+import "./paneloverview.css";
 
 /** One row: the tool, what it holds in a few words, and a figure at its end in the tone of what it says.
- *  `kind` tells two rows of one tool apart for a reader of the page (the Usage tool's row is either the
- *  subscription's windows or the metered spend). */
+ *  `kind` names what a row stands for when its tool alone does not (the Usage row is the metered spend;
+ *  a subscription is the block under the rows). */
 export type OverviewRow = { tab: PanelTab; name: string; text: ReactNode; tag?: string; tone?: "live" | "attn" | "add"; kind?: string };
 
-/** A subscription window as the host reports it: its name ("5h", "weekly"), how much of it is used, when it starts again. */
-export type QuotaWindow = { name: string; used_percent: number; resets_at?: number | string | null };
+/** The subscription the chat's model runs on, as the Overview draws it: the provider by its whole name,
+ *  the plan and the account when the host names them, and every window on a line of its own. */
+export type OverviewUsage = { provider: string; name: string; plan?: string; account?: string; windows: QuotaWindow[]; limit?: boolean; note?: string };
 
-/** The windows of the subscription the chat's model runs on, each a thin meter and its percentage, in
- *  the attention colour once the app judges it near its limit; when it starts again is in its tooltip. */
-export function QuotaWindows({ windows }: { windows: QuotaWindow[] }) {
+/** The subscription as a block under the tools: a heading with the provider, its plan and the way to
+ *  the Usage tool, then one line a window. It was one row of chips, which a provider with three long
+ *  window names ("Gemini 4 Argon (high)") cut to letters, and which never said when a window resets. */
+function UsageBlock({ usage, onOpen }: { usage: OverviewUsage; onOpen: () => void }) {
+  const tone = usage.limit || usage.windows.some((w) => quotaTone(w.used_percent) === "bad") ? "bad" : usage.windows.some((w) => quotaTone(w.used_percent) !== "ok") ? "attn" : undefined;
   return (
-    <span className="ov-quota">
-      {windows.map((w) => {
-        const percent = Math.round(w.used_percent);
-        const tone = quotaTone(w.used_percent);
-        const resets = resetDate(w.resets_at);
-        const title = [`${w.name}: ${percent}%`, resets ? `${t("details.quota.resets")} ${untilShort(resets)} (${absTime(resets)})` : ""].filter(Boolean).join(" · ");
-        return (
-          <span key={w.name} className={`ov-window ${tone === "ok" ? "" : tone}`} data-quota={w.name} data-tone={tone} title={title}>
-            <span className="ov-window-name">{w.name}</span>
-            <span className="ov-meter" aria-hidden><i style={{ width: `${Math.max(0, Math.min(100, w.used_percent))}%` }} /></span>
-            <span className="ov-window-pct num">{percent}%</span>
-          </span>
-        );
-      })}
-    </span>
+    <section className="ov-usage" data-usage="subscription" data-provider={usage.provider} data-tone={tone} aria-label={usage.name}>
+      <div className="ov-usage-head">
+        <Icon name={TAB_ICON.usage} size={16} />
+        <span className="ov-usage-name">{usage.name}</span>
+        {(usage.plan || usage.account) && <span className="ov-usage-plan">{[usage.plan, usage.account].filter(Boolean).join(" · ")}</span>}
+        {usage.limit && <span className="ov-usage-tag">{t("usage.limitreached")}</span>}
+        <button type="button" className="ov-usage-open" onClick={onOpen} title={t("panel.ov.usage.open")}>{t("panel.tab.usage")}<Icon name="forward" size={14} /></button>
+      </div>
+      {usage.note && <p className="ov-usage-note">{usage.note}</p>}
+      {usage.windows.length > 0 && <QuotaRows windows={usage.windows} />}
+    </section>
   );
-}
-
-/** The host sends a reset as seconds since the epoch or as an ISO date. */
-function resetDate(at: number | string | null | undefined): Date | null {
-  if (at === null || at === undefined || at === "") return null;
-  const date = new Date(typeof at === "number" && at < 1e12 ? at * 1000 : at);
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export type OverviewStatus = { tone: "live" | "attn" | "bad" | "idle"; word: string; since?: string | null };
 
-export function Overview({ sessionId, board, status, title, meta, rows, jobs, onOpen, onBoard, onDetails }: {
+export function Overview({ sessionId, board, status, title, meta, rows, usage, jobs, onOpen, onBoard, onDetails }: {
   sessionId: string;
   /** The chat's tasks (what it and its helpers made), or undefined until they are read. */
   board: BoardTask[] | undefined;
@@ -63,7 +58,9 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
   title: string;
   meta: ReactNode;
   rows: OverviewRow[];
-  /** Whether the Terminal row is drawn: the session runs jobs (an orchestrator runs none). */
+  /** The subscription the chat's model runs on, drawn under the rows; a metered model is a row instead. */
+  usage?: OverviewUsage | null;
+  /** Whether the Jobs row is drawn: the session runs jobs (an orchestrator runs none). */
   jobs?: boolean;
   onOpen: (tab: PanelTab) => void;
   /** The way to the chat's tasks (its Board tab); left out, the block has no way there. */
@@ -73,7 +70,7 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
 }) {
   const tasks = useQuery<{ tasks: TaskView[] }>(jobs ? `/api/sessions/${encodeURIComponent(sessionId)}/tasks` : null, { staleMs: 5000 }).data?.tasks;
   const job = jobRow(tasks);
-  // The Terminal row stands with the rest of the chat's work: after the changes and the helpers.
+  // The Jobs row stands with the rest of the chat's work: after the changes and the helpers.
   const at = rows.findIndex((row) => row.tab !== "changes" && row.tab !== "board" && row.tab !== "subagents" && row.tab !== "questions");
   const all = job ? [...rows.slice(0, at < 0 ? rows.length : at), job, ...rows.slice(at < 0 ? rows.length : at)] : rows;
   return (
@@ -100,6 +97,7 @@ export function Overview({ sessionId, board, status, title, meta, rows, jobs, on
           </button>
         ))}
       </div>
+      {usage && <UsageBlock usage={usage} onOpen={() => onOpen("usage")} />}
       {board && board.length > 0 && <BoardBlock tasks={board} onOpen={onBoard} />}
     </div>
   );

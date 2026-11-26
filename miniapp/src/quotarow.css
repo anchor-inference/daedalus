@@ -1,0 +1,18 @@
+/* A subscription window as one line (quotarow.tsx): the name, and at the line's end the meter, the
+   share and the reset, each of a fixed width so the windows of one provider line up as a small table.
+   The name is never cut: "Gemini 4 Argon (high)" cut to "Gemi…" was the fault this replaces. A name
+   that does not leave the figures their room sends them to a line of their own under it, still at the
+   end; folding the name into a narrow column instead read as three lines of broken words at 410 px. */
+.qrows { display: flex; flex-direction: column; }
+.qrow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 2px; min-height: 32px; padding: 4px 0; font-size: var(--fs-14); }
+.qrow-name { flex: 1 0 auto; max-width: 100%; min-width: 0; color: var(--fg); line-height: 1.3; overflow-wrap: anywhere; }
+.qrow-figures { display: flex; flex: none; align-items: center; gap: 12px; margin-left: auto; }
+.qrow-meter { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--selected); overflow: hidden; }
+.qrow-meter i { display: block; height: 100%; background: var(--fg-2); }
+.qrow-pct { flex: none; width: 3em; color: var(--fg); font-size: var(--fs-13); text-align: right; }
+.qrow-reset { display: inline-flex; flex: none; align-items: center; gap: 4px; width: 9.5em; color: var(--fg-3); font-size: var(--fs-13); white-space: nowrap; }
+.qrow-reset > .ic { flex: none; }
+.qrow.attn .qrow-pct, .qrow.attn .qrow-name { color: var(--attention); }
+.qrow.attn .qrow-meter i { background: var(--attention); }
+.qrow.bad .qrow-pct, .qrow.bad .qrow-name { color: var(--bad); }
+.qrow.bad .qrow-meter i { background: var(--bad); }

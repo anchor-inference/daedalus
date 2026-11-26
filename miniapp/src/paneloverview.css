@@ -1,0 +1,19 @@
+/* The Overview's own blocks under its tool rows (paneloverview.tsx); the head, the rows and the tasks
+   block are drawn by panel.css beside the rest of the panel. A block has the tasks block's measure: a
+   12 px label line, then rows on the panel's 12 + 12 px gutter, so its text lines up with the rows'. */
+
+/* The subscription: the provider by its whole name with the plan, the way to the Usage tool, then
+   one line a window (quotarow.css). */
+.ov-usage { display: flex; flex-direction: column; margin: 12px 12px 0; padding: 0 12px; }
+.ov-usage-head { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.ov-usage-head > .ic:first-child { flex: none; color: var(--fg-2); }
+.ov-usage-name { flex: 0 1 auto; min-width: 0; color: var(--fg); font-size: var(--fs-14); font-weight: 500; overflow-wrap: anywhere; }
+.ov-usage-plan { flex: 0 1 auto; min-width: 0; color: var(--fg-3); font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-usage-tag { flex: none; color: var(--bad); font-size: var(--fs-12); font-weight: 500; }
+.ov-usage-open { display: inline-flex; flex: none; align-items: center; gap: 2px; margin-left: auto; padding: 0 2px 0 6px; height: 28px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.ov-usage-open:hover { background: var(--hover); color: var(--fg); }
+.ov-usage-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ov-usage-note { margin: 0 0 4px; color: var(--fg-2); font-size: var(--fs-13); }
+.ov-usage .qrows { padding-left: 24px; }
+/* On a phone the blocks keep the rows' narrower gutter, as the tasks block does. */
+.panel-sheet .ov-usage { margin: 12px 8px 0; }
