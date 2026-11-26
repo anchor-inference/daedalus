@@ -5,7 +5,7 @@
 
 import { Sheet, toast } from "./ui/dialogs";
 import { Segmented } from "./ui/primitives";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, inPanel } from "./api";
 import { FileTile, fileTileIcon } from "./filetile";
 import { Icon } from "./icons";
@@ -20,6 +20,7 @@ export { parseCsv } from "./csv";
 import { FileSkeleton } from "./feedback";
 import { createSharedFetch, type Joined } from "./sharedfetch";
 import { routed } from "./visit";
+import { useEdgeFade } from "./edgefade";
 
 /** Where the bytes come from: a file under a session API root, or a File object from the composer.
  * `lines` ("20-40", or a single number) is what an answer cited: the file opens as source with that range marked.
@@ -60,6 +61,17 @@ export function fileGlyph(name: string, dir = false): ReactNode {
   const kind = previewKind(name);
   const family = kind === "docx" ? "document" : kind === "csv" ? "sheet" : kind === "markdown" ? "text" : kind === "json" || kind === "diff" || kind === "html" ? "code" : kind === "other" ? "file" : kind;
   return <Icon name={fileTileIcon(family)} size={16} />;
+}
+
+/** How much of a long file name's end is kept when the name alone is wider than its line: the
+ *  extension and the characters before it, which tell versions and dates apart. */
+const NAME_TAIL = 10;
+
+/** A file's name that, when it must give way at all, gives way in its middle and keeps its end
+ *  ("langpt-users-all-2…11-26.xlsx"): cut at its end it lost the extension and the date. */
+export function FileName({ name }: { name: string }) {
+  if (name.length <= NAME_TAIL * 2) return <span className="file-name"><span className="file-name-head">{name}</span></span>;
+  return <span className="file-name"><span className="file-name-head">{name.slice(0, -NAME_TAIL)}</span><span className="file-name-tail">{name.slice(-NAME_TAIL)}</span></span>;
 }
 
 /** The address a browser tab can open the file at: the token travels in the query, since a tab carries no header. */
@@ -172,29 +184,44 @@ export function AuthImg({ src, alt, className, onClick }: { src: PreviewSource; 
 
 // ── parsers ────────────────────────────────────────────────────────────────────────────
 
+/** A cell longer than this wraps in a column of a readable width; a shorter one keeps to its line. */
+const LONG_CELL = 32;
+
+/**
+ * A sheet or a CSV as a table that ends at its last row and scrolls both ways inside its own frame,
+ * the head row staying in view. A long cell wraps in its column instead of being cut, the one way
+ * to read it that works the same under a pointer and a finger, in the panel and in the sheet; the
+ * short ones (numbers, dates, names) stay on their line, so a wide sheet scrolls sideways rather
+ * than folding every column, and the edge that has more behind it fades.
+ */
 function Grid({ rows, note }: { rows: string[][]; note?: string }) {
+  const frame = useRef<HTMLDivElement>(null);
+  useEdgeFade(frame, rows);
   if (!rows.length) return <div className="empty">{t("preview.empty")}</div>;
   const width = Math.max(...rows.map((r) => r.length));
+  const cell = (text: string) => (text.length > LONG_CELL ? "long" : undefined);
   return (
-    <div className="tablewrap preview-grid">
-      <table>
-        <thead>
-          <tr>
-            <th className="num">#</th>
-            {Array.from({ length: width }, (_, i) => <th key={i}>{rows[0][i] ?? ""}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(1).map((r, i) => (
-            <tr key={i}>
-              <td className="num sub">{i + 1}</td>
-              {Array.from({ length: width }, (_, j) => <td key={j}>{r[j] ?? ""}</td>)}
+    <>
+      <div ref={frame} className="preview-grid" tabIndex={0} role="region" aria-label={t("preview.table")}>
+        <table>
+          <thead>
+            <tr>
+              <th className="num">#</th>
+              {Array.from({ length: width }, (_, i) => <th key={i} className={cell(rows[0][i] ?? "")}>{rows[0][i] ?? ""}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {note && <div className="sub" style={{ padding: "6px 0" }}>{note}</div>}
-    </div>
+          </thead>
+          <tbody>
+            {rows.slice(1).map((r, i) => (
+              <tr key={i}>
+                <td className="num">{i + 1}</td>
+                {Array.from({ length: width }, (_, j) => <td key={j} className={cell(r[j] ?? "")}>{r[j] ?? ""}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {note && <div className="sub preview-grid-note">{note}</div>}
+    </>
   );
 }
 
@@ -289,7 +316,10 @@ export function Viewer({ src, onInfo, onNavigation, className }: { src: PreviewS
   useEffect(() => { onInfo?.({ url, size: blob?.size ?? null, name, kind, loading, progress }); }, [url, blob, name, kind, loading, progress, onInfo]);
 
   return (
-    <div className={`viewer ${kind} ${className ?? ""}`}>
+    // The kind is an attribute, not a class: as the class `sheet` a workbook's viewer took on the
+    // Sheet dialog's own surface and width, and drew a grey card past the panel's edge and down to
+    // its foot.
+    <div className={`viewer ${className ?? ""}`} data-kind={kind}>
       {!onInfo && loading && <div className={`preview-progress ${progress === null ? "busy" : ""}`} role="progressbar" aria-label={t("common.loading")}><i style={progress === null ? undefined : { width: `${progress * 100}%` }} /></div>}
       {["markdown", "html", "json", "diff"].includes(previewKind(name)) && (
         <div className="source-tools">
@@ -347,7 +377,7 @@ export function FilePreview({ src, onClose }: { src: PreviewSource; onClose: () 
       title={(
         <span className="preview-name" title={"file" in src ? name : src.path}>
           <span className="preview-glyph" aria-hidden>{fileGlyph(name)}</span>
-          <span className="preview-file">{name}</span>
+          <span className="preview-file"><FileName name={name} /></span>
           {cited && <span className="sub">{t("preview.lines", { range: cited.from === cited.to ? cited.from : `${cited.from}–${cited.to}` })}</span>}
           {info?.size != null && <span className="sub"> · {fmtBytes(info.size)}</span>}
         </span>

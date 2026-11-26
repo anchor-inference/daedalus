@@ -6412,6 +6412,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "preview.rows": { en: "showing the first 2000 rows", ru: "показаны первые 2000 строк" },
   "preview.none": { en: "No preview for this type.", ru: "Для этого типа просмотра нет." },
   "preview.empty": { en: "empty", ru: "пусто" },
+  "preview.table": { en: "Table", ru: "Таблица" },
   "preview.nofile": { en: "no such file", ru: "файла нет" },
   "preview.failed": { en: "could not load the file ({status})", ru: "не удалось загрузить файл ({status})" },
   "preview.more": { en: "[… {size} more — download the file for the rest]", ru: "[… ещё {size} — скачайте файл целиком]" },

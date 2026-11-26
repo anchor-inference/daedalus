@@ -10,9 +10,14 @@ import { jsonRows, parseJsonText, toggleRow } from "./jsontree";
 import { diffFileName, lineAnchor, parseDiff } from "./diff";
 import { t } from "./i18n";
 import { RawHtml } from "./rawhtml";
+import { useEdgeFade } from "./edgefade";
 
 export function SourceView({ text, name, range }: { text: string; name: string; range?: { from: number; to: number } | null }) {
-  const [wrap, setWrap] = useState(false);
+  // Prose and logs are read line by line and wrap from the start; code keeps its lines (its indent is
+  // its structure) and scrolls sideways, its far edge faded while more of a line is out of view.
+  const [wrap, setWrap] = useState(() => langOf(name) === "text");
+  const box = useRef<HTMLDivElement>(null);
+  useEdgeFade(box, wrap);
   const [jump, setJump] = useState(String(range?.from ?? 1));
   const [at, setAt] = useState(range?.from ?? 1);
   const [mark, setMark] = useState(range);
@@ -27,7 +32,7 @@ export function SourceView({ text, name, range }: { text: string; name: string; 
       <form onSubmit={(e) => { e.preventDefault(); const n = Math.max(1, Math.min(lines.length, Number(jump) || 1)); setAt(n); setMark({ from: n, to: n }); }}><input className="field" type="number" min="1" max={lines.length} aria-label={t("preview.goto")} value={jump} onChange={(e) => setJump(e.target.value)} /><Button size="sm" type="submit">{t("preview.goto")}</Button></form>
       <span className="sub">{t("preview.lines.of", { from: start + 1, to: end, total: lines.length })}</span>
     </div>
-    <div className={`filetext lined source-view ${wrap ? "wrap" : ""}`}>
+    <div ref={box} className={`filetext lined source-view ${wrap ? "wrap" : ""}`}>
       {start > 0 && <button className="linkbtn" onClick={() => setAt(Math.max(1, at - 280))}>{t("preview.previous")}</button>}
       {lines.slice(start, end).map((line, i) => { const n = start + i + 1; return <div key={n} data-line={n} className={`line ${mark && n >= mark.from && n <= mark.to ? "cited" : ""}`} ref={n === at ? first : undefined}><span className="linenum">{n}</span><RawHtml as="span" className="linebody" html={line || " "} /></div>; })}
       {end < lines.length && <button className="linkbtn" onClick={() => setAt(at + 280)}>{t("preview.next")}</button>}
