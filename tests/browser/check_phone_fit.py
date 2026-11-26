@@ -183,10 +183,9 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     mode, pill = facts["mode"], facts["model"]
     if not mode:
         problems.append(f"{where}: no access chip")
-    if running:
-        if pill:
-            problems.append(f"{where}: the model pill did not give way to steering")
-    elif not pill:
+    # The model stays in the row while the agent works: without it the model could not be changed
+    # from a phone during a run, and the controls it holds apart packed to the left edge.
+    if not pill:
         problems.append(f"{where}: no model pill")
     else:
         if pill["pad"] < 8 or pill["fs"] != 14:

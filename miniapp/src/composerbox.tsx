@@ -698,10 +698,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {props.beside}
           {phone && offline && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
-            {/* A running phone composer has no room for the chip, but the list still opens from the panel's
-                strip: without the component mounted that chip did nothing at all while a turn ran. */}
+            {/* The chip stays while a turn runs, on a phone as on a desktop: the choice is for the next
+                turn (an effort reaches the run's next request), and a phone composer that dropped the chip
+                while running left no way to change the model there, and its controls slid to the left. */}
             <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={(o) => { if (o) setModelAnchor(null); setModelOpen(o); }} onChoose={props.onChooseModel}
-              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} account={props.account} anchor={modelAnchor} pill={!phone || status !== "running"} />
+              effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} account={props.account} anchor={modelAnchor} />
             {/* The context in use, as a number: it opens the panel at its Context section. A ring beside
                 the number read as a spinner at rest, and the number alone says the same. */}
             {pct !== null && ctx && (

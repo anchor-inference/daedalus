@@ -70,7 +70,7 @@ describe("the anchor", () => {
 
   function Harness({ anchor }: { anchor: HTMLElement | null }) {
     const [open, setOpen] = useState(true);
-    return <ModelSelect model="claude-opus-5" fallback={null} open={open} onOpenChange={setOpen} onChoose={() => {}} anchor={anchor} pill={false} />;
+    return <ModelSelect model="claude-opus-5" fallback={null} open={open} onOpenChange={setOpen} onChoose={() => {}} anchor={anchor} />;
   }
 
   it("hangs below the chip that opened it, from its left edge", async () => {
@@ -85,8 +85,6 @@ describe("the anchor", () => {
     await act(async () => { window.dispatchEvent(new Event("resize")); await new Promise((resolve) => setTimeout(resolve, 30)); });
     const placed = menu.closest<HTMLElement>(".popover-pos")!;
     expect(placed.style.transform).toBe("translate(700px, 80px)");
-    // No pill was asked for, so none is drawn: a running phone composer has no room for one.
-    expect(host.querySelector(".model-select")).toBeNull();
   });
 
   it("gives the keyboard back to that chip on Escape", async () => {

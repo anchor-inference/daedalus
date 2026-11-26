@@ -84,8 +84,6 @@ export type ModelSelectProps = {
   /** A control elsewhere that opened the list, such as the panel strip's model chip: the popover hangs
    *  below it, aligned to its left edge. Null hangs it from this component's own chip. */
   anchor?: HTMLElement | null;
-  /** Whether the chip itself is drawn; the list can still be opened from an outside anchor without it. */
-  pill?: boolean;
   /** How many letters of the model's name the chip shows before it cuts. A chat's composer shares its
    *  row with more and keeps 22; the start page gives the model a row of its own. */
   labelMax?: number;
@@ -97,7 +95,7 @@ function isCurrent(id: string, p: Preset, model: string): boolean {
   return model === id || model === p.label || model === p.model || model === `${p.provider}/${p.model}`;
 }
 
-export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, effort, thinking, onChooseEffort, account, anchor = null, pill = true, labelMax = 22 }: ModelSelectProps) {
+export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, effort, thinking, onChooseEffort, account, anchor = null, labelMax = 22 }: ModelSelectProps) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [cat, setCat] = useState<Catalogue | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -149,14 +147,14 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, eff
   const ownOpen = open && !anchor;
   return (
     <>
-      {pill && <button ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${ownOpen ? "on" : ""}`} onClick={() => onOpenChange(!ownOpen)} title={title} aria-label={t("session.model.for")} aria-haspopup="dialog" aria-expanded={ownOpen}>
+      <button ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${ownOpen ? "on" : ""}`} onClick={() => onOpenChange(!ownOpen)} title={title} aria-label={t("session.model.for")} aria-haspopup="dialog" aria-expanded={ownOpen}>
         {fallback && <span className="model-dot" aria-hidden />}
         {/* The effort is its own span so a long model name is what gives way: in one span the
             ellipsis ate the effort first and the chip read "DeepSeek Flash · l…". */}
         <span className={`model-label truncate ${fallback ? "model-fallback" : ""}`}>{label}</span>
         {onChooseEffort && <span className="model-effort">{effortWord(effort, thinking)}</span>}
         <Icon name="chevron" size={14} />
-      </button>}
+      </button>
       {open && (
         <Popover anchor={anchor ?? trigger.current} onClose={() => onOpenChange(false)} className="model-picker" align={anchor ? "start" : "end"} width={PICKER_WIDTH} room={PICKER_ROOM} label={t("session.model.for")}>
           <ModelPicker cat={cat} failed={failed} model={model} fallback={fallback} onPick={pick} onStar={star} onClose={() => onOpenChange(false)}

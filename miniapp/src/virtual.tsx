@@ -502,9 +502,9 @@ export function WindowedRows({ keys, render, host, rowSelector, estimate = 64, o
   for (let i = start; i < end; i++) slots.push(<Fragment key={keys[i]}>{render(i)}</Fragment>);
   return (
     <>
-      {padTop > 0 && <div style={{ height: Math.round(padTop) }} aria-hidden />}
+      {padTop > 0 && <div className="win-pad" style={{ height: Math.round(padTop) }} aria-hidden />}
       {slots}
-      {padBottom > 0 && <div style={{ height: Math.round(padBottom) }} aria-hidden />}
+      {padBottom > 0 && <div className="win-pad" style={{ height: Math.round(padBottom) }} aria-hidden />}
     </>
   );
 }

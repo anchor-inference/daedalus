@@ -782,15 +782,22 @@ describe("the sidebar", () => {
     expect(wide(".sb-nav")).toContain("height: var(--row-h)");
     expect(wide(".sb-row")).toContain("height: var(--row-h)");
     // Every chat row — in a project, outside one, a subagent under its leader — is the slot, the
-    // title and one trailing item: a 16 px slot 12 px in and the title 8 px after it, where a
-    // project's chats always started (12 + 16 + 8). The indent that pushed a project's chats 36 px
-    // in stood empty; the slot is in its place and holds the chat's one glyph, so no row draws its
-    // marks between the title and the time any more.
+    // title and one trailing item: a 16 px slot 12 px in and the title 8 px after it, so no row draws
+    // its marks between the title and the time.
     expect(wide(".sb-chat")).toContain("padding: 0 10px 0 var(--space-3)");
     expect(wide(".sb-chat")).toContain("gap: var(--space-2)");
     expect(wide(".sb-gut")).toContain("width: 16px");
-    expect(wide(".sb-kids > .sb-row")).toBe("");
     expect(wide(".sb-marks")).toBe("");
+    // A chat inside a project, and a subagent under its leader, stands one 16 px step in on a guide
+    // line drawn by each row's own ::before (the rows are windowed), in the neutral line colour: with
+    // every title at one x, a project's name read as one more chat.
+    expect(wide(".sidebar")).toContain("--sb-step: 16px");
+    expect(wide(".sb-chat.nested")).toContain("--sb-depth: 1");
+    expect(wide(".sb-chat.nested")).toContain("padding-left: var(--sb-indent)");
+    expect(wide(".sb-sub.nested")).toContain("--sb-depth: 2");
+    expect(wide(".sb-chat.nested::before")).toContain("linear-gradient(var(--line-strong) 0 0)");
+    expect(wide(".sb-kids > .win-pad::before")).toContain("background: var(--line-strong)");
+    expect(wide(".sb-kids > .sb-row")).toBe("");
     // A subagent is quieter by its type, not its height: the 32 px pitch of every row keeps its tree
     // line one stroke and the windowed list's estimate one number.
     expect(wide(".sb-sub")).not.toMatch(/(^|;)\s*height:/);

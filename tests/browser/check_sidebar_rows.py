@@ -11,32 +11,51 @@ unread or running dot), the title, and one trailing item (its state while it nee
 works, else its subagents' count while they work, else its time) — and the environment is said
 once, on the folder's line, where it is the folder's rule, and on a row only where the row breaks it.
 
+With every title at one x, a project's name read as one more chat and a chat outside the projects,
+between two of them, as a member of the one above. A chat inside a project now stands one 16 px step
+in, on a guide line that drops from under the folder with a tick to each row; a subagent stands one
+step in from its leader on a line of its own, so a subagent of a chat inside a project is two steps
+in, with the project's line running on past it to the next chat.
+
 The fixture is an installation shaped like that one: 26 chats in four projects and the Chats section,
 four of five on the host, forks, an imported Claude chat, a leader with four subagents of which two
 work, a private chat, a loop, a computer, a browser and a remote chat, long Russian titles, one chat
 waiting for the reader and one working. What is checked, at 300 px and at the 232 px minimum:
 
-- every nested row's title box is at least 170 px wide at 300 and 120 px at 232;
+- every nested chat's title box is at least 160 px wide at 300 and 110 px at 232 (a subagent, a step
+  deeper, is reported and not held to it);
 - no row draws more than one item after its title (its actions wait for the pointer);
 - nothing in a row is drawn on an orange ground or in orange ink unless the row needs the reader;
 - every property the row does not draw is in its accessible name and its tooltip;
-- the slot is as wide on every row and every title starts at the same x;
+- the slot is as wide on every row; the chats outside projects share one x for slot and title, the
+  chats inside projects another, 16 px further right and right of their folder's name, and each
+  subagent one step right of its leader;
+- every row on a guide line draws it, the line boxes of neighbouring rows touch, and the pixels under
+  the line are the line's from under the folder (or the leader's slot) down to the last row's tick,
+  through the subagents between two chats; the lines are the neutral line colour, never a hue;
 - the unread dot and the running state are visible;
-- the rows stay 32 px with a 2 px gap, the windowed list's estimate.
+- every row stays 32 px with a 2 px gap, the windowed list's estimate.
 
-``SHOTS=<dir>`` saves the pictures: the column at 300 and 232 px in dark Russian, 300 px in light,
-the 276 px column of the installation the fixture copies, a hovered row, and the phone's drawer at 390 px.
+A project of 60 chats, opened in full and scrolled to its middle, keeps its line whole through the
+windowed rows. The phone's drawer draws the same tree at its 44 px rows.
+
+``SHOTS=<dir>`` saves the pictures: the column at 300, 276 and 232 px in dark Russian, 300 px in
+light, English, a hovered and a selected row, the long project scrolled, and the phone's drawer at 390 px.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
+from PIL import Image
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import screenshots  # noqa: E402
 from api_stub import DEFAULT_APP, expect_app, folders, open_drawer  # noqa: E402
 from screenshots import LOOP, UNHANDLED, ago, stub  # noqa: E402
 
@@ -128,6 +147,12 @@ def route(r) -> None:  # type: ignore[no-untyped-def]
     path = r.request.url.split("?", 1)[0]
     if r.request.method == "GET" and path.endswith("/api/sessions"):
         return r.fulfill(status=200, content_type="application/json", body=json.dumps(listing()))
+    # A fixture chat opened, for its row drawn as the selected one: the shared stub's detail of one of
+    # its own chats, under this chat's name.
+    opened = next((s for s in SESSIONS if path.endswith(f"/api/sessions/{s['id']}")), None)
+    if r.request.method == "GET" and opened:
+        body = {**screenshots.detail(screenshots.S2), "id": opened["id"], "title": opened["title"], "project_id": opened["project_id"]}
+        return r.fulfill(status=200, content_type="application/json", body=json.dumps(body))
     return stub(r)
 
 
@@ -176,6 +201,7 @@ MEASURE = """() => {
     const dot = row.querySelector('.unread-dot');
     return {
       id: row.dataset.session || row.dataset.subagent, sub: !!row.dataset.subagent, nested: !!row.closest('.sb-kids'),
+      depth: (row.closest('.sb-kids') ? 1 : 0) + (row.dataset.subagent ? 1 : 0),
       text: title.textContent, titleLeft: Math.round(tb.left), titleWidth: Math.round(tb.width), titleCut: title.scrollWidth > title.clientWidth,
       height: Math.round(rb.height), top: rb.top, trailing, inked,
       gutter: gb ? { left: Math.round(gb.left), width: Math.round(gb.width) } : null,
@@ -185,6 +211,93 @@ MEASURE = """() => {
     };
   });
 }"""
+
+# Every row on a guide line, group by group in the order drawn: its line box (the ::before), whether it
+# ends the line, and where the line it hangs from stands. A group is a project's fold, or a leader's
+# subagents outside any project.
+GUIDES = """() => {
+  const list = document.querySelector('.sidebar-body');
+  const view = list.getBoundingClientRect();
+  const box = (row) => {
+    const r = row.getBoundingClientRect(); const cs = getComputedStyle(row, '::before');
+    return { top: r.top + parseFloat(cs.top), bottom: r.bottom - parseFloat(cs.bottom), left: r.left, rowTop: r.top, rowBottom: r.bottom,
+             drawn: cs.content !== 'none' && cs.backgroundImage.includes('gradient'), image: cs.backgroundImage };
+  };
+  const groups = [];
+  for (const section of document.querySelectorAll('.sidebar .sb-project.kids')) {
+    const tile = section.querySelector(':scope > .sb-prow > .sb-tile').getBoundingClientRect();
+    const rows = [...section.querySelectorAll(':scope > .sb-kids > .sb-row, :scope > .sb-kids > .sb-more, :scope > .sb-kids > .win-pad')];
+    groups.push({ key: section.dataset.project, x: tile.left + tile.width / 2, start: tile.bottom, view: [view.top, view.bottom],
+      rows: rows.map((row) => ({ name: row.querySelector('.sb-t')?.textContent || row.textContent.trim() || row.className, cls: row.className,
+                               tail: row.classList.contains('tail') || row.classList.contains('sb-more'), pad: row.classList.contains('win-pad'), ...box(row) })) });
+  }
+  for (const fold of document.querySelectorAll('.sidebar .sb-fold[aria-expanded="true"]')) {
+    const leader = fold.closest('.sb-row'); const slot = fold.getBoundingClientRect();
+    const subs = []; for (let n = leader.nextElementSibling; n && n.classList.contains('sb-sub'); n = n.nextElementSibling) subs.push(n);
+    groups.push({ key: 'subs of ' + leader.dataset.session, x: slot.left + slot.width / 2, start: slot.bottom, view: [view.top, view.bottom],
+      rows: subs.map((row) => ({ name: row.querySelector('.sb-t').textContent, cls: row.className, tail: row.classList.contains('tail'), pad: false, ...box(row) })) });
+  }
+  return { groups, side: document.querySelector('.sidebar').getBoundingClientRect().toJSON(),
+           folders: [...document.querySelectorAll('.sidebar .sb-prow > .sb-t')].map((t) => Math.round(t.getBoundingClientRect().left)) };
+}"""
+
+
+def guides(page, where: str, problems: list[str]) -> int:  # type: ignore[no-untyped-def]
+    """The guide lines: drawn on every row of a fold, their boxes touching, and on screen unbroken.
+
+    The pixels are read from a picture of the column: one column of them under each line, from just
+    under the folder (or the leader's slot) to the middle of the row that ends it, each against the
+    pixel three to its left, which is the row's own ground. Returns how many lines were followed."""
+    facts = page.evaluate(GUIDES)
+    shot_png = page.screenshot(clip={"x": facts["side"]["x"], "y": facts["side"]["y"], "width": facts["side"]["width"], "height": facts["side"]["height"]})
+    picture = Image.open(io.BytesIO(shot_png)).convert("RGB")
+    followed = 0
+    for group in facts["groups"]:
+        rows = group["rows"]
+        name = f"{where} {group['key']}"
+        if not rows:
+            continue
+        for row in rows:
+            if not row["pad"] and not row["drawn"]:
+                problems.append(f"{name}: the row {row['name'][:24]!r} draws no guide line")
+            if any(hue in row["image"] for hue in ("oklch", "hsl")) or ("rgb" in row["image"] and not grey(row["image"])):
+                problems.append(f"{name}: the guide of {row['name'][:24]!r} is drawn in a colour: {row['image'][:80]}")
+        drawn = [r for r in rows if not r["pad"]]
+        for a, b in zip(rows, rows[1:], strict=False):
+            if b["top"] > a["bottom"] + 0.5:
+                problems.append(f"{name}: the line breaks between {a['name'][:20]!r} and {b['name'][:20]!r} ({a['bottom']:.1f} → {b['top']:.1f})")
+        # A project's own line ends at its last chat or its "show more"; a subagent's tail ends its
+        # leader's line, not the project's.
+        ends = [r for r in drawn if r["tail"] and "sb-sub" not in r["cls"].split()]
+        own = [r for r in drawn if "sb-sub" not in r["cls"].split()]
+        if group["key"].startswith("subs of "):
+            last = drawn[-1]
+            if not last["tail"]:
+                problems.append(f"{name}: the last subagent does not end its line")
+        elif len(ends) != 1 or ends[0] is not own[-1]:
+            problems.append(f"{name}: the line should end at the last row only, ends at {[r['name'][:20] for r in ends]}")
+        last = drawn[-1]
+        x = int(group["x"] - facts["side"]["x"])
+        top = max(group["start"] + 3, group["view"][0]) - facts["side"]["y"]
+        bottom = min((last["rowTop"] + last["rowBottom"]) / 2 - 1, group["view"][1]) - facts["side"]["y"]
+        missing = []
+        for y in range(int(top), int(bottom)):
+            line, ground = picture.getpixel((x, y)), picture.getpixel((x - 3, y))
+            if sum(abs(p - q) for p, q in zip(line, ground, strict=True)) < 18:
+                missing.append(y)
+        if missing:
+            problems.append(f"{name}: no line under x {x} at {len(missing)} of {int(bottom - top)} px (first at y {missing[0]})")
+        followed += 1
+    return followed
+
+
+def grey(image: str) -> bool:
+    """Whether every rgb() in a computed background is a grey: the neutral line colour, not a hue."""
+    for r, g, b in re.findall(r"rgba?\((\d+), (\d+), (\d+)", image):
+        if max(int(r), int(g), int(b)) - min(int(r), int(g), int(b)) > 6:
+            return False
+    return True
+
 
 # What each fixture chat is, in the words its tooltip and its accessible name must carry (Russian).
 PROPERTIES: dict[str, list[str]] = {}
@@ -223,9 +336,9 @@ for s in SESSIONS:
         PROPERTIES[s["id"]] = words
 
 
-def judge(rows: list[dict], width: int, problems: list[str]) -> None:
+def judge(rows: list[dict], width: int, problems: list[str], folders: list[int]) -> None:
     where = f"{width}px"
-    least = 170 if width >= 300 else 120
+    least = 160 if width >= 300 else 110
     if len(rows) < 24:
         problems.append(f"{where}: only {len(rows)} chat rows are drawn")
     for row in rows:
@@ -247,12 +360,25 @@ def judge(rows: list[dict], width: int, problems: list[str]) -> None:
                 problems.append(f"{name}: its tooltip does not say {word!r}: {row['tip']!r}")
         if row["titleCut"] and row["text"] not in row["tip"]:
             problems.append(f"{name}: a cut title is not whole in the tooltip")
-    gutters = {(r["gutter"]["left"], r["gutter"]["width"]) for r in rows if r["gutter"]}
-    if len(gutters) > 1:
-        problems.append(f"{where}: the slot differs between rows: {sorted(gutters)}")
-    lefts = {r["titleLeft"] for r in rows}
-    if max(lefts) - min(lefts) > 1:
-        problems.append(f"{where}: titles start at different x: {sorted(lefts)}")
+    widths = {r["gutter"]["width"] for r in rows if r["gutter"]}
+    if len(widths) > 1:
+        problems.append(f"{where}: the slot's width differs between rows: {sorted(widths)}")
+    # One x per kind of row: outside the projects, inside one, a subagent of each, one 16 px step apart.
+    loose = {(r["gutter"]["left"], r["titleLeft"]) for r in rows if r["gutter"] and r["depth"] == 0}
+    if len(loose) != 1:
+        problems.append(f"{where}: the chats outside the projects do not share one x: {sorted(loose)}")
+        return
+    slot, title = loose.pop()
+    for depth, kind in ((1, "chat"), (1, "sub"), (2, "sub")):
+        group = [r for r in rows if r["depth"] == depth and (r["sub"] == (kind == "sub")) and r["gutter"]]
+        if depth == 1 and kind == "sub":
+            group = [r for r in group if not r["nested"]]
+        found = {(r["gutter"]["left"] - slot, r["titleLeft"] - title) for r in group}
+        if found and found != {(16 * depth, 16 * depth)}:
+            problems.append(f"{where}: {kind} rows at depth {depth} stand {sorted(found)} right of a loose chat, not {16 * depth}")
+    nested = [r["titleLeft"] for r in rows if r["nested"] and not r["sub"]]
+    if folders and nested and min(nested) <= max(folders):
+        problems.append(f"{where}: a nested chat's title starts at {min(nested)}, not right of its folder's at {max(folders)}")
     by_id = {r["id"]: r for r in rows}
     if not by_id.get(UNREAD, {}).get("unreadShown"):
         problems.append(f"{where}: the unread chat shows no dot")
@@ -270,8 +396,10 @@ def judge(rows: list[dict], width: int, problems: list[str]) -> None:
 def report(rows: list[dict], width: int) -> None:
     nested = [r["titleWidth"] for r in rows if r["nested"] and not r["sub"]]
     loose = [r["titleWidth"] for r in rows if not r["nested"] and not r["sub"]]
+    deeper = [r["titleWidth"] for r in rows if r["sub"] and r["nested"]]
     print(f"{width}px: nested title width min {min(nested, default=0)} median {sorted(nested)[len(nested) // 2] if nested else 0} max {max(nested, default=0)}; "
-          f"top-level min {min(loose, default=0)} max {max(loose, default=0)}; most trailing items {max((len(r['trailing']) for r in rows), default=0)}")
+          f"top-level min {min(loose, default=0)} max {max(loose, default=0)}; subagent in a project min {min(deeper, default=0)} max {max(deeper, default=0)}; "
+          f"most trailing items {max((len(r['trailing']) for r in rows), default=0)}")
 
 
 def shot(page, name: str) -> None:  # type: ignore[no-untyped-def]
@@ -281,15 +409,62 @@ def shot(page, name: str) -> None:  # type: ignore[no-untyped-def]
     page.screenshot(path=f"{SHOTS}/{name}.png")
 
 
-def column(browser, width: int, *, scheme: str = "dark", lang: str = "ru", viewport: tuple[int, int] = (1920, 1080)):  # type: ignore[no-untyped-def]
+def column(browser, width: int, *, scheme: str = "dark", lang: str = "ru", viewport: tuple[int, int] = (1920, 1080), at: str = "", handler=None):  # type: ignore[no-untyped-def]
     context = browser.new_context(viewport={"width": viewport[0], "height": viewport[1]})
     context.add_init_script(seed(width))
     page = context.new_page()
-    page.route("**/api/**", route)
-    page.goto(f"{BASE}/agents?token=t&lang={lang}&scheme={scheme}", wait_until="networkidle")
-    page.wait_for_selector(f".sidebar [data-session='{LEADER}']", timeout=20000)
+    page.route("**/api/**", handler or route)
+    page.goto(f"{BASE}/agents{f'/{at}' if at else ''}?token=t&lang={lang}&scheme={scheme}", wait_until="networkidle")
+    page.wait_for_selector(".sidebar .sb-kids .sb-row", timeout=20000)
     page.wait_for_timeout(400)
     return context, page
+
+
+# A project as long as the operator's longest, to scroll through the windowed rows.
+LONG = "ab00000000ff"
+
+
+def long_listing() -> dict:
+    rows = [chat(f"ff{n:010d}", f"Длинный проект, чат номер {n}: разбор и проверка", LONG, minutes=10 + n * 30) for n in range(60)]
+    for row in rows:
+        row["project"] = "Длинный проект"
+    project = {"id": LONG, "name": "Длинный проект", "folders": [dict(f, env="host") for f in folders("/home/you/work/long")], "created_at": ago(days=20),
+               "settings": {"snapshots": True}, "total": len(rows), "active": 0, "loops": 0, "last_message_at": rows[0]["last_message_at"], "pinned_at": ""}
+    loose = chat("ee0000000001", "Почему контейнер теряет сеть после перезапуска хоста", "", minutes=15)
+    own = {"id": loose["project_id"], "name": loose["title"], "folders": [dict(f, env="host") for f in folders("/home/you/chats/x")], "created_at": ago(days=6),
+           "settings": {"snapshots": False, "ephemeral": True}, "total": 1, "active": 0, "loops": 0, "last_message_at": loose["last_message_at"], "pinned_at": ""}
+    return {"sessions": [*rows, loose], "projects": [project, own]}
+
+
+def long_route(r) -> None:  # type: ignore[no-untyped-def]
+    path = r.request.url.split("?", 1)[0]
+    if r.request.method == "GET" and path.endswith("/api/sessions"):
+        return r.fulfill(status=200, content_type="application/json", body=json.dumps(long_listing()))
+    return stub(r)
+
+
+def long_project(browser, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """Sixty chats opened in full and scrolled to the middle: the rows are windowed there, and the line
+    must run whole through whichever of them are mounted."""
+    context = browser.new_context(viewport={"width": 1920, "height": 1080})
+    context.add_init_script(f"try {{ localStorage.setItem('daedalus.folder.{LONG}', '1'); localStorage.setItem('daedalus.width.sidebar', '300'); }} catch (e) {{}}")
+    page = context.new_page()
+    page.route("**/api/**", long_route)
+    page.goto(f"{BASE}/agents?token=t&lang=ru&scheme=dark", wait_until="networkidle")
+    page.wait_for_selector(".sidebar .sb-more", timeout=20000)
+    page.locator(".sidebar .sb-more").click()
+    page.wait_for_timeout(300)
+    body = page.locator(".sidebar-body")
+    body.evaluate("el => el.scrollTo(0, (el.scrollHeight - el.clientHeight) / 2)")
+    page.wait_for_timeout(400)
+    mounted = page.evaluate("() => document.querySelectorAll('.sidebar .sb-kids > .sb-row').length")
+    spacers = page.evaluate("() => document.querySelectorAll('.sidebar .sb-kids > .win-pad').length")
+    print(f"long project: {mounted} of 60 rows mounted, {spacers} spacers")
+    if mounted >= 60 or spacers == 0:
+        problems.append(f"the long project is not windowed ({mounted} rows, {spacers} spacers): the check proves nothing there")
+    guides(page, "long project, middle", problems)
+    shot(page, "sidebar-rows-long-middle-dark-ru")
+    context.close()
 
 
 def run() -> int:
@@ -303,8 +478,12 @@ def run() -> int:
                 problems.append(f"the column was asked for {width} px and drew {drawn:.0f}")
             rows = page.evaluate(MEASURE)
             report(rows, width)
+            folders_x = page.evaluate("() => [...document.querySelectorAll('.sidebar .sb-prow > .sb-t')].map((t) => Math.round(t.getBoundingClientRect().left))")
             if width != 276:
-                judge(rows, width, problems)
+                judge(rows, width, problems, folders_x)
+            followed = guides(page, f"{width}px", problems)
+            if followed < 3:
+                problems.append(f"{width}px: only {followed} guide lines were in view to follow")
             shot(page, f"sidebar-rows-{width}-dark-ru")
             if width == 300:
                 # The scroll keeps the Chats section and the folder with the subagents in one picture.
@@ -316,18 +495,30 @@ def run() -> int:
                     problems.append(f"a hovered row keeps {row['trailing']} beside its actions")
                 if not page.locator(f".sidebar [data-session='{UNREAD}'] .sb-acts").is_visible():
                     problems.append("a hovered row shows no actions")
+                guides(page, "300px hovered", problems)
                 shot(page, "sidebar-rows-300-hover-dark-ru")
                 page.locator(".sidebar-body").evaluate("el => el.scrollTo(0, el.scrollHeight)")
                 page.mouse.move(1200, 500)
                 page.wait_for_timeout(300)
+                guides(page, "300px end", problems)
                 shot(page, "sidebar-rows-300-dark-ru-end")
             context.close()
+        # A selected chat inside a project, and a selected subagent under a leader inside one: the
+        # fill spans the row and the line is drawn over it.
+        context, page = column(browser, 300, at="aa0000000006")
+        guides(page, "300px selected", problems)
+        if not page.locator(".sidebar [data-session='aa0000000006'].current").count():
+            problems.append("the open chat's row is not drawn as selected")
+        shot(page, "sidebar-rows-300-selected-dark-ru")
+        context.close()
         context, page = column(browser, 300, scheme="light")
+        guides(page, "300px light", problems)
         shot(page, "sidebar-rows-300-light-ru")
         context.close()
         context, page = column(browser, 300, lang="en")
         shot(page, "sidebar-rows-300-dark-en")
         context.close()
+        long_project(browser, problems)
         phone = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         phone.add_init_script(seed(300))
         page = phone.new_page()
@@ -336,15 +527,17 @@ def run() -> int:
         open_drawer(page)
         drawer = page.evaluate("""() => [...document.querySelectorAll('.ph-drawer-root.open [data-session]')].slice(0, 12).map((row) => {
           const t = row.querySelector('.sb-t').getBoundingClientRect(); const g = row.querySelector('.sb-gut');
-          return { w: Math.round(t.width), left: Math.round(t.left), h: Math.round(row.getBoundingClientRect().height), gut: g ? Math.round(g.getBoundingClientRect().width) : 0 };
+          return { w: Math.round(t.width), left: Math.round(t.left), h: Math.round(row.getBoundingClientRect().height), gut: g ? Math.round(g.getBoundingClientRect().width) : 0,
+                   nested: !!row.closest('.sb-kids'), sub: !!row.dataset.subagent };
         })""")
         print("drawer 390:", drawer)
         if any(r["h"] < 44 for r in drawer):
             problems.append(f"the drawer's rows are under a finger's 44 px: {drawer}")
-        if len({r["left"] for r in drawer}) > 1:
-            problems.append(f"the drawer's titles start at different x: {drawer}")
+        if len({r["left"] for r in drawer if r["nested"] and not r["sub"]}) > 1:
+            problems.append(f"the drawer's chats inside a project start at different x: {drawer}")
         if page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth"):
             problems.append("the phone scrolls sideways with the drawer open")
+        guides(page, "drawer 390", problems)
         shot(page, "sidebar-rows-drawer-390-dark-ru")
         phone.close()
         browser.close()
