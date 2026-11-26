@@ -243,7 +243,8 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: default; }
   .list-row-wrap { position: relative; overflow: hidden; }
   .list-row { position: relative; display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--list-row-h); padding: 6px var(--gutter); background: var(--bg); color: var(--fg); text-align: left; cursor: pointer; touch-action: pan-y; transition: transform var(--t-base) var(--ease-out), background var(--t-fast); -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .list-row.one { min-height: var(--list-row-h-1); }
-  .list-row:has(> .list-row-more) { padding-right: 4px; }
+  /* The ⋮'s glyph ends on the 16 px line: its button is 32 px with 8 px either side of the glyph. */
+  .list-row:has(> .list-row-more) { padding-right: calc(var(--gutter) - 8px); }
   .list-row:active, .list-row.pressed { background: var(--surface-2); }
   .list-row.current { background: var(--surface-3); }
   .list-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }

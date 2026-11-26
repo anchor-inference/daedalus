@@ -13,6 +13,10 @@ body.resizing iframe { pointer-events: none; }
 .chat.pane-right { border-left: 1px solid var(--line); }
 .chat.pane .chat-head { padding: 0 12px; }
 .chat.pane .chat-scroll, .chat.pane .composer { padding-left: 16px; padding-right: 16px; }
+/* A phone's composer card stands on the page's 16 px line, as the conversation above it and every
+   page's cards do; at 12 it was the one block of the screen nearer the edge. Here rather than in the
+   composer's own sheet, which this one follows, so the card keeps its own rules in one place. */
+@media (max-width: 1023px) { .composer[data-shape] { padding-inline: var(--gutter); } }
 @media (min-width: 1024px) {
   .app > .dual { grid-area: 1 / 1 / -1 / -1; }
 }

@@ -111,7 +111,9 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 /* ── the stack (a phone) ─────────────────────────────────────────────────────────────────── */
 @media (max-width: 1023px) {
   .settings-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; outline: none; }
-  .settings-phone-back { display: inline-flex; align-items: center; gap: 2px; min-height: var(--row-h-touch); margin-left: -6px; padding: 0 8px 0 2px; border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-16); cursor: pointer; }
+  /* The chevron stands on the page's 16 px line, as the drawer's button does in the other pages'
+     bars and as the section's title and cards under it do; it stood at the screen's edge. */
+  .settings-phone-back { display: inline-flex; align-items: center; gap: 2px; min-height: var(--row-h-touch); margin-left: 0; padding: 0 8px 0 calc(var(--gutter) - var(--space-1)); border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-16); cursor: pointer; }
   .settings-phone h1.settings-title { margin-top: 4px; font-size: var(--fs-22); }
   .settings-phone .settings-about { margin-bottom: var(--space-2); }
   .settings-phone .settings-search-box { margin: 4px 0 var(--space-2); }

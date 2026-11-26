@@ -85,12 +85,13 @@ button.explorer-where:hover { background: var(--hover); }
 }
 
 @media (max-width: 1023px) {
-  .explorer-head { padding:6px var(--gutter) 6px 12px; }
+  .explorer-head { padding:6px var(--gutter); }
   .explorer-filter { height:var(--ctl-h); margin:0 var(--gutter) 8px; }
   .explorer-filter input { font-size:var(--fs-16); }
   .explorer-mode button { height:28px; min-height:28px; padding:0 10px; font-size:var(--fs-13); }
   .explorer-note { margin:0 var(--gutter) 6px; }
-  .explorer-tree { padding:2px 8px 12px; }
+  /* A row's chevron or icon on the page's 16 px line: the row's own border and 4 px of padding are the rest. */
+  .explorer-tree { padding:2px 11px 12px; }
   .files.explorer .tree-row { height:var(--row-h-touch); min-height:var(--row-h-touch); font-size:var(--fs-15); }
   .files.explorer .tree-row.grep-row { min-height:var(--ctl-h); font-size:var(--fs-13); }
   /* The phone sheet's older rule gives every file title of a sheet a 44 px box of its own; inside a row
