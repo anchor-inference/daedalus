@@ -15,5 +15,33 @@
 .ov-usage-open:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ov-usage-note { margin: 0 0 4px; color: var(--fg-2); font-size: var(--fs-13); }
 .ov-usage .qrows { padding-left: 24px; }
-/* On a phone the blocks keep the rows' narrower gutter, as the tasks block does. */
-.panel-sheet .ov-usage { margin: 12px 8px 0; }
+/* What sets the chat apart (overviewfacts.ts): a label line, then 32 px rows of the panel's menu rows'
+   height, the name in a column of its own so the values start on one line, the value cut with its
+   whole text in the tooltip. A row that opens a page of Details ends in a chevron; a fact with no page
+   (a private chat) is the same row without one. */
+.ov-diff { display: flex; flex-direction: column; margin: 12px 12px 0; }
+/* Written against the phone sheet's own heading rule (.sheet h3, 17/600), which would otherwise make a
+   label of this block a sheet's title. */
+.ov-diff .ov-diff-title { display: flex; align-items: flex-end; min-height: 36px; margin: 0; padding: 0 12px 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; letter-spacing: normal; }
+.ov-diff-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.ov-diff-row { display: flex; align-items: center; gap: 12px; width: 100%; height: var(--row-h); padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; }
+button.ov-diff-row { cursor: pointer; }
+button.ov-diff-row:hover { background: var(--hover); }
+button.ov-diff-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ov-diff-row > .ic:first-child { flex: none; color: var(--fg-2); }
+.ov-diff-row > .ic:last-child { flex: none; color: var(--fg-3); }
+.ov-diff-name { flex: none; width: clamp(112px, 30%, 152px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-diff-value { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-diff-value.live { color: var(--live); }
+.ov-diff-value.attn { color: var(--attention); }
+.ov-diff-value.bad { color: var(--bad); }
+.ov-diff-row.more .ov-diff-name { flex: 1; width: auto; padding-left: 28px; color: var(--fg-3); font-size: var(--fs-13); }
+
+/* On a phone the blocks keep the rows' narrower gutter, as the tasks block does, and a row is a touch
+   target's height. */
+@media (max-width: 1023px) {
+  .panel-sheet .ov-usage { margin: 12px 8px 0; }
+  .panel-sheet .ov-diff { margin: 12px 8px 0; }
+  .panel-sheet .ov-diff-row { height: var(--row-h-touch); }
+  .panel-sheet .ov-diff-name { width: 124px; }
+}

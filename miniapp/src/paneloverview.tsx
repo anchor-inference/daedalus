@@ -5,7 +5,7 @@
 // summary and the way in.
 
 import type { ReactNode } from "react";
-import type { TaskView } from "./api";
+import type { SessionToolGroup, SubagentModelsView, TaskView } from "./api";
 import type { PanelTab } from "./panel";
 import { TAB_ICON } from "./panelhost";
 import { Icon } from "./icons";
@@ -13,6 +13,8 @@ import { t } from "./i18n";
 import { Elapsed } from "./details";
 import type { BoardTask } from "./board/tasks";
 import { useQuery } from "./store";
+import { useEvent } from "./events";
+import { SHOWN_DIFFERENCES, differences, type Difference, type DifferenceInput, type DifferenceTarget, type McpView } from "./overviewfacts";
 import { taskSub } from "./jobs";
 import { commandPreview } from "./format";
 import { quotaTone } from "./detailsmodel";
@@ -50,7 +52,7 @@ function UsageBlock({ usage, onOpen }: { usage: OverviewUsage; onOpen: () => voi
 
 export type OverviewStatus = { tone: "live" | "attn" | "bad" | "idle"; word: string; since?: string | null };
 
-export function Overview({ sessionId, board, status, title, meta, rows, usage, jobs, onOpen, onBoard, onDetails }: {
+export function Overview({ sessionId, board, status, title, meta, rows, usage, facts, jobs, onOpen, onBoard, onDetails, onDifference }: {
   sessionId: string;
   /** The chat's tasks (what it and its helpers made), or undefined until they are read. */
   board: BoardTask[] | undefined;
@@ -60,6 +62,9 @@ export function Overview({ sessionId, board, status, title, meta, rows, usage, j
   rows: OverviewRow[];
   /** The subscription the chat's model runs on, drawn under the rows; a metered model is a row instead. */
   usage?: OverviewUsage | null;
+  /** What the chat is and holds, for the block of what sets it apart; the Overview reads the rest
+   *  (its MCP servers, standing grants, helper models and tool groups) itself. Left out, no block. */
+  facts?: Omit<DifferenceInput, "mcp" | "standing" | "helpers" | "toolGroups">;
   /** Whether the Jobs row is drawn: the session runs jobs (an orchestrator runs none). */
   jobs?: boolean;
   onOpen: (tab: PanelTab) => void;
@@ -67,7 +72,11 @@ export function Overview({ sessionId, board, status, title, meta, rows, usage, j
   onBoard?: () => void;
   /** Details, for a reader who closed its tab beside the Overview; left out while the tab is there. */
   onDetails?: () => void;
+  /** Where a row of the block leads: a page of Details, or the approval or the queue in the composer. */
+  onDifference?: (target: DifferenceTarget) => void;
 }) {
+  const extras = useSettingsRead(facts ? sessionId : null);
+  const different = facts ? differences({ ...facts, ...extras }) : [];
   const tasks = useQuery<{ tasks: TaskView[] }>(jobs ? `/api/sessions/${encodeURIComponent(sessionId)}/tasks` : null, { staleMs: 5000 }).data?.tasks;
   const job = jobRow(tasks);
   // The Jobs row stands with the rest of the chat's work: after the changes and the helpers.
@@ -98,8 +107,66 @@ export function Overview({ sessionId, board, status, title, meta, rows, usage, j
         ))}
       </div>
       {usage && <UsageBlock usage={usage} onOpen={() => onOpen("usage")} />}
+      {different.length > 0 && <DifferenceBlock rows={different} onOpen={(target) => onDifference?.(target)} />}
       {board && board.length > 0 && <BoardBlock tasks={board} onOpen={onBoard} />}
     </div>
+  );
+}
+
+/** The lines of Details that are read from routes of their own, read again each time the Overview is
+ *  shown (it is, after a change made in Details) and, for the standing grants, when an approval is
+ *  answered anywhere. A route that fails or answers something else counts as the default. */
+function useSettingsRead(sessionId: string | null): Pick<DifferenceInput, "mcp" | "standing" | "helpers" | "toolGroups"> {
+  const base = sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : null;
+  const mcp = useQuery<McpView>(base && `${base}/mcp`, { staleMs: 2000 }).data;
+  const standing = useQuery<{ standing?: unknown[] }>(base && `${base}/policy/standing`, { staleMs: 2000 });
+  const helpers = useQuery<SubagentModelsView>(base && `${base}/subagent-models`, { staleMs: 2000 }).data;
+  const groups = useQuery<{ groups?: SessionToolGroup[] }>(base && `${base}/tool-groups`, { staleMs: 2000 }).data;
+  const refreshStanding = standing.refresh;
+  useEvent(["permission.resolved"], (event) => { if (sessionId && event.session_id === sessionId) void refreshStanding(); }, [sessionId, refreshStanding]);
+  return {
+    mcp: mcp && Array.isArray(mcp.enabled) && Array.isArray(mcp.servers) ? mcp : null,
+    standing: Array.isArray(standing.data?.standing) ? standing.data!.standing : null,
+    helpers: helpers && Array.isArray(helpers.allowed) && Array.isArray(helpers.options) ? helpers : null,
+    toolGroups: Array.isArray(groups?.groups) ? groups!.groups : null,
+  };
+}
+
+/** What sets this chat apart, one 32 px row each: its name, its value in words and the way to the
+ *  place it is changed. Absent when nothing does; past eight rows the rest are counted and left to
+ *  Details, so the Overview stays something read at a glance. */
+function DifferenceBlock({ rows, onOpen }: { rows: Difference[]; onOpen: (target: DifferenceTarget) => void }) {
+  const shown = rows.slice(0, SHOWN_DIFFERENCES);
+  const more = rows.length - shown.length;
+  return (
+    <section className="ov-diff" data-diff aria-label={t("panel.ov.diff")}>
+      <h3 className="ov-diff-title">{t("panel.ov.diff")}</h3>
+      <ul className="ov-diff-rows">
+        {shown.map((row) => {
+          const body = <>
+            <Icon name={row.icon} size={16} />
+            <span className="ov-diff-name">{row.name}</span>
+            <span className={`ov-diff-value ${row.tone ?? ""}`}>{row.value}</span>
+            {row.target && <Icon name="forward" size={14} />}
+          </>;
+          return (
+            <li key={row.id}>
+              {row.target
+                ? <button type="button" className="ov-diff-row" data-diff-row={row.id} data-tone={row.tone} data-rank={row.rank} title={`${row.name}: ${row.value}`} onClick={() => onOpen(row.target)}>{body}</button>
+                : <div className="ov-diff-row" data-diff-row={row.id} data-tone={row.tone} data-rank={row.rank} title={`${row.name}: ${row.value}`}>{body}</div>}
+            </li>
+          );
+        })}
+        {more > 0 && (
+          <li>
+            <button type="button" className="ov-diff-row more" data-diff-more onClick={() => onOpen({ details: "session" })}>
+              <span className="ov-diff-name">{t("panel.ov.diff.more", { n: more })}</span>
+              <Icon name="forward" size={14} />
+            </button>
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }
 

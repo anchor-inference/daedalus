@@ -114,6 +114,7 @@ import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
 import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
 import { Overview, type OverviewRow, type OverviewStatus, type OverviewUsage } from "../paneloverview";
+import type { DifferenceTarget } from "../overviewfacts";
 import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
@@ -1921,6 +1922,18 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const usageRow: OverviewRow | null = !detail || overviewUsage || (!usageKnown && !((detail.usage.usd ?? 0) > 0)) ? null
     : subscription && !((detail.usage.usd ?? 0) > 0) ? null
     : { tab: "usage", kind: "spend", name: t("panel.tab.usage"), text: detail.usage.usd_today != null && detail.usage.usd_today > 0 ? `${fmtUsd(detail.usage.usd)} ${today!.short}` : fmtUsd(detail.usage.usd) };
+  // What the Overview's block of differences is built from: what Details shows, plus what waits in the
+  // composer. Its rows open the place their Details line opens.
+  const overviewFacts = detail ? { detail, conductor: orchestrating || main, schedules, approvals: detail.open_approvals?.length ?? 0, queued: queuedInput.length, moving: !!folderMove } : undefined;
+  const openDifference = (target: DifferenceTarget) => {
+    if (!target) return;
+    if ("details" in target) {
+      setDetailsFocus(target.details);
+      panel.open("details");
+      return;
+    }
+    document.querySelector<HTMLElement>(target.composer === "approval" ? ".composer .approval-card button" : ".composer .steer button")?.focus();
+  };
   const overviewRows: OverviewRow[] = !detail ? [] : [
     ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
     ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
@@ -2284,7 +2297,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           context={panelContext}
           figures={panelFigures}
           pages={{
-            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} usage={panelTabs.includes("usage") ? overviewUsage : null} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
+            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} usage={panelTabs.includes("usage") ? overviewUsage : null} facts={panelTabs.includes("details") ? overviewFacts : undefined} onDifference={openDifference} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
               onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))}
               onDetails={panelTabs.includes("details") && !panel.state.open.includes("details") ? () => panel.open("details") : undefined} />,
             ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),

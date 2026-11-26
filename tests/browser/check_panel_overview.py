@@ -11,6 +11,13 @@ subscription, then a row of chips that a provider with three long window names c
 - a metered model keeps its spend as a row, without the "today unmetered" words;
 - a subscription the host has no windows for draws nothing rather than zeros.
 
+Under them, a block says what sets this chat apart, built from what Details shows: a row only for a line
+away from its default (a service running with its address, a loop with its pace, MCP servers switched on,
+a spend cap with its share used, a vision model of its own, a brief), what needs the operator first, at
+most eight rows and "N more" opening Details. Each row opens the page of Details its line opens. A chat
+with everything at its default has no block and no empty heading, and a service that starts or stops
+appears and leaves without a reload.
+
 Details was reached only through "+". It is now the panel's second tab in every ordinary chat, until the
 reader closes it: the closing is remembered across chats and reloads, and the Overview's head then offers
 a quiet "Details" link that brings the tab back in its place. The strip still fits at 1366.
@@ -161,6 +168,143 @@ def usage_block(page, where: str, words: dict, provider: str, windows: list, pla
     return problems
 
 
+# The servers a chat can switch on: one is on, two are off (the host starts every chat with none on).
+MCP_ONE_ON = {"enabled": ["github"], "servers": [
+    {"name": name, "description": "", "connected": name == "github", "error": None, "tools": [], "state": "ready" if name == "github" else "disabled", "catalog_revision": 0, "last_error_code": None, "in_flight": 0}
+    for name in ("github", "sentry", "linear")]}
+MCP_NONE_ON = {**MCP_ONE_ON, "enabled": []}
+# A chat busy in every way the Overview should mention, and one with everything at its default.
+BUSY = {"loop": shots.LOOP, "usd_cap": 4.0, "usage": {"c": 38, "i": 612000, "o": 24100, "ch": 540000, "usd": 2.0}, "bypass": True,
+        "vision_preset": "gpt-5.6-luna", "vision_label": "GPT-5.6 Luna", "services": shots.SERVICES_S1}
+PLAIN = {"loop": None, "usd_cap": None, "brief": "", "services": [], "tools_off": [], "vision_preset": "", "vision_label": "", "bypass": False}
+CROWDED = {**BUSY, "tools_off": ["WebFetch"], "private": True, "yagni": True, "autopilot": {"on": True, "enabled": True, "eligible": True, "used": 1, "allowed": 5}}
+# The page of Details each row must open: the row's id is the page's.
+PAGES = {"services", "loop", "cron", "mcp", "spend", "vision", "toolgroups", "brief"}
+
+
+def chat(browser, lang: str, fields: dict, *, mcp: dict, size=(1920, 1080), live=None, groups=True):  # type: ignore[no-untyped-def]
+    """A chat whose detail carries `fields`, whose MCP route answers `mcp`, with no schedules or grants
+    of its own unless the stub gives them; `live` (a dict) is read at every request, so a test can
+    change the chat under an open page. `groups=False` answers every tool group at its default."""
+    touch = size[0] < 600
+    context = browser.new_context(viewport={"width": size[0], "height": size[1]}, color_scheme="dark", is_mobile=touch, has_touch=touch)
+    page = context.new_page()
+
+    def route(r) -> None:  # type: ignore[no-untyped-def]
+        path = urlsplit(r.request.url).path
+        path = path[path.index("/api/"):]
+        if path == f"/api/sessions/{shots.S1}" and r.request.method == "GET":
+            return shots.respond(r, {**shots.detail(shots.S1), **fields, **(live or {})})
+        if path == f"/api/sessions/{shots.S1}/mcp" and r.request.method == "GET":
+            return shots.respond(r, mcp)
+        if path == f"/api/sessions/{shots.S1}/tool-groups" and not groups:
+            return shots.respond(r, {"groups": [{**g, "source": "default"} for g in shots.session_tool_groups()["groups"]]})
+        if path == "/api/schedules" and r.request.method == "GET" and not groups:
+            return shots.respond(r, [])
+        if path.startswith("/api/usage/provider/"):
+            return shots.respond(r, shots.PROVIDER_USAGE)
+        return shots.stub(r)
+
+    page.route("**/api/**", route)
+    page.goto(f"{BASE}/agents/{shots.S1}?token=t&scheme=dark&lang={lang}&panel=overview")
+    page.wait_for_selector(f"{P} [data-tool-page='overview'] .ov-row", timeout=15000)
+    page.wait_for_timeout(800)
+    return context, page
+
+
+def diff_rows(page) -> list[str]:  # type: ignore[no-untyped-def]
+    return page.locator(f"{P} .ov-diff [data-diff-row]").evaluate_all("els => els.map((e) => e.dataset.diffRow)")
+
+
+def differences(browser, lang: str) -> list[str]:  # type: ignore[no-untyped-def]
+    problems: list[str] = []
+    words = {"en": {"title": "Particular to this chat", "more": "more in Details", "half": "$2.00 of $4.00 · 50%", "one": "1 of 3 on"},
+             "ru": {"title": "Особое в этом чате", "more": "в деталях", "half": "$2.00 из $4.00 · 50%", "one": "1 из 3 вкл."}}[lang]
+    for size, name in (((1920, 1080), "busy"), ((1366, 768), "busy-1366"), ((390, 844), "busy-phone")):
+        where = f"{lang} {name}"
+        context, page = chat(browser, lang, BUSY, mcp=MCP_ONE_ON, size=size)
+        block = page.locator(f"{P} .ov-diff")
+        rows = diff_rows(page)
+        if block.count() != 1 or block.locator(".ov-diff-title").inner_text().strip() != words["title"]:
+            problems.append(f"{where}: no block headed {words['title']!r}")
+        elif block.locator(".ov-diff-title").evaluate("e => getComputedStyle(e).fontSize") != "12px":
+            problems.append(f"{where}: the block's label is {block.locator('.ov-diff-title').evaluate('e => getComputedStyle(e).fontSize')}, not a 12 px label")
+        for wanted in ("services", "loop", "mcp", "spend", "vision", "brief"):
+            if wanted not in rows:
+                problems.append(f"{where}: no {wanted!r} row among {rows}")
+        if {"services", "spend"} <= set(rows) and rows.index("services") > rows.index("spend"):
+            problems.append(f"{where}: a setting stands before what runs ({rows})")
+        texts = {key: page.locator(f"{P} [data-diff-row='{key}']").inner_text() for key in rows}
+        if "203.0.113.20:8100" not in texts.get("services", ""):
+            problems.append(f"{where}: the service's row does not say where it answers ({texts.get('services')!r})")
+        if words["half"] not in texts.get("spend", ""):
+            problems.append(f"{where}: the cap reads {texts.get('spend')!r}")
+        if words["one"] not in texts.get("mcp", ""):
+            problems.append(f"{where}: the servers read {texts.get('mcp')!r}")
+        if "GPT-5.6 Luna" not in texts.get("vision", ""):
+            problems.append(f"{where}: the vision model reads {texts.get('vision')!r}")
+        if len(rows) > 8:
+            problems.append(f"{where}: {len(rows)} rows, more than eight")
+        panel = page.locator(P).bounding_box()
+        for row in page.locator(f"{P} .ov-diff-row").all():
+            box = row.bounding_box()
+            if not box or box["x"] < panel["x"] or box["x"] + box["width"] > panel["x"] + panel["width"] + 0.5:
+                problems.append(f"{where}: a row stands outside the panel ({box})")
+            elif box["height"] not in ((44,) if size[0] < 600 else (32,)):
+                problems.append(f"{where}: a row is {box['height']} px high")
+        if SHOTS is not None:
+            page.locator(P).screenshot(path=str(SHOTS / f"diff-{name}-{lang}.png"))
+        if size[0] == 1920:
+            # Every row opens the page of Details its line opens, and the Overview is a tab away again.
+            for key in [r for r in rows if r in PAGES]:
+                page.locator(f"{P} [data-diff-row='{key}']").click()
+                try:
+                    page.wait_for_selector(f"{P} .dt-drill[data-page='{key}']", timeout=5000)
+                except Exception:  # noqa: BLE001 - reported below
+                    problems.append(f"{where}: the {key!r} row does not open its page of Details")
+                page.locator(f"{P} .panel-tab[data-tab='overview']").click()
+                page.wait_for_selector(f"{P} .ov-diff", timeout=5000)
+        context.close()
+
+    where = f"{lang} crowded"
+    context, page = chat(browser, lang, CROWDED, mcp=MCP_ONE_ON)
+    more = page.locator(f"{P} .ov-diff [data-diff-more]")
+    if len(diff_rows(page)) != 8 or more.count() != 1 or words["more"] not in more.inner_text():
+        problems.append(f"{where}: {len(diff_rows(page))} rows and {more.count()} 'more' rows, not eight and one")
+    else:
+        more.click()
+        try:
+            page.wait_for_selector(f"{P} .panel-tab.on[data-tab='details']", timeout=5000)
+            page.wait_for_selector(f"{P} .details [data-prop]", timeout=5000)
+        except Exception:  # noqa: BLE001 - reported here
+            problems.append(f"{where}: 'more' does not open Details' list")
+    if SHOTS is not None:
+        page.locator(P).screenshot(path=str(SHOTS / f"diff-crowded-{lang}.png"))
+    context.close()
+
+    # Everything at its default: no block, no heading; then a service starts and stops under the open page.
+    where = f"{lang} plain"
+    live: dict = {}
+    context, page = chat(browser, lang, PLAIN, mcp=MCP_NONE_ON, live=live, groups=False)
+    if page.locator(f"{P} .ov-diff").count() or words["title"] in page.locator(f"{P} [data-tool-page='overview']").inner_text():
+        problems.append(f"{where}: a chat with nothing particular draws {diff_rows(page)}")
+    if SHOTS is not None:
+        page.locator(P).screenshot(path=str(SHOTS / f"diff-plain-{lang}.png"))
+    if lang == "en":
+        live["services"] = shots.SERVICES_S1
+        try:
+            page.wait_for_selector(f"{P} [data-diff-row='services']", timeout=30000)
+        except Exception:  # noqa: BLE001 - reported here
+            problems.append(f"{where}: a service that started does not appear without a reload")
+        live["services"] = []
+        try:
+            page.wait_for_selector(f"{P} .ov-diff", state="detached", timeout=30000)
+        except Exception:  # noqa: BLE001 - reported here
+            problems.append(f"{where}: a service that stopped does not leave without a reload")
+    context.close()
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     subscription = copy.deepcopy(shots.PROVIDER_USAGE)
@@ -173,6 +317,7 @@ def run() -> int:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         for lang in ("en", "ru"):
             problems += details_tab(browser, lang)
+            problems += differences(browser, lang)
             words = WORDS[lang]
             where = f"{lang} subscription"
             context, page = overview(browser, lang, subscription, "subscription")
