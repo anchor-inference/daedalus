@@ -20,7 +20,7 @@ import { useMoreBelow } from "../edgefade";
 import { useEvent } from "../events";
 import { relTime, tokens, usd } from "../format";
 import { plural, t } from "../i18n";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { AskAnswers } from "../project/phone";
 import { useFocus } from "../project/data";
 import { MessageRow, StaffHeader, useMember, useStaffMessages } from "../project/staff";
@@ -30,7 +30,9 @@ import { steadySession } from "./details";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { HARNESS_BADGES, HARNESS_NAMES, type Staff } from "../team/team";
 import { act } from "../team/phone";
-import { BottomSheet, IconButton, SegmentedControl, TopBar } from "../ui/phone";
+import { TopBar } from "../shell";
+import { Button, IconButton, Segmented } from "../ui/primitives";
+import { firstWait, staffTone, waitKey } from "../project/focus";
 import { PhoneAskAnswers } from "./phoneask";
 import { TerminalView } from "../terminal/view";
 import type { TerminalState } from "../terminal/instance";
@@ -228,13 +230,13 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           title={<span className="ph-who"><StaffAvatar name={member.name} color={member.color} /><span className="ph-who-w"><span className="ph-who-n">{member.name}</span><span className="ph-who-s">{who}</span></span></span>}
           actions={<>
             {hasBrowser && <BrowserHeadButton groups={browsers.groups} onOpen={showBrowser} streaming={!sheet} saving={deviceSaving(true)} />}
-            <IconButton icon="vdots" label={t("staff.side")} popup="dialog" onClick={() => setSheet(true)} />
+            <IconButton icon="vdots" label={t("staff.side")} popup="dialog" onClick={() => setSheet(true)} className="ph-ib" />
           </>} />
         <div className="ph-member-mode">
-          <SegmentedControl label={t("staff.mode")} value={shown} onChange={pick}
-            options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} />
+          <Segmented label={t("staff.mode")} value={shown} onChange={pick}
+            options={[{ id: "feed", label: t("staff.mode.feed") }, { id: "terminal", label: t("staff.mode.terminal") }]} className="ph-seg" />
         </div>
-        <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText} compact>
+        <StaffHeader projectId={projectId} staffId={staffId} toast={toast} facts={factsText}>
           {flagged > 0 && (
             <button className={`staff-attention ${need.failed.length > 0 ? "failed" : "pending"}`} data-attention={need.failed.length > 0 ? "failed" : "pending"} onClick={showMessages} aria-label={`${flaggedText} · ${t("staff.attention.open")}`} title={flaggedText}>
               <Icon name={need.failed.length > 0 ? "alert" : "send"} size={14} />
@@ -263,76 +265,82 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           </div>
         </div>
         {sheet && (
-          <BottomSheet full onClose={() => setSheet(false)} className="staff-sheet ph-member-sheet" label={member.name}
+          <Sheet size="full" onClose={() => setSheet(false)} className="ph-sheet staff-sheet ph-member-sheet" ariaLabel={member.name}
             title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{member.name}</span><span className="ph-sheet-kt-m">{[member.role, version].filter(Boolean).join(" · ")}</span></span>}
             footer={member.live ? (
               <div className="ph-foot-row wrap">
-                <button type="button" className="ph-btn" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}><Icon name="pause" size={16} />{t("ph.team.pause")}</button>
-                <button type="button" className="ph-btn" onClick={() => void act(member, projectId, "interrupt", toast)}><Icon name="stop" size={16} />{t("focus.staff.interrupt")}</button>
-                <button type="button" className="ph-btn danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</button>
+                <Button icon="pause" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}>{t("ph.team.pause")}</Button>
+                <Button icon="stop" onClick={() => void act(member, projectId, "interrupt", toast)}>{t("focus.staff.interrupt")}</Button>
+                <Button variant="danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</Button>
               </div>
             ) : undefined}>
             {panel}
-          </BottomSheet>
+          </Sheet>
         )}
       </div>
     );
   }
   const covering = wide && side && expanded;
+  const tone = staffTone(member);
+  const wait = firstWait(member);
+  const state = wait ? t("focus.wait.line", { reason: t(waitKey(wait.reason)), n: wait.position }) : member.live?.pause_requested ? t("focus.staff.paused") : t(`team.status.${member.status}`);
   const browserInView = (wide ? side : sheet) && tab === "browser";
 
   return (
     <div className="chat in-project staff-cli" data-staff={staffId} data-mode={shown}>
-      <div className="chat-head">
-        {!wide && (
-          <button className="iconbtn" onClick={onBack} aria-label={t("shell.back")} title={t("shell.back")}>
-            <Icon name="back" />
-          </button>
-        )}
-        <div className="grow chat-identity" style={{ minWidth: 0 }}>
-          <span className="chat-title truncate">{member.name}</span>
-        </div>
-        <div className="segmented inline staff-mode" role="group" aria-label={t("staff.mode")}>
-          <button className={shown === "feed" ? "on" : ""} aria-pressed={shown === "feed"} data-mode="feed" onClick={() => pick("feed")}>{t("staff.mode.feed")}</button>
-          <button className={shown === "terminal" ? "on" : ""} aria-pressed={shown === "terminal"} data-mode="terminal" disabled={!terminalId} title={terminalId ? undefined : t("staff.mode.noterminal")} onClick={() => pick("terminal")}>{t("staff.mode.terminal")}</button>
-        </div>
-        <div className="head-actions">
-          {!wide && hasBrowser && <BrowserHeadButton groups={browsers.groups} onOpen={showBrowser} streaming={!sheet} saving={deviceSaving(true)} />}
-          {flagged > 0 && (
-            <button
-              className={`staff-attention ${need.failed.length > 0 ? "failed" : "pending"}`}
-              data-attention={need.failed.length > 0 ? "failed" : "pending"}
-              onClick={showMessages}
-              aria-label={`${flaggedText} · ${t("staff.attention.open")}`}
-              title={flaggedText}
-            >
-              <Icon name={need.failed.length > 0 ? "alert" : "send"} size={14} />
-              <span className="staff-attention-n">{flagged}</span>
-            </button>
+      {/* One header row, as a chat's: who, how it goes, the view, the three controls of a turn, the
+          column. What runs the member and whether the host hears it are the facts line under it; the
+          two-line block that once stood between the header and the terminal said the same twice. */}
+      <header className="staff-head">
+        <div className="chat-head staff-head-row">
+          <StaffAvatar name={member.name} color={member.color} />
+          <div className="staff-head-who">
+            <span className="staff-head-name truncate">{member.name}{member.role && <span className="staff-head-role"> · {member.role}</span>}</span>
+          </div>
+          <span className={`focus-pill tone-${tone}`} title={wait?.detail || member.live?.waiting_for || undefined} data-status={member.status}>
+            <span className={`focus-dot tone-${tone}`} aria-hidden />
+            <span className="staff-head-state truncate">{state}</span>
+            {factsText && !wait && <span className="staff-head-facts"> · {factsText}</span>}
+          </span>
+          <span className="grow" />
+          <div className="segmented inline sm staff-mode" role="group" aria-label={t("staff.mode")}>
+            <button className={shown === "feed" ? "on" : ""} aria-pressed={shown === "feed"} data-mode="feed" onClick={() => pick("feed")}>{t("staff.mode.feed")}</button>
+            <button className={shown === "terminal" ? "on" : ""} aria-pressed={shown === "terminal"} data-mode="terminal" disabled={!terminalId} title={terminalId ? undefined : t("staff.mode.noterminal")} onClick={() => pick("terminal")}>{t("staff.mode.terminal")}</button>
+          </div>
+          {member.live && (
+            <div className="staff-head-actions">
+              <Button size="sm" icon="stop" onClick={() => void act(member, projectId, "interrupt", toast)}>{t("focus.staff.interrupt")}</Button>
+              <Button size="sm" icon="pause" disabled={!!member.live.pause_requested} onClick={() => void act(member, projectId, "pause", toast)}>{t("focus.staff.pause")}</Button>
+              <Button size="sm" variant="danger" onClick={() => void act(member, projectId, "release", toast)}>{t("focus.staff.release")}</Button>
+            </div>
           )}
-          <button className={`iconbtn ${wide && side ? "on" : ""}`} onClick={toggleSide} aria-label={t("staff.side")} title={t("staff.side")} aria-pressed={wide ? side : sheet}>
-            <Icon name="panel" />
-          </button>
+          <div className="head-actions">
+            {flagged > 0 && (
+              <button
+                className={`staff-attention ${need.failed.length > 0 ? "failed" : "pending"}`}
+                data-attention={need.failed.length > 0 ? "failed" : "pending"}
+                onClick={showMessages}
+                aria-label={`${flaggedText} · ${t("staff.attention.open")}`}
+                title={flaggedText}
+              >
+                <Icon name={need.failed.length > 0 ? "alert" : "send"} size={14} />
+                <span className="staff-attention-n">{flagged}</span>
+              </button>
+            )}
+            <IconButton icon="panel" label={t("staff.side")} pressed={side} onClick={toggleSide} />
+          </div>
         </div>
-      </div>
-      <StaffHeader
-        projectId={projectId}
-        staffId={staffId}
-        toast={toast}
-        facts={factsText}
-        details={
-          <div className="staff-head-meta truncate">
+        <div className="staff-facts">
+          <span className="staff-head-meta truncate">
             <HarnessBadge harness={member.harness} />
             <span className="staff-head-runs">{runs}</span>
             {branch && <span className="mono">{t("staff.worktree", { branch })}</span>}
             {task && <span>{t("focus.staff.task", { title: task.title })}</span>}
-          </div>
-        }
-      >
-        {/* A phone's header keeps only what is wrong; the whole line is in the sheet beside. */}
-        <HealthLine health={view?.health ?? member.health ?? null} compact={!wide} />
-        <ConditionLine conditions={view?.conditions ?? member.conditions} />
-      </StaffHeader>
+          </span>
+          <HealthLine health={view?.health ?? member.health ?? null} />
+          <ConditionLine conditions={view?.conditions ?? member.conditions} />
+        </div>
+      </header>
       <div ref={bodyRef} className={`chat-body ${wide && side ? "with-staff-aside" : ""}`} data-aside-width={asideWidth ?? "auto"} style={asideWidth != null ? ({ "--staff-aside-w": `${asideWidth}px` } as CSSProperties) : undefined}>
         <div className="chat-main">
           {wide && !browserInView && !covering && <BrowserPip groups={browsers.groups} onOpen={showBrowser} />}
@@ -353,7 +361,7 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           )}
           <div className="staff-foot">
             <KeyboardBanner terminalId={terminalId} messages={messages} watching={shown === "terminal"} state={terminalState} toast={toast} />
-            <PermissionBar projectId={projectId} staffId={staffId} caps={caps} toast={toast} />
+            <PermissionBar projectId={projectId} staffId={staffId} caps={caps} toast={toast} name={member.name} />
             <StaffComposer staffId={staffId} name={member.name} caps={caps} live={live} toast={toast} />
           </div>
         </div>
@@ -376,11 +384,6 @@ export function StaffView({ projectId, staffId, wide, toast, onBack }: { project
           </aside>
         )}
       </div>
-      {!wide && sheet && (
-        <Sheet title={member.name} onClose={() => setSheet(false)} className="staff-sheet">
-          {panel}
-        </Sheet>
-      )}
     </div>
   );
 }
@@ -448,13 +451,18 @@ function PermissionBar({ projectId, staffId, caps, toast, name = "", phone = fal
   return (
     <div className="staff-requests" aria-label={t("perm.label")}>
       {open.map((ask) => (
-        <section key={ask.id} className={`staff-request ${ask.kind}`} data-ask={ask.short_id}>
-          <div className="staff-request-head">
-            <Icon name={ask.kind === "permission" ? "shield" : "question"} size={14} />
-            <span className="staff-request-text truncate" title={ask.text}>{askWords(ask)}</span>
+        // The composer's approval card: who asks in the attention colour, what it would run in the
+        // code face, then the answers.
+        <section key={ask.id} className={`staff-request approval-card ${ask.kind}`} data-ask={ask.short_id}>
+          <div className="approval-eyebrow">
+            <Icon name={ask.kind === "permission" ? "shield" : "question"} size={16} />
+            <span className="grow truncate">{t(ask.kind === "permission" ? "ph.member.asks.permission" : "ph.member.asks.question", { name })} · {relTime(ask.created_at)}</span>
             <span className="staff-request-id mono">#{ask.short_id}</span>
           </div>
-          {ask.routed_to === "orchestrator" && <div className="staff-request-routed">{t("perm.routed.orchestrator")}</div>}
+          {ask.kind === "permission"
+            ? <pre className="approval-command mono staff-request-text" title={ask.text}>{askWords(ask)}</pre>
+            : <div className="approval-question staff-request-text">{askWords(ask)}</div>}
+          {ask.routed_to === "orchestrator" && <div className="staff-request-routed approval-why">{t("perm.routed.orchestrator")}</div>}
           <AskAnswers ask={ask} projectId={projectId} toast={toast} always={canAlways(ask, caps)} server={alwaysServer(ask, caps)} />
         </section>
       ))}
@@ -519,18 +527,23 @@ function StaffComposer({ staffId, name, caps, live, toast }: { staffId: string; 
           }
         }}
       />
-      <div className="segmented inline staff-when" role="group" aria-label={t("staff.when")}>
+      <div className="staff-compose-row">
+      <div className="segmented inline sm staff-when" role="group" aria-label={t("staff.when")}>
         <button type="button" className={chosen === "after_turn" ? "on" : ""} aria-pressed={chosen === "after_turn"} data-when="after_turn" onClick={() => change({ ...draft, when: "after_turn" })}>{t("staff.when.after_turn")}</button>
         <button type="button" className={chosen === "now" ? "on" : ""} aria-pressed={chosen === "now"} data-when="now" disabled={!now.enabled} title={now.hint ? t(now.hint, { cli: caps?.label ?? "" }) : undefined} onClick={() => change({ ...draft, when: "now" })}>{t("staff.when.now")}</button>
       </div>
       <button className="iconbtn primary staff-compose-send" type="submit" disabled={busy || !text.trim() || !live || offline} aria-label={t("staff.send")} title={offline ? t("staff.compose.offline") : t("staff.send")}>
-        <Icon name="send" />
+        <Icon name="up" />
       </button>
+      </div>
     </form>
   </>;
 }
 
 type SideTab = "session" | "details" | "changes" | "notes" | "browser";
+
+/** The right panel's glyphs for the same tools, so the column beside a member reads as that panel. */
+const SIDE_ICON: Record<SideTab, IconName> = { session: "terminal", details: "info", changes: "changes", notes: "note", browser: "globe" };
 
 type PanelProps = {
   projectId: string;
@@ -564,19 +577,19 @@ function StaffPanel({ projectId, staffId, member, turns, name, view, notes, inst
   const tabs: SideTab[] = browser ? ["session", "details", "changes", "notes", "browser"] : ["session", "details", "changes", "notes"];
   return (
     <div className={`staff-panel ${tab === "browser" ? "with-browser" : ""}`}>
-      <div className="panel-tabs">
+      <div className="panel-tabs" data-tabs={tabs.length}>
         <div className="panel-tablist" role="tablist">
+          {/* The name rides on the button too: a narrow column draws the tabs it is not on as icons. */}
           {tabs.map((name) => (
-            <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} onClick={() => setTab(name)}>
-              <span>{t(`staff.tab.${name}`)}</span>
+            <button key={name} role="tab" className={`panel-tab ${tab === name ? "on" : ""}`} aria-selected={tab === name} data-tab={name} aria-label={t(`staff.tab.${name}`)} title={t(`staff.tab.${name}`)} onClick={() => setTab(name)}>
+              <Icon name={SIDE_ICON[name]} size={16} />
+              <span className="panel-tab-word">{t(`staff.tab.${name}`)}</span>
             </button>
           ))}
         </div>
         {onExpand && (
           <div className="panel-actions">
-            <button className={`iconbtn small staff-expand ${expanded ? "on" : ""}`} onClick={onExpand} aria-pressed={expanded} aria-label={t(expanded ? "staff.side.restore" : "staff.side.expand")} title={t(expanded ? "staff.side.restore" : "staff.side.expand")}>
-              <Icon name={expanded ? "panel" : "expand"} size={16} />
-            </button>
+            <IconButton icon={expanded ? "panel" : "expand"} label={t(expanded ? "staff.side.restore" : "staff.side.expand")} pressed={expanded} onClick={onExpand} className="staff-expand" />
           </div>
         )}
       </div>

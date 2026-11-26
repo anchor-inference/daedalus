@@ -39,7 +39,7 @@ vi.mock("./api", () => ({
 }));
 
 import { AttachedSecret, REVEAL_MS, SecretChip, SecretSheet, SecretsManager, UNDO_MS, matchesSecret, secretName, validSecretName } from "./secrets";
-import { ToastHost } from "./ui/dialogs";
+import { ConfirmHost, ToastHost } from "./ui/dialogs";
 
 const VALUE = "hunter2-and-more";
 const PROJECT = "Home network";
@@ -88,7 +88,7 @@ async function open(phone = false, already: string[] = []) {
   const attached: AttachedSecret[] = [];
   const changed: [string, string | null][] = [];
   let closed = false;
-  await act(async () => root.render(<><ToastHost /><SecretSheet sessionId="sess-1" phone={phone} attached={already} onClose={() => { closed = true; }} onAttach={(s) => attached.push(s)} onChanged={(id, name) => changed.push([id, name])} /></>));
+  await act(async () => root.render(<><ToastHost /><ConfirmHost /><SecretSheet sessionId="sess-1" phone={phone} attached={already} onClose={() => { closed = true; }} onAttach={(s) => attached.push(s)} onChanged={(id, name) => changed.push([id, name])} /></>));
   await act(async () => {});
   return { attached, changed, closed: () => closed };
 }
@@ -96,6 +96,12 @@ function row(name: string): HTMLElement {
   const found = document.querySelector<HTMLElement>(`.secret-row[data-secret="${name}"]`);
   if (!found) throw new Error(`no row ${name}`);
   return found;
+}
+/** The removal's question is a dialog of its own over the page: its last button is the one that removes. */
+function confirmRemoval() {
+  const buttons = document.querySelectorAll<HTMLButtonElement>(".dialog .dialog-actions button");
+  if (buttons.length !== 2) throw new Error("no removal question");
+  buttons[1].click();
 }
 function press(scope: ParentNode, selector: string) {
   const found = scope.querySelector<HTMLButtonElement>(selector);
@@ -192,7 +198,7 @@ describe("the secrets manager", () => {
     expect(written).toEqual([SHOWN]);
     expect(document.body.innerHTML).not.toContain(SHOWN);
     // Said at the button pressed, not in a line that leaves.
-    expect(row("wifi")!.querySelector(".secret-copy svg path")?.getAttribute("d")).toBe("M5 12l5 5 9-11");
+    expect(row("wifi")!.querySelector(".secret-copy .ic-check")).not.toBeNull();
   });
 
   it("edits in place, sending only what changed and never fetching the value", async () => {
@@ -229,8 +235,8 @@ describe("the secrets manager", () => {
     vi.useFakeTimers();
     await act(async () => press(row("wifi"), ".secret-remove"));
     expect(calls.got).toContain("/api/secrets/s0/usage");
-    expect(row("wifi").textContent).toContain(t("secret.remove.used", { n: "2", titles: "Router, Firmware" }));
-    await act(async () => press(row("wifi"), ".secret-remove-yes"));
+    expect(document.querySelector(".dialog")!.textContent).toContain(t("secret.remove.used", { n: "2", titles: "Router, Firmware" }));
+    await act(async () => confirmRemoval());
     expect(document.querySelector('.secret-row[data-secret="wifi"]')).toBeNull();
     expect(sheet.changed).toEqual([["s0", null]]);
     expect(calls.deleted).toEqual([]);
@@ -240,7 +246,7 @@ describe("the secrets manager", () => {
     expect(calls.deleted).toEqual([]);
     // Removed again and left alone, it goes when the undo runs out.
     await act(async () => press(row("wifi"), ".secret-remove"));
-    await act(async () => press(row("wifi"), ".secret-remove-yes"));
+    await act(async () => confirmRemoval());
     await act(async () => { vi.advanceTimersByTime(UNDO_MS + 100); });
     expect(calls.deleted).toEqual(["/api/secrets/s0"]);
   });
@@ -249,7 +255,7 @@ describe("the secrets manager", () => {
     calls.list = { secrets: [KNOWN], others: [], project_id: null, project_name: null };
     await open();
     await act(async () => press(row("wifi"), ".secret-remove"));
-    await act(async () => press(row("wifi"), ".secret-remove-yes"));
+    await act(async () => confirmRemoval());
     expect(calls.deleted).toEqual([]);
     await act(async () => root.unmount());
     root = createRoot(host);

@@ -35,7 +35,7 @@ describe("the settings index", () => {
     expect(new Set(ids).size).toBe(ids.length);
     const drawn = [...SETTINGS.matchAll(/case "([a-z-]+)":/g)].map((m) => m[1]).filter((id) => id !== "language");
     for (const id of drawn) expect(ids, id).toContain(id);
-    expect(SECTION_GROUPS.map((group) => group.id)).toEqual(["you", "models", "agent", "tools", "integrations", "system"]);
+    expect(SECTION_GROUPS.map((group) => group.id)).toEqual(["general", "voice", "models", "autonomy", "tools", "integrations", "system"]);
     expect(SECTION_GROUPS.flatMap((group) => group.sections.map((section) => section.id)).sort()).toEqual([...ids].sort());
     for (const group of SECTION_GROUPS) expect(DICT[`settings.group.${group.id}`], group.id).toBeDefined();
   });
@@ -67,7 +67,7 @@ describe("the settings index", () => {
     const stt = INDEX_FIELDS.find((field) => field.anchor === "asr.transcriber")!;
     expect(fieldPath(stt)).toBe("/app/settings/dictation#asr.transcriber");
     const keys = INDEX_FIELDS.find((field) => field.anchor === "providers.list")!;
-    expect(fieldPath(keys)).toBe("/app/settings/providers#providers.list");
+    expect(fieldPath(keys)).toBe("/app/settings/models#providers.list");
   });
 
   // An address written before a row moved names the old section; the page asks this where the row is
@@ -75,7 +75,7 @@ describe("the settings index", () => {
   it("knows the section of every row it lists, and of the rows drawn once per model, provider or account", () => {
     for (const field of INDEX_FIELDS) expect(sectionOfAnchor(field.anchor), field.anchor).toBe(field.section);
     expect(sectionOfAnchor("presets.main.images")).toBe("models");
-    expect(sectionOfAnchor("providers.openrouter.api_key")).toBe("providers");
+    expect(sectionOfAnchor("providers.openrouter.api_key")).toBe("models");
     expect(sectionOfAnchor("limits.usd_total_per_provider.openrouter")).toBe("budget");
     expect(sectionOfAnchor("accounts.claude.fallover")).toBe("accounts");
     expect(sectionOfAnchor("keyproxy.clients")).toBe("keyproxy");

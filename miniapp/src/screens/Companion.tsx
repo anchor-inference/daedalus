@@ -17,12 +17,14 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { retried } from "../chunks";
 import { api } from "../api";
-import { Dropdown, StatusLabel, timeAgo } from "../ui/components";
-import { Row } from "../settingsrow";
+import { Select, StatusLabel, timeAgo } from "../ui/components";
+import { Row, SetFoot, SetGroup } from "../settingsrow";
 import { t, useLang } from "../i18n";
 import { Icon } from "../icons";
 import { navigate, pathFor, sessionPath } from "../router";
-import { BottomSheet, OverflowMenu, PageHeader, go, useMedia } from "../ui/index";
+import { OverflowMenu, PageHeader, go, useMedia } from "../ui/index";
+import { Badge, Sheet, Tabs } from "../ui/primitives";
+import { Page } from "../shell";
 import type { MenuItem } from "../ui/dialogs";
 import { invalidate, prime, useQuery } from "../store";
 import { errorText, haptic } from "../ui";
@@ -173,15 +175,8 @@ export function CompanionScreen({ tab, onOpen, toast }: { tab?: string | null; o
             <OverflowMenu items={menu} label={t("companion.menu")} className="companion-menu" />
           </>
         }
-      >
-        <div className="companion-tabs" role="tablist" aria-label={t("companion.tabs")}>
-          {TABS.map((id) => (
-            <button key={id} role="tab" aria-selected={current === id} className={current === id ? "on" : ""} onClick={() => pick(id)}>
-              {t(`companion.tab.${id}`)}
-            </button>
-          ))}
-        </div>
-      </PageHeader>
+        filters={<Tabs variant="page" className="companion-tabs" value={current} onChange={(id) => pick(id as CompanionTabId)} label={t("companion.tabs")} tabs={TABS.map((id) => ({ id, label: t(`companion.tab.${id}`) }))} />}
+      />
       {profile?.paused && (
         <div className="companion-paused">
           <span className="grow">{t("companion.paused.banner")}</span>
@@ -211,8 +206,8 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
   const ui = useSyncExternalStore(session.subscribe, session.state);
   const [typed, setTyped] = useState("");
   // Where the agents have no column beside the conversation; they are a sheet there, opened from the
-  // header. The width matches the stylesheet's, which stacks the grid at the same point.
-  const narrow = useMedia("(max-width: 900px)");
+  // header. The width is the one at which the page header turns into the phone's.
+  const narrow = useMedia("(max-width: 1023px)");
   useLang();
   // The server produces the audio for both of the first two: a voice on this machine and a speech
   // endpoint both answer /api/companion/tts, and only the browser's own synthesiser does not.
@@ -417,12 +412,12 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
 
   if (state && !state.enabled) {
     return (
-      <div className="screen wide">
+      <Page width="reading">
         <div className="empty">
           <b>{t("voice.off.title")}</b>
           <div>{t("voice.off.body")}</div>
         </div>
-      </div>
+      </Page>
     );
   }
 
@@ -444,6 +439,8 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
             : ui.micOn
               ? t("voice.tap.stop")
               : t("voice.tap");
+  // What turns the stage's state word orange: the one case the page cannot get on by itself.
+  const needsYou = ui.blocked || !!ui.problem || ui.engine.state === "error" || (ttsKind === "local" && ui.voice.state === "error");
   const mascotPose: PetPose = ui.phase === "listening"
     ? { emotion: "curious", action: "listen", prop: "" }
     : ui.phase === "speaking"
@@ -465,6 +462,8 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
     if (center.view === "orb") setCenter({ view: "transcript" });
   };
   // `stage`: under the orb, which is the microphone itself, so the field offers no second one.
+  // The field and its round button are the conversation composer's card in miniature: the same
+  // corners and hairline, the same filled circle for send and for stopping.
   const composer = (stage: boolean) => (
     <form
       className="voice-compose"
@@ -477,16 +476,16 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
     >
       <input className="field" placeholder={ui.micOn ? t(`voice.phase.${ui.phase}`) : t("voice.compose", { name })} value={typed} onChange={(e) => setTyped(e.target.value)} aria-label={t("voice.compose.label")} />
       {typed.trim() || (stage && !ui.micOn) ? (
-        <button className="voice-compose-btn send" type="submit" disabled={!typed.trim()} aria-label={t("voice.compose.label")} title={t("voice.compose.label")}>
-          <Icon name="send" size={18} />
+        <button className="roundbtn primary voice-compose-btn send" type="submit" disabled={!typed.trim()} aria-label={t("voice.compose.label")} title={t("voice.compose.label")}>
+          <Icon name="up" />
         </button>
       ) : ui.micOn ? (
-        <button className="voice-compose-btn hangup" type="button" onClick={hangUp} aria-label={t("companion.hangup")} title={t("companion.hangup")}>
-          <Icon name="stop" size={18} />
+        <button className="roundbtn primary stop voice-compose-btn hangup" type="button" onClick={hangUp} aria-label={t("companion.hangup")} title={t("companion.hangup")}>
+          <Icon name="stop" />
         </button>
       ) : (
-        <button className="voice-compose-btn mic" type="button" onClick={startCall} disabled={!canTalk || !ready} aria-label={t("companion.call")} title={t("companion.call")}>
-          <Icon name="mic" size={18} />
+        <button className="roundbtn voice-compose-btn mic" type="button" onClick={startCall} disabled={!canTalk || !ready} aria-label={t("companion.call")} title={t("companion.call")}>
+          <Icon name="mic" />
         </button>
       )}
     </form>
@@ -500,20 +499,20 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
         return (
           <button
             key={a.session_id}
-            className={`card row pressable voice-agent${open ? " open" : ""}`}
+            className={`voice-agent${open ? " open" : ""}`}
             aria-pressed={open}
             onClick={() => {
               setPanel(false);
               setCenter(open ? { view: "transcript" } : { view: "agent", id: a.session_id, title: a.title });
             }}
           >
-            <div className="grow">
+            <div className="voice-agent-body">
               <div className="voice-agent-top">
                 <b className="truncate">{a.title}</b>
-                {note.waiting ? <span className="chip accent">{t(note.waiting)}</span> : <StatusLabel status={a.status} />}
+                {note.waiting ? <span className="voice-agent-wait">{t(note.waiting)}</span> : <StatusLabel status={a.status} />}
               </div>
-              {note.line && <div className={`sub clamp-2${note.live ? " voice-agent-live" : ""}`}>{note.line}</div>}
-              <div className="sub num">{timeAgo(note.when)}</div>
+              {note.line && <div className={`voice-agent-line clamp-2${note.live ? " voice-agent-live" : ""}`}>{note.line}</div>}
+              <div className="voice-agent-when num">{timeAgo(note.when)}</div>
             </div>
           </button>
         );
@@ -523,7 +522,7 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
   const agentTitle = center.view === "agent" ? center.title : "";
   return (
     <>
-      <div className="screen wide voice">
+      <div className="screen voice">
         <div className={`voice-grid${reading ? " reading" : ""}`}>
           {/* One area, two things that can be in it. The key is what makes the swap a cross-fade
               rather than a cut — a fresh node for the arriving view — and it is the only thing about
@@ -531,10 +530,10 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
           <div className={`voice-centre phase-${ui.phase}`}>
             <div className="voice-centre-view" key={center.view === "agent" ? `agent-${center.id}` : center.view}>
               {center.view === "orb" ? (
-                <section className={`voice-stage card phase-${ui.phase}`}>
+                <section className={`voice-stage phase-${ui.phase}${needsYou ? " needs-you" : ""}`}>
                   <div className="voice-chips">
-                    <PhaseChip ui={ui} />
-                    <span className="chip quiet">{spokenBy}</span>
+                    <PhaseWord ui={ui} />
+                    <span className="voice-by">{spokenBy}</span>
                     {state?.session_id && (
                       <button className="btn ghost small voice-to-transcript" onClick={openTranscript} title={t("voice.transcript.key")}>
                         {t("voice.transcript")}
@@ -617,20 +616,20 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
                   )}
                 </section>
               ) : (
-                <section className={`card voice-read${center.view === "transcript" ? " own" : ""}`}>
+                <section className={`voice-read${center.view === "transcript" ? " own" : ""}`}>
                   {/* The companion's own transcript is the page itself and needs no frame saying so; an
                       agent's is somewhere else, and the strip says whose it is and how to get back. */}
                   {center.view === "agent" && (
                     <div className="voice-crumbs">
-                      <button className="iconbtn" onClick={() => setCenter({ view: "transcript" })} aria-label={t("voice.crumb.back")} title={t("voice.crumb.back")}>
+                      <button className="iconbtn small" onClick={() => setCenter({ view: "transcript" })} aria-label={t("voice.crumb.back")} title={t("voice.crumb.back")}>
                         <Icon name="back" />
                       </button>
                       <b className="truncate grow">{agentTitle}</b>
                       {/* The field with the call's button is not under an agent's transcript, so the
                           call can be ended from the strip while one is being read. */}
                       {ui.micOn && (
-                        <button className="voice-compose-btn hangup small" onClick={hangUp} aria-label={t("companion.hangup")} title={t("companion.hangup")}>
-                          <Icon name="stop" size={16} />
+                        <button className="roundbtn primary stop voice-compose-btn hangup small" onClick={hangUp} aria-label={t("companion.hangup")} title={t("companion.hangup")}>
+                          <Icon name="stop" size={14} />
                         </button>
                       )}
                       <a
@@ -686,9 +685,9 @@ function CompanionConversation({ onOpen, toast, name, panel, setPanel, voiceMasc
         </div>
       </div>
       {narrow && panel && (
-        <BottomSheet title={t("voice.agents")} onClose={() => setPanel(false)} className="voice-agents-sheet">
+        <Sheet title={t("voice.agents")} onClose={() => setPanel(false)} className="ph-sheet voice-agents-sheet">
           <div className="voice-agents">{agentList}</div>
-        </BottomSheet>
+        </Sheet>
       )}
     </>
   );
@@ -719,10 +718,10 @@ function Captions({ ui }: { ui: VoiceUi }) {
 }
 
 /** The one word for what the page is doing, and the animation that says it without being read. */
-function PhaseChip({ ui }: { ui: VoiceUi }) {
+function PhaseWord({ ui }: { ui: VoiceUi }) {
   const word = t(`voice.phase.${ui.phase}`);
   return (
-    <span className={`chip voice-chip ${ui.phase}`}>
+    <span className={`voice-phase ${ui.phase}`}>
       <span className="voice-chip-mark" aria-hidden>
         <i />
         <i />
@@ -797,83 +796,83 @@ export function VoiceSettings() {
         ? t("voice.card.in.server")
         : t("voice.card.in.none");
   return (
-    <div className="card voice-card" data-setting="companion.enabled">
-      <div className="section-title">{t("voice.card.title")}</div>
-      <div className="sub">{t("voice.card.intro")}</div>
-      <Row title={t("voice.card.enabled")}>
-        <span className="settings-value">{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</span>
-      </Row>
-      <Row
-        data-setting="companion.preset"
-        title={t("voice.card.model")}
-        desc={
-          <>
-            {t("voice.card.model.hint")} {row.warn && <span className="chip attn">{t(row.warn)}</span>}
-            {row.addFast && (
-              <>
-                {" "}{t("voice.card.model.none")}{" "}
-                <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>{t("voice.card.model.add")}</a>
-              </>
-            )}
-            {problem && <span className="push-error"> {problem}</span>}
-          </>
-        }
-        stack
-      >
-        <WithEffort id="companion-effort" value={data.effort} disabled={saving} onChange={(effort) => void pick({ effort })} fallback="model">
-          <Dropdown
-            label={t("voice.card.model")}
-            value={row.value}
-            disabled={saving}
-            onChange={(preset) => void pick({ preset })}
-            options={[
-              { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
-              ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
-            ]}
-          />
-        </WithEffort>
-      </Row>
-      <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
-        <WithEffort id="companion-background-effort" value={data.background_effort} disabled={saving} onChange={(background_effort) => void pick({ background_effort })} fallback="model">
-          <Dropdown
-            label={t("voice.card.background")}
-            value={data.background_preset ?? ""}
-            disabled={saving}
-            onChange={(background_preset) => void pick({ background_preset })}
-            options={[
-              { id: "", label: t("voice.card.model.default") },
-              ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
-            ]}
-          />
-        </WithEffort>
-      </Row>
-      <Row title={t("voice.card.out")} stack>
-        <span className="settings-value">{spokenLine(data)}</span>
-      </Row>
-      <Row title={t("voice.card.in")} stack>
-        <span className="settings-value">{listens}</span>
-      </Row>
-      {local?.active && (
-        <Row title={t("voice.card.memory")}>
-          <span className="settings-value">
-            {data.stt?.state === "loading"
-              ? t("voice.card.memory.loading")
-              : data.stt?.state === "error"
-                ? data.stt.error || t("voice.card.memory.failed")
-                : data.stt?.loaded_in_ms
-                  ? t("voice.card.memory.ready", { s: (data.stt.loaded_in_ms / 1000).toFixed(1) })
-                  : t("voice.card.memory.later")}
-          </span>
+    <>
+      <SetGroup title={t("voice.card.title")} help={t("voice.card.intro")}>
+        <Row title={t("voice.card.enabled")} data-setting="companion.enabled">
+          <Badge tone={data.enabled ? "live" : "attention"}>{t(data.enabled ? "voice.card.enabled.yes" : "voice.card.enabled.no")}</Badge>
         </Row>
-      )}
-      {/* Where the two lines above say "the browser's own" because nothing else is installed, the
-          offer to install it belongs directly under them rather than on another page. */}
-      <SpeechRuntimeNotice onInstalled={refresh} />
-      <div className="btnrow">
-        <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
-          {t("voice.card.open")}
-        </a>
-      </div>
-    </div>
+        <Row
+          data-setting="companion.preset"
+          title={t("voice.card.model")}
+          desc={
+            <>
+              {t("voice.card.model.hint")} {row.warn && <Badge tone="attention">{t(row.warn)}</Badge>}
+              {row.addFast && (
+                <>
+                  {" "}{t("voice.card.model.none")}{" "}
+                  <a href={pathFor("settings", "models")} onClick={(e) => go(e, pathFor("settings", "models"))}>{t("voice.card.model.add")}</a>
+                </>
+              )}
+              {problem && <span className="push-error"> {problem}</span>}
+            </>
+          }
+          stack
+        >
+          <WithEffort id="companion-effort" value={data.effort} disabled={saving} onChange={(effort) => void pick({ effort })} fallback="model">
+            <Select
+              label={t("voice.card.model")}
+              value={row.value}
+              disabled={saving}
+              onChange={(preset) => void pick({ preset })}
+              options={[
+                { id: "", label: row.fallback ? t("voice.card.model.default.named", { model: row.fallback }) : t("voice.card.model.default") },
+                ...row.choices.map((c) => ({ id: c.id, label: c.label, hint: c.slow ? t("voice.card.model.option.slow", { detail: c.detail }) : c.detail })),
+              ]}
+            />
+          </WithEffort>
+        </Row>
+        <Row title={t("voice.card.background")} desc={t("voice.card.background.hint")} stack>
+          <WithEffort id="companion-background-effort" value={data.background_effort} disabled={saving} onChange={(background_effort) => void pick({ background_effort })} fallback="model">
+            <Select
+              label={t("voice.card.background")}
+              value={data.background_preset ?? ""}
+              disabled={saving}
+              onChange={(background_preset) => void pick({ background_preset })}
+              options={[
+                { id: "", label: t("voice.card.model.default") },
+                ...(data.presets ?? []).map((p) => ({ id: p.id, label: p.label })),
+              ]}
+            />
+          </WithEffort>
+        </Row>
+      </SetGroup>
+
+      <SetGroup title={t("voice.card.runs")}>
+        <Row title={t("voice.card.out")} desc={spokenLine(data)} />
+        <Row title={t("voice.card.in")} desc={listens} />
+        {local?.active && (
+          <Row
+            title={t("voice.card.memory")}
+            desc={
+              data.stt?.state === "loading"
+                ? t("voice.card.memory.loading")
+                : data.stt?.state === "error"
+                  ? data.stt.error || t("voice.card.memory.failed")
+                  : data.stt?.loaded_in_ms
+                    ? t("voice.card.memory.ready", { s: (data.stt.loaded_in_ms / 1000).toFixed(1) })
+                    : t("voice.card.memory.later")
+            }
+          />
+        )}
+        {/* Where the two lines above say "the browser's own" because nothing else is installed, the
+            offer to install it belongs directly under them rather than on another page. */}
+        <SpeechRuntimeNotice onInstalled={refresh} />
+        <SetFoot>
+          <a className="btn small" href={pathFor("companion")} onClick={(e) => go(e, pathFor("companion"))}>
+            {t("voice.card.open")}
+          </a>
+        </SetFoot>
+      </SetGroup>
+    </>
   );
 }

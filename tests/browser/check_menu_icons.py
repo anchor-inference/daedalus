@@ -22,7 +22,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
-from screenshots import S1, S2, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, S2, S6, UNHANDLED, open_tool, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -41,7 +41,7 @@ ROWS = """
   const icon = row.firstElementChild;
   const lead = icon && icon.matches('svg.ic') ? icon.getBoundingClientRect() : null;
   // A row may stack a hint under its title (a phone's, the picker's Free): the icon is centred on both lines, not on the first.
-  const block = row.querySelector('.ph-mrow-main, .model-text');
+  const block = row.querySelector('.menu-row-main, .model-text');
   const middle = block ? block.getBoundingClientRect() : label;
   return {
     text: text.textContent.trim().slice(0, 24),
@@ -57,16 +57,17 @@ ROWS = """
 TABS = """
 (root) => [...document.querySelectorAll(root)].filter((tab) => tab.getClientRects().length).map((tab) => {
   const icon = tab.querySelector('svg.ic'), word = tab.querySelector('span:not(.count)');
-  if (!icon || !word) return null;
+  // A strip short of room draws an inactive tab as its icon alone: there is no label to centre on.
+  if (!icon || !word || !word.getClientRects().length) return null;
   const i = icon.getBoundingClientRect(), w = word.getBoundingClientRect();
   const under = w.top >= i.bottom - 2;
   return { text: word.textContent.trim(), under, off: Math.round((under ? (i.left + i.width / 2) - (w.left + w.width / 2) : (i.top + i.height / 2) - (w.top + w.height / 2)) * 10) / 10 };
 }).filter(Boolean);
 """
 
-MENU_ROWS = ":scope > button, :scope > .ph-mrow"
-# The model picker's rows that lead with an icon of their own: Free, Effort, the account and Add model.
-PICKER_ROWS = ":scope .provider-row:not([data-provider]), :scope .effort-entry, :scope .model-add"
+MENU_ROWS = ":scope > button, :scope > .menu-row"
+# The access menu's rows: its switches and the agent's language under them, in one column of words.
+ACCESS_ROWS = ":scope > .menu-row, :scope .access-lang-row > .menu-row"
 
 problems: list[str] = []
 
@@ -106,12 +107,12 @@ def desktop(page: Page, scheme: str) -> None:
     row.locator(".sb-acts button[aria-haspopup='menu']").click()
     judge(f"{scheme} chat overflow", rows(page, ".menu[role=menu]"), icons=7)
     page.keyboard.press("Escape")
-    page.get_by_role("button", name="Session menu").click()
+    page.locator(".chat button[aria-label='Session actions']").first.click()
     judge(f"{scheme} session menu", rows(page, ".menu[role=menu]"), icons=10)
     page.keyboard.press("Escape")
-    page.locator(".rail a[data-rail]").nth(2).click(button="right")
+    page.locator(".sb-pinned-nav a.sb-nav[data-nav]").nth(1).click(button="right")
     page.wait_for_selector(".context-menu")
-    judge(f"{scheme} rail right click", rows(page, ".context-menu"), icons=3)
+    judge(f"{scheme} pinned row right click", rows(page, ".context-menu"), icons=3)
     page.keyboard.press("Escape")
     page.get_by_role("button", name="Add to the message").click()
     judge(f"{scheme} composer +", rows(page, ".menu.pop"), icons=3)
@@ -123,17 +124,29 @@ def desktop(page: Page, scheme: str) -> None:
     page.wait_for_selector(".context-menu")
     judge(f"{scheme} text right click", rows(page, ".context-menu"), icons=4)
     page.keyboard.press("Escape")
-    page.get_by_role("button", name="Model for this session").click()
-    page.wait_for_selector(".model-list")
-    judge(f"{scheme} model picker", rows(page, ".model-list", PICKER_ROWS), icons=3)
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".menu.access-menu")
+    judge(f"{scheme} access menu", rows(page, ".menu.access-menu", ACCESS_ROWS), icons=0)
+    page.keyboard.press("Escape")
+    # The panel's "+" menu: every tool the chat offers, under its group's heading.
+    page.locator(".panel .panel-add").click()
+    page.wait_for_selector(".menu.panel-tools .panel-tools-row")
+    judge(f"{scheme} panel tools", rows(page, ".menu.panel-tools", ".panel-tools-row"), icons=8)
     page.keyboard.press("Escape")
     # A checkbox row has no icon of its own and has to stand in the column of the rows around it.
-    page.locator(".panel-tab[data-tab='files']").click()
+    open_tool(page, "files")
     page.locator(".explorer-more").click()
     judge(f"{scheme} files tools", rows(page, ".menu[role=menu]"), icons=2)
     page.keyboard.press("Escape")
+    # The strip holds the Overview and what was opened: open enough tools that it has several tabs to
+    # measure, in a panel at its widest so that each of them still draws its word beside its icon.
+    # In a chat with no open tasks: with some, the Board tab stands beside the opened ones, four tabs
+    # do not all fit with their words in 520 px, and the strip steps down to the open tab's word alone.
+    fresh(f"agents/{S6}")
+    for tool in ("details", "context"):
+        open_tool(page, tool)
     tabs = page.evaluate(TABS, ".panel-tab")
-    if len(tabs) < 5:
+    if len(tabs) < 4:
         problems.append(f"{scheme} panel tabs: only {len(tabs)} found")
     problems.extend(f"{scheme} panel tab '{t['text']}' is {t['off']}px off its icon's axis" for t in tabs if abs(t["off"]) > 1)
 
@@ -149,8 +162,8 @@ def phone(page: Page, scheme: str) -> None:
     judge(f"{scheme} phone text right click", rows(page, ".context-menu"), icons=4)
     page.keyboard.press("Escape")
     page.get_by_role("button", name="Add to the message").click()
-    page.wait_for_selector(".ph-sheet .ph-mrow")
-    judge(f"{scheme} phone + sheet", rows(page, ".ph-sheet .sheet-body"), icons=3)
+    page.wait_for_selector(".sheet .menu.attach-menu .menu-row")
+    judge(f"{scheme} phone + sheet", rows(page, ".sheet .menu.attach-menu"), icons=3)
 
 
 def run() -> None:
@@ -159,6 +172,7 @@ def run() -> None:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         for scheme in ("dark", "light"):
             context = browser.new_context(viewport=DESK, color_scheme=scheme)
+            context.add_init_script("try { localStorage.setItem('daedalus.width.panel', '520'); } catch (e) {}")
             page = context.new_page()
             page.set_default_timeout(8000)
             page.route("**/api/**", stub)

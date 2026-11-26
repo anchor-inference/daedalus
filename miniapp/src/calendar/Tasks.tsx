@@ -5,6 +5,7 @@ import { useState, type CSSProperties } from "react";
 import { locale, t } from "../i18n";
 import { Icon } from "../icons";
 import { Sheet } from "../ui/dialogs";
+import { Segmented, Select, Tabs } from "../ui/primitives";
 import { useQuery } from "../store";
 import { addDays, clockLabel, dayLabel, type Day } from "./dates";
 import { tasksViewKey } from "./data";
@@ -55,13 +56,8 @@ export function TasksPanel(props: PanelProps) {
   return (
     <section className="cal-tasks" aria-label={t("cal.tasks")}>
       <div className="cal-side-head"><span>{t("cal.tasks")}</span></div>
-      <div className="cal-task-tabs" role="tablist" aria-label={t("cal.tasks")}>
-        {VIEWS.map((v) => (
-          <button key={v} type="button" role="tab" aria-selected={view === v} className={`cal-task-tab ${view === v ? "on" : ""} ${v === "overdue" && late ? "late" : ""}`} onClick={() => props.onView(v)}>
-            {t(`cal.tasks.${v}`)}{v === "overdue" && late > 0 && <span className="cal-count" aria-label={t("cal.tasks.overdue.count", { n: late })}>{late}</span>}
-          </button>
-        ))}
-      </div>
+      <Tabs variant="page" className="cal-task-tabs" label={t("cal.tasks")} value={view} onChange={(v) => props.onView(v as TaskView)}
+        tabs={VIEWS.map((v) => ({ id: v, label: t(`cal.tasks.${v}`), count: v === "overdue" && late > 0 ? <span className="cal-count" aria-label={t("cal.tasks.overdue.count", { n: late })}>{late}</span> : undefined }))} />
       <form className="cal-task-add" onSubmit={add}>
         <Icon name="plus" size={14} />
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("cal.task.add")} aria-label={t("cal.task.add")} maxLength={240} disabled={adding} />
@@ -111,7 +107,7 @@ export function TaskEditor({ draft: initial, lists, zone, today, busy, onClose, 
   const set = (patch: Partial<TaskDraft>) => setD((cur) => ({ ...cur, ...patch }));
   const blocked = d.scheduled_start && d.scheduled_end ? { from: toWall(d.scheduled_start, zone), to: toWall(d.scheduled_end, zone) } : null;
   return (
-    <Sheet title={initial.task ? t("cal.task.edit") : t("cal.new.task")} onClose={onClose} size="narrow" className="cal-editor">
+    <Sheet title={initial.task ? t("cal.task.edit") : t("cal.new.task")} onClose={onClose} size="sm" className="cal-editor">
       <form className="cal-form" onSubmit={(e) => { e.preventDefault(); if (d.title.trim()) onSave(d); }}>
         <div className="cal-task-title-row">
           {initial.task && (
@@ -144,18 +140,13 @@ export function TaskEditor({ draft: initial, lists, zone, today, busy, onClose, 
         )}
         <div className="cal-line">
           <Icon name="flag" size={16} />
-          <div className="segmented inline cal-priority" role="radiogroup" aria-label={t("cal.task.priority")}>
-            {([0, 1, 2, 3] as const).map((p) => (
-              <button key={p} type="button" role="radio" aria-checked={d.priority === p} className={d.priority === p ? "on" : ""} onClick={() => set({ priority: p })}>{t(`cal.priority.${p}`)}</button>
-            ))}
-          </div>
+          <Segmented className="cal-priority" label={t("cal.task.priority")} value={String(d.priority) as "0" | "1" | "2" | "3"} onChange={(p) => set({ priority: Number(p) as 0 | 1 | 2 | 3 })}
+            options={(["0", "1", "2", "3"] as const).map((p) => ({ id: p, label: t(`cal.priority.${p}`) }))} />
         </div>
         {lists.length > 1 && (
           <div className="cal-line">
             <Icon name="inbox" size={16} />
-            <select className="field cal-grow" value={d.list_id} onChange={(e) => set({ list_id: e.target.value })} aria-label={t("cal.task.list")}>
-              {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
+            <div className="cal-grow"><Select size="md" value={d.list_id} label={t("cal.task.list")} onChange={(id) => set({ list_id: id })} options={lists.map((l) => ({ id: l.id, label: l.name }))} /></div>
           </div>
         )}
         <div className="cal-line">

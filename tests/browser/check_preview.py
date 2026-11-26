@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from api_stub import DEFAULT_APP, FILE_TEXT, expect_app
 from playwright.sync_api import expect, sync_playwright
-from screenshots import S1, SILENCE, UNHANDLED, detail, respond, stub
+from screenshots import S1, SILENCE, UNHANDLED, detail, open_tool, respond, stub
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -124,7 +124,7 @@ def run() -> int:
         open_file("src/main.py", '.line.cited[data-line="4"]', "4-5")
         assert page.locator(".line.cited").count() == 2
         open_file("NOTES.md", ".preview-doc")
-        page.get_by_role("button", name="Source", exact=True).click()
+        page.get_by_role("radio", name="Source", exact=True).click()
         expect(page.locator(".source-view")).to_be_visible()
         open_file("data/sample.csv", ".preview-grid")
         expect(page.locator(".preview-grid")).to_contain_text("fresh, daily")
@@ -136,12 +136,12 @@ def run() -> int:
         before = page.locator(".json-row").count()
         page.locator(".json-row button").first.click()
         assert page.locator(".json-row").count() < before
-        page.get_by_role("button", name="Source", exact=True).click()
+        page.get_by_role("radio", name="Source", exact=True).click()
         expect(page.locator(".source-view")).to_be_visible()
         for name in ["change.diff", "change.patch"]:
-            open_file(name, ".diff-view")
-            expect(page.locator(".diff-add")).to_contain_text("new = 2")
-            expect(page.locator(".diff-del")).to_contain_text("old = 1")
+            open_file(name, ".patch-view")
+            expect(page.locator(".patch-view .dp-line.add")).to_contain_text("new = 2")
+            expect(page.locator(".patch-view .dp-line.del")).to_contain_text("old = 1")
         open_file("sample.svg", ".preview-image")
         expect(page.locator(".source-tools")).to_contain_text("80 × 40 px")
         page.get_by_role("button", name="1:1", exact=True).click()
@@ -190,12 +190,15 @@ def run() -> int:
         assert downloads.count("site/next.html") > before
         page.locator('.panel-toolbar button[aria-label="Phone width"]').click()
         assert page.locator(".html-frame").bounding_box()["width"] <= 390
+        # The panel keeps its own width in a wide window. Laid over the conversation it is wide enough to
+        # draw the tree beside the file, and the phone's width still holds the page to 390 px there.
         page.set_viewport_size({"width": 2560, "height": 1400})
+        page.keyboard.press("Control+Shift+Period")
         expect(page.locator(".panel-body.split")).to_be_visible()
         assert page.locator(".html-frame").bounding_box()["width"] <= 390
         page.emulate_media(reduced_motion="reduce")
         assert page.locator(".panel").evaluate("e => getComputedStyle(e).transitionDuration") == "0s"
-        page.locator('[data-tab="jobs"]').click()
+        open_tool(page, "jobs")
         page.locator(".receipt summary").click()
         expect(page.locator(".receipt .diff-add")).to_contain_text("new = 2")
         print("source, markdown, HTML navigation, image, PDF, CSV, TSV, JSON, media, diffs, office and binary: passed")

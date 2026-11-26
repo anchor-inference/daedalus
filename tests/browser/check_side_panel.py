@@ -8,8 +8,8 @@ request. Everything else is the built app against a stub of ``/api/panel/*``. Wh
 side panel's width:
 
 - opened outside the panel, the page says what it is and asks for nothing;
-- the conversation of the active tab is shown, with its pending action as a card that has the focus:
-  Enter allows it once through the panel's door, Esc refuses the next one;
+- the conversation of the active tab is shown, with its pending action as the composer's own approval
+  card: Enter allows it once through the panel's door, Esc refuses the next one;
 - the active tab moving to another conversation's group moves the panel there; pinned, it stays;
 - "This page" asks the extension for the page's text and attaches it as a file;
 - the composer's approval chip offers the three modes and sets one through the panel's door, and the
@@ -334,9 +334,9 @@ def run() -> int:
         ready = page.evaluate("window.__shell.ready")
         assert ready["target"] == EXTENSION and len(ready["message"]["nonce"]) >= 16, ready
         expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")
-        card = page.locator(".sp-card")
+        # The composer's own card, in the composer's place; Enter and Esc answer it while nothing else has the keys.
+        card = page.locator(".composer .approval-card")
         expect(card).to_contain_text("https://bank.example/bill")
-        expect(card).to_be_focused()
         page.screenshot(path=str(SHOTS / "side-panel-approval.png"))
         page.keyboard.press("Enter")
         expect(card).to_have_count(0)
@@ -352,7 +352,7 @@ def run() -> int:
         page.reload()
         expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")
         page.wait_for_timeout(400)
-        expect(page.locator(".sp-card")).to_have_count(0)
+        expect(page.locator(".approval-card")).to_have_count(0)
 
         # A second refusal comes in and is refused from the keyboard.
         door.details["s1"]["messages"] = messages(refusal="abcdefabcdef")
@@ -362,9 +362,9 @@ def run() -> int:
         expect(page.locator(".sp-title")).to_contain_text("Find flights to Lisbon")
         page.evaluate("window.__shell.emit('current', " + json.dumps(tab("s1", "Your bill", "https://bank.example/bill")) + ")")
         expect(page.locator(".sp-title")).to_contain_text("Pay the electricity bill")
-        expect(page.locator(".sp-card")).to_be_focused()
+        expect(page.locator(".composer .approval-card")).to_be_visible()
         page.keyboard.press("Escape")
-        expect(page.locator(".sp-card")).to_have_count(0)
+        expect(page.locator(".approval-card")).to_have_count(0)
         assert door.posted("/api/panel/sessions/s1/policy/refuse") == [{"key": "abcdefabcdef"}], door.posts
 
         # Pinned, the panel stays where it is when the tab moves.
@@ -507,7 +507,7 @@ def run() -> int:
         # In Russian, as the extension says.
         door = Door()
         ctx, page = open_panel(browser, door, lang="ru")
-        expect(page.locator(".sp-card")).to_contain_text("Разрешить один раз")
+        expect(page.locator(".composer .approval-card")).to_contain_text("Разрешить один раз")
         expect(page.locator(".sp-attach")).to_contain_text("Эта страница")
         page.screenshot(path=str(SHOTS / "side-panel-approval-ru.png"))
         ctx.close()

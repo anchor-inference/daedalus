@@ -217,9 +217,9 @@ def test_the_page_store_and_the_navigation_take_a_slug_in_any_script(tmp_path: P
     for bad in ("Калькулятор", "_kit", "a/b", "a.b", "a b", "", "x" * 64, unicodedata.normalize("NFD", "отчёт")):
         with pytest.raises(PageError):
             check_slug(bad)
-    assert NavigationConfig(rail=["page:калькулятор", "inbox"]).rail == ["page:калькулятор", "inbox"]
+    assert NavigationConfig(pinned=["page:калькулятор", "inbox"]).pinned == ["page:калькулятор", "inbox"]
     with pytest.raises(ValueError):
-        NavigationConfig(rail=["page:a/b"])
+        NavigationConfig(pinned=["page:a/b"])
 
 
 # -- where a widget cannot run ------------------------------------------------------------------

@@ -1,8 +1,17 @@
-/* ── palette, offline strip ──────────────────────────────────────────────── */
+/* ── offline strip ──────────────────────────────────────────────── */
 /* One quiet row: warn text on a 12% wash. The wash sits on --bg, not on nothing, because the strip is
    sticky and the page scrolls under it. */
 .offline-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 12px; font-size: var(--fs-12); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); }
 .main.chat-open .offline-strip { flex: none; }
+@media (max-width: 1023px) {
+  /* The global offline line, in the strip's shape: red, 32 px, under the bar. */
+  /* A page drawn from the primitives puts the strip under its own top bar; elsewhere the strip moves
+     under the page header, where the design has it, rather than above it. */
+  .main:has(> .ph-page) > .offline-strip { display: none; }
+  .main > .offline-strip { order: 1; }
+  .main > :not(.pagehead):not(.offline-strip) { order: 2; }
+  .offline-strip { min-height: 32px; display: flex; align-items: center; justify-content: center; padding: 6px var(--gutter); font-size: var(--fs-13); font-weight: 500; color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); border-bottom: 0; }
+}
 
 /* The agent's own changes. Three states, one shape: waiting for a restart, applied, refused. */
 .change-strip { position: sticky; top: 0; z-index: 13; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; padding: 8px 14px; font-size: var(--fs-13); background: var(--surface-1); }
@@ -14,118 +23,99 @@
 .change-problem { color: var(--warn); }
 .change-actions { display: flex; gap: 8px; flex: none; }
 .main.chat-open .change-strip { flex: none; }
-.nudge-strip { position: sticky; top: 0; z-index: 13; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; min-height: 28px; padding: 4px 12px; font-size: var(--fs-12); color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
-.nudge-strip a { color: var(--fg); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
-.main.chat-open .nudge-strip { flex: none; }
-/* The search is a 40px row closed by a hairline, part of the surface rather than a field lying on it. */
-.palette-sheet .field { height: var(--ctl-h-lg); margin: 0 0 4px; padding-inline: var(--space-3); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; }
-.palette-sheet .field:focus { box-shadow: none; }
-.palette-list { display: flex; flex-direction: column; gap: 1px; max-height: 50vh; overflow-y: auto; }
-/* The hint's column is at most 40 % of the row and no wider than its text. A max-width in percent on
-   the hint itself resolved against its own auto column, a cycle the browser settled at a few
-   characters: "Al…" for "All projects" with half the row empty. */
-.palette-row { display: grid; grid-template-columns: auto minmax(0, 1fr) fit-content(40%); gap: 10px; align-items: center; width: 100%; min-height: var(--row-h-dense); padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; border-radius: var(--radius-sm); cursor: pointer; }
-.palette-row .ic { color: var(--fg-3); }
-.palette-row:hover { background: var(--surface-2); }
-.palette-row.on { background: var(--surface-3); }
-.palette-row .sub { text-align: right; font-size: var(--fs-12); color: var(--fg-3); }
-.palette-row .sub.tail { direction: rtl; }
 /* the first item of a meta line keeps its width; what follows truncates */
 .erow-meta > span:first-child, .erow-meta > .nowrap, .erow-meta > .chip, .erow-meta > span[title], .erow-meta > .pill { flex: none; }
 .erow-meta > .mono:not(:first-child) { flex: 0 1 auto; }
-/* The model is the part of a row's state line that gives way, with an ellipsis: held at its width
-   by the rule above, it was cut flush against the row's menu — "DeepSee" with nothing to say so. */
-.erow-meta > span.erow-model { flex: 0 1 auto; }
 .mrow-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); align-items: center; }
 .provider-limit { margin-top: 10px; padding: 8px 0; border-top: 1px solid var(--line); line-height: 1.4; }
-.provider-limit .linkbtn { margin-left: 8px; }
+.provider-limit .btn, .provider-limit .linkbtn { margin-left: 8px; }
 @media (max-width: 480px) { .kpi-grid > .kpi:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 
-/* ── files the agent sent, attached under the answer ───────────────────────────────────── */
-.sent-files { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin-top: 8px; }
-.sent-file.image { margin: 0; display: flex; flex-direction: column; gap: 4px; max-width: min(100%, 420px); }
-.sent-file.image .tool-image { max-height: 320px; }
-.sent-file.file-chip { max-width: 100%; min-height: var(--row-h); }
-.sent-file .truncate { max-width: 260px; }
 
-/* ── voice: the orb, what was said, and the agents it started ────────────────────────────── */
-/* This page is looked at sideways by someone who is talking, so everything it has to say it says in
-   motion and colour before it says it in words: the orb breathes when nothing is happening, swells
-   with the operator's own voice, turns while the concierge thinks and ripples while it speaks. Three
-   custom properties carry the live part — --orb-scale, --orb-glow and --orb-spin, written sixty times
-   a second by one animation frame in Voice.tsx — and everything else here is the shape around them.
-   The :root rule for prefers-reduced-motion takes every animation below away; the colours, the words
-   and the scale still distinguish all six states, which is why none of them is drawn by motion alone. */
-.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-11); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
-.voice-beta { padding: 2px 8px; font-size: var(--fs-11); vertical-align: middle; }
-/* Wide by design: the conversation takes the room it needs and the agents stand beside it, not under
-   it. The right column grows with the glass rather than pinning the page to a column in the middle. */
-/* The page takes the height it is given as well as the width: on a 1300 px tall window the stage
-   used to stop two thirds of the way down and leave the rest of the glass empty under it. */
-.screen.voice { width: min(100%, 2160px); }
-.voice-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 480px); gap: 16px; align-items: stretch; min-height: calc(100dvh - 196px); }
+/* ── voice: the call, what was said, and the agents it started ──────────────────────────── */
+/* This page is looked at sideways by someone who is talking, so what it has to say it says in
+   motion and colour before words: the sphere breathes when nothing is happening, swells with the
+   operator's own voice, turns while the concierge thinks and ripples while it speaks. Three custom
+   properties carry the live part — --orb-scale, --orb-glow and --orb-spin, written sixty times a
+   second by one animation frame in Companion.tsx — and everything else here is the shape around them.
+   The colour is one of the three accents and only ever means one thing: cyan while the microphone is
+   open or the answer is being read out, orange when the page cannot go on without the operator (the
+   browser will not make a sound, an engine failed to load), grey for everything else. The :root rule
+   for prefers-reduced-motion takes every animation below away; the colours and the words still
+   tell the states apart, which is why none of them is drawn by motion alone. */
+.beta-tag { margin-left: 6px; padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--fs-12); font-weight: 500; color: var(--fg-2); background: var(--surface-3); }
+
+/* The page is the area under its header and nothing scrolls but what is inside it: the transcript
+   in its own box, the stage when the window is too short for it, the agents beside them. The page
+   scrolling as well put the field of a call under the fold of a short window. */
+.screen.voice { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; padding: 0; background: var(--bg); }
+.main:has(.voice-grid) { overflow: hidden; }
+.voice-grid { flex: 1; min-height: 0; display: flex; }
+
 .voice-stage {
-  position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center;
-  gap: 16px; padding: clamp(28px, 5vh, 64px) 20px 22px; min-height: min(72vh, 660px);
-  --orb-color: var(--accent);
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 16px;
+  padding: 20px 24px 16px; overflow-y: auto;
+  --orb-color: var(--fg-3);
   --orb-scale: 1; --orb-glow: .3; --orb-spin: 8s;
 }
-/* The light behind the whole card, tinted by whatever the page is doing. Lightening to elevate, not
-   a darker slab: the stage is the raised surface here and the halo is what raises it. */
+/* The light behind the whole stage, tinted by whatever the page is doing and kept low enough that the
+   page stays calm: it is a breath of colour, not a spotlight. */
 .voice-stage::before {
-  content: ""; position: absolute; left: 50%; top: 14%; width: min(120%, 780px); aspect-ratio: 1; translate: -50% 0;
-  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 9%, transparent) 0%, transparent 62%);
+  content: ""; position: absolute; left: 50%; top: 10%; width: min(120%, 780px); aspect-ratio: 1; translate: -50% 0;
+  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 7%, transparent) 0%, transparent 62%);
   opacity: calc(.35 + var(--orb-glow) * .5); transition: opacity .4s ease, background .6s ease; pointer-events: none;
 }
-.voice-stage.phase-idle { --orb-color: var(--fg-3); }
-.voice-stage.phase-loading { --orb-color: var(--warn); }
-.voice-stage.phase-listening { --orb-color: var(--accent); }
-.voice-stage.phase-thinking,
-.voice-stage.phase-delegating { --orb-color: var(--info); }
-.voice-stage.phase-speaking { --orb-color: var(--ok); }
+.voice-stage.phase-listening, .voice-stage.phase-speaking { --orb-color: var(--live); }
+.voice-stage.phase-thinking, .voice-stage.phase-delegating, .voice-stage.phase-loading { --orb-color: var(--fg-2); }
+.voice-stage.needs-you { --orb-color: var(--attention); }
 .voice-stage > * { position: relative; }
 
-/* Two auto margins, and the free height splits evenly: the chip stays at the top, the composer at the
-   bottom, and the orb with its captions sits in the middle of whatever is left. */
-.voice-chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: auto; }
-.chip.quiet { color: var(--fg-3); }
-/* The state chip animates between states rather than swapping: three bars that stand still when idle,
+/* Two auto margins, and the free height splits evenly: the state stays at the top, the field at the
+   bottom, and the sphere with its captions sits in the middle of whatever is left. */
+.voice-chips { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 14px; min-height: var(--ctl-h); margin-bottom: auto; }
+/* The state is a word, not a chip: it takes the colour and the three bars beside it, and nothing
+   else on the page is that colour at that weight. */
+.voice-phase { display: inline-flex; align-items: center; gap: 8px; color: var(--orb-color, var(--fg-2)); font-size: var(--fs-14); font-weight: 500; transition: color .3s ease; }
+.voice-stage.phase-idle .voice-phase { color: var(--fg-2); }
+.voice-by { color: var(--fg-3); font-size: var(--fs-12); }
+.voice-chips .btn.ghost { margin-left: 2px; }
+/* The state's bars animate between states rather than swapping: three bars that stand still when idle,
    rise and fall with a listening page, travel while it thinks, and pulse together while it speaks. */
-.voice-chip { color: var(--orb-color, var(--fg-2)); border-color: transparent; background: color-mix(in srgb, var(--orb-color) 12%, transparent); transition: color .3s ease, background .3s ease, border-color .3s ease; }
-.voice-chip-mark { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; margin-right: 2px; }
+.voice-chip-mark { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
 /* The bars are drawn at their tallest and scaled down: animating `height` on three elements at 60 fps
    is a layout pass per frame, and a transform is none. `transform-origin` keeps them standing on the
    baseline rather than shrinking towards their middle. */
 .voice-chip-mark i { display: block; width: 2px; height: 11px; border-radius: 1px; background: currentColor; transform-origin: bottom; transform: scaleY(.364); transition: transform .3s ease; }
-.voice-chip.listening .voice-chip-mark i { animation: chip-bars 1s ease-in-out infinite; }
-.voice-chip.listening .voice-chip-mark i:nth-child(2) { animation-delay: .12s; }
-.voice-chip.listening .voice-chip-mark i:nth-child(3) { animation-delay: .24s; }
-.voice-chip.speaking .voice-chip-mark i { animation: chip-bars .62s ease-in-out infinite; }
-.voice-chip.speaking .voice-chip-mark i:nth-child(2) { animation-delay: .1s; }
-.voice-chip.speaking .voice-chip-mark i:nth-child(3) { animation-delay: .2s; }
-.voice-chip.thinking .voice-chip-mark i,
-.voice-chip.delegating .voice-chip-mark i,
-.voice-chip.loading .voice-chip-mark i { transform: scaleY(.364); animation: chip-travel 1.4s ease-in-out infinite; }
-.voice-chip.thinking .voice-chip-mark i:nth-child(2),
-.voice-chip.delegating .voice-chip-mark i:nth-child(2),
-.voice-chip.loading .voice-chip-mark i:nth-child(2) { animation-delay: .18s; }
-.voice-chip.thinking .voice-chip-mark i:nth-child(3),
-.voice-chip.delegating .voice-chip-mark i:nth-child(3),
-.voice-chip.loading .voice-chip-mark i:nth-child(3) { animation-delay: .36s; }
+.voice-phase.listening .voice-chip-mark i { animation: chip-bars 1s ease-in-out infinite; }
+.voice-phase.listening .voice-chip-mark i:nth-child(2) { animation-delay: .12s; }
+.voice-phase.listening .voice-chip-mark i:nth-child(3) { animation-delay: .24s; }
+.voice-phase.speaking .voice-chip-mark i { animation: chip-bars .62s ease-in-out infinite; }
+.voice-phase.speaking .voice-chip-mark i:nth-child(2) { animation-delay: .1s; }
+.voice-phase.speaking .voice-chip-mark i:nth-child(3) { animation-delay: .2s; }
+.voice-phase.thinking .voice-chip-mark i,
+.voice-phase.delegating .voice-chip-mark i,
+.voice-phase.loading .voice-chip-mark i { transform: scaleY(.364); animation: chip-travel 1.4s ease-in-out infinite; }
+.voice-phase.thinking .voice-chip-mark i:nth-child(2),
+.voice-phase.delegating .voice-chip-mark i:nth-child(2),
+.voice-phase.loading .voice-chip-mark i:nth-child(2) { animation-delay: .18s; }
+.voice-phase.thinking .voice-chip-mark i:nth-child(3),
+.voice-phase.delegating .voice-chip-mark i:nth-child(3),
+.voice-phase.loading .voice-chip-mark i:nth-child(3) { animation-delay: .36s; }
 @keyframes chip-bars { 0%, 100% { transform: scaleY(.273); } 50% { transform: scaleY(1); } }
 @keyframes chip-travel { 0%, 100% { opacity: .25; transform: scaleY(.364) translateY(0); } 50% { opacity: 1; transform: scaleY(.364) translateY(-3px); } }
 
 .voice-orb-wrap { display: grid; place-items: center; padding: 8px 0 4px; }
-.voice-mascot-wrap { display:grid; place-items:center; width:100%; min-height:400px; }
-.voice-mascot { position:relative; display:block; width:min(100%,440px); aspect-ratio:1; padding:0; border:0; background:transparent; cursor:pointer; transform:scale(var(--orb-scale,1)); transition:transform var(--t-fast); }
-.voice-mascot:disabled { cursor:default; }
-.voice-mascot .pet-canvas { width:100%; height:100%; pointer-events:none; }
-.voice-mascot-mic { position:absolute; left:50%; bottom:18px; translate:-50% 0; display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:50%; background:var(--surface-2); color:var(--fg); box-shadow:var(--shadow-md); }
-.voice-mascot.on .voice-mascot-mic { color:var(--orb-color); }
-/* The orb is the page. On a wide screen it was capped at 232 px in a card most of a metre tall,
+.voice-mascot-wrap { display: grid; place-items: center; width: 100%; min-height: 400px; }
+.voice-mascot { position: relative; display: block; width: min(100%, 440px); aspect-ratio: 1; padding: 0; border: 0; background: transparent; cursor: pointer; transform: scale(var(--orb-scale, 1)); transition: transform var(--t-fast); }
+.voice-mascot:disabled { cursor: default; }
+.voice-mascot .pet-canvas { width: 100%; height: 100%; pointer-events: none; }
+/* The microphone under the figure is the same round plate as the composer's controls. */
+.voice-mascot-mic { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; display: grid; place-items: center; width: var(--ctl-h-lg); height: var(--ctl-h-lg); border: 1px solid var(--line-strong); border-radius: 50%; background: var(--card); color: var(--fg-2); }
+.voice-mascot.on .voice-mascot-mic { color: var(--orb-color); border-color: color-mix(in srgb, var(--orb-color) 45%, var(--line-strong)); }
+/* The sphere is the page. On a wide screen it was capped at 232 px in a card most of a metre tall,
    which read as a small button lost in a lot of glass. */
 .voice-orb {
-  position: relative; width: clamp(148px, 22vw, 360px); aspect-ratio: 1; border: 0; padding: 0; border-radius: 50%;
+  position: relative; width: clamp(148px, 22vw, 320px); aspect-ratio: 1; border: 0; padding: 0; border-radius: 50%;
   background: none; color: var(--fg); cursor: pointer; display: grid; place-items: center; isolation: isolate;
   transform: scale(var(--orb-scale)); transition: transform .09s linear, opacity .3s ease;
 }
@@ -135,22 +125,21 @@
    travelling around it, and the rings it sends out while it is listening or speaking. */
 .orb-halo {
   position: absolute; inset: -22%; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 55%, transparent) 0%, transparent 65%);
-  opacity: calc(.15 + var(--orb-glow) * .55); filter: blur(14px); transition: opacity .12s linear;
+  background: radial-gradient(circle, color-mix(in srgb, var(--orb-color) 45%, transparent) 0%, transparent 65%);
+  opacity: calc(.12 + var(--orb-glow) * .45); filter: blur(14px); transition: opacity .12s linear;
 }
 .orb-shell {
   position: absolute; inset: 0; border-radius: 50%;
-  background: color-mix(in srgb, var(--orb-color) 14%, var(--surface-2));
-  box-shadow: var(--shadow-md);
-  border: 1px solid color-mix(in srgb, var(--orb-color) 28%, var(--line-strong));
+  background: color-mix(in srgb, var(--orb-color) 9%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--orb-color) 35%, var(--line-strong));
   animation: orb-breathe 5.5s ease-in-out infinite;
 }
 /* Light travelling inside the sphere rather than a rim around it: blurred, so it reads as something
    moving under the surface and not as a dial with a pointer on it. */
 .orb-sweep {
   position: absolute; inset: 12%; border-radius: 50%; pointer-events: none;
-  background: conic-gradient(from 0deg, transparent 0deg, color-mix(in srgb, var(--orb-color) 60%, transparent) 60deg, transparent 170deg, color-mix(in srgb, var(--orb-color) 22%, transparent) 260deg, transparent 340deg);
-  opacity: calc(.12 + var(--orb-glow) * .38); mix-blend-mode: screen; filter: blur(16px);
+  background: conic-gradient(from 0deg, transparent 0deg, color-mix(in srgb, var(--orb-color) 55%, transparent) 60deg, transparent 170deg, color-mix(in srgb, var(--orb-color) 20%, transparent) 260deg, transparent 340deg);
+  opacity: calc(.1 + var(--orb-glow) * .34); mix-blend-mode: screen; filter: blur(16px);
   animation: orb-turn var(--orb-spin, 8s) linear infinite;
 }
 .orb-ring {
@@ -168,22 +157,22 @@
 @keyframes orb-turn { to { rotate: 360deg; } }
 @keyframes orb-ripple { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
 
-.voice-hint { text-align: center; max-width: 46ch; min-height: 1.4em; }
-.voice-captions { width: min(100%, 780px); display: grid; gap: 10px; text-align: center; padding: 6px 0; }
+.voice-hint { max-width: 46ch; min-height: 1.4em; text-align: center; color: var(--fg-3); font-size: var(--fs-13); }
+/* A long answer scrolls in its own box: it took the field with it off the bottom of the stage, and the
+   field is how the call is ended. */
+.voice-captions { width: min(100%, var(--reading-w)); flex: 0 1 auto; min-height: 0; max-height: 36vh; overflow-y: auto; display: grid; gap: 10px; text-align: center; padding: 6px 0; }
 /* The diagnostic line: a measurement of the last answer, deliberately the quietest thing on the page.
    It is read when something feels slow and ignored the rest of the time, so it sits below the words
-   at the smallest size the page uses and takes no colour of its own. */
-/* The hint's grey, not the fainter one: at 12px on the stage's dark gradient the faint grey was the
-   one line on the page that could hardly be read. It stays secondary by its size. */
-.voice-timing { text-align: center; font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+   at the smallest size the page uses. The hint's grey, not the fainter one: at this size on the
+   stage's wash the faint grey was the one line on the page that could hardly be read. */
+.voice-timing { text-align: center; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; }
 /* Three voices, three treatments: what the operator asked (settled, quiet), what is being heard right
    now (light and italic, because it is still provisional), and the answer (large, and arriving). */
-.voice-asked { margin: 0; color: var(--fg-2); font-size: 14px; }
-.voice-heard { margin: 0; color: var(--fg-3); font-style: italic; font-size: 15px; animation: caption-in .25s ease-out both; }
-.voice-said { margin: 0; font-size: clamp(18px, 1.35vw, 23px); line-height: 1.5; overflow-wrap: anywhere; min-height: 1.5em; }
+.voice-asked { margin: 0; color: var(--fg-3); font-size: var(--fs-14); }
+.voice-heard { margin: 0; color: var(--fg-3); font-style: italic; font-size: var(--fs-prose); animation: caption-in .25s ease-out both; }
+.voice-said { margin: 0; font-size: clamp(18px, 1.35vw, 22px); line-height: 1.5; overflow-wrap: anywhere; min-height: 1.5em; }
 .voice-sentence { display: inline; animation: sentence-in .45s cubic-bezier(.2, .7, .3, 1) both; }
 .voice-sentence.writing { color: var(--fg-2); }
-/* Nothing said yet, and the concierge has not started: three dots that are a wait, not a sentence. */
 /* Nothing said yet: a fixed width, breathed on with a transform. It animated `width` before, on the
    element the page shows most of the time, which is a layout pass sixty times a second for a dash. */
 .voice-waiting { display: inline-block; width: 52px; height: 6px; border-radius: 3px; background: currentColor; opacity: .16; transform: scaleX(.808); animation: waiting-breathe 2.4s ease-in-out infinite; }
@@ -191,69 +180,62 @@
    loses is the claim to have been heard, which is one shade of the text and one small word after it. */
 .voice-sentence.unspoken { color: var(--fg-2); }
 .voice-unspoken { font-style: normal; font-size: .62em; color: var(--fg-3); vertical-align: .35em; margin-left: .3em; white-space: nowrap; }
-.voice-problem { margin: 0; color: var(--bad); font-size: 13.5px; }
+.voice-problem { margin: 0; color: var(--attention); font-size: var(--fs-13); }
 /* The tap the browser wants before it will make a sound, offered where the answer would have been. */
-.voice-blocked { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; font-size: 13.5px; color: var(--fg-2); }
+.voice-blocked { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; font-size: var(--fs-13); color: var(--attention); }
 @keyframes caption-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sentence-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes waiting-breathe { 0%, 100% { opacity: .1; transform: scaleX(.654); } 50% { opacity: .28; transform: scaleX(1); } }
 
-/* Typing is half of the conversation, so the field is a field: full strength, a round send at its
-   end, and under a transcript the microphone in that same place until something is typed. */
-.voice-compose { width: min(100%, 760px); display: flex; align-items: center; gap: 8px; margin-top: auto; }
-.voice-compose .field { flex: 1; min-width: 0; border-radius: var(--radius-pill); padding-inline: 16px; }
-/* One round button at the end of the field: send, start a call, or hang up. A grid with nothing
-   else in it, so the glyph is centred by the box and not by a label's gap. */
-.voice-compose-btn { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; line-height: 0; }
-.voice-compose-btn .ic { display: block; margin: 0; }
-.voice-compose-btn.send { background: var(--primary); color: var(--primary-ink); }
-.voice-compose-btn.send:disabled { background: var(--surface-2); color: var(--fg-3); opacity: 1; }
-.voice-compose-btn.mic { background: var(--surface-2); color: var(--fg); }
-.voice-compose-btn.mic:hover { background: var(--surface-3); }
-.voice-compose-btn.hangup { background: var(--bad); color: var(--bg); }
-.voice-compose-btn.small { width: 32px; height: 32px; }
-.voice-compose-btn:disabled { cursor: default; opacity: .5; }
-.voice-why { width: min(100%, 720px); text-align: center; }
+/* Typing is half of the conversation, so the field is the composer's card in small: its corners and
+   hairline, the field bare inside it and one round button at its end — the filled circle that sends
+   and stops in a chat, a plain one to start a call. */
+.voice-compose { width: min(100%, var(--reading-w)); box-sizing: border-box; display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 8px 8px 8px 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-xl); background: var(--card); transition: border-color var(--t-fast); }
+.voice-compose:focus-within { border-color: var(--fg-3); }
+.voice-compose input.field { flex: 1; min-width: 0; width: auto; height: var(--ctl-h); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: var(--fs-prose); }
+.voice-compose input.field:focus-visible { box-shadow: none; }
+.voice-compose-btn { width: var(--ctl-h); height: var(--ctl-h); line-height: 0; }
+.voice-compose-btn.mic { border-color: transparent; box-shadow: none; background: var(--selected); }
+.voice-compose-btn.mic:hover:not(:disabled) { background: var(--hover); }
+.voice-compose-btn.mic:disabled { opacity: .4; cursor: default; }
+.voice-compose-btn.small { width: var(--ctl-h-sm); height: var(--ctl-h-sm); }
+.voice-why { width: min(100%, 720px); text-align: center; color: var(--fg-3); font-size: var(--fs-12); }
+.voice-why a { color: var(--fg-2); text-decoration: underline; text-underline-offset: 2px; }
 
-.voice-agents { display: grid; gap: 8px; align-content: start; overflow-y: auto; animation: panel-slide .34s cubic-bezier(.2, .7, .3, 1) both; }
-.voice-agents-head { margin: 4px 2px 2px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.voice-agents-empty { padding: 8px 2px; }
-.voice-agent { width: 100%; text-align: left; border: 1px solid var(--line); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
-.voice-agent:hover { background: var(--surface-2); border-color: var(--line-strong); }
+/* The agents it started: a column of rows like the Inbox's, at the end of the page. */
+.voice-agents { width: 320px; flex: none; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 16px; overflow-y: auto; border-left: 1px solid var(--line); }
+.voice-agents-head { display: flex; align-items: center; height: 36px; margin: 0; padding: 0 12px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.voice-agents-head .sub { margin-left: 4px; font-weight: 400; }
+.voice-agents-empty { padding: 8px 12px; }
+.voice-agent { display: block; width: 100%; padding: 10px 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; transition: background var(--t-fast); }
+.voice-agent:hover { background: var(--hover); }
+.voice-agent:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.voice-agent.open { background: var(--selected); }
+.voice-agent-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .voice-agent-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.voice-agent-top b { min-width: 0; }
+.voice-agent-top b { flex: 1; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
+.voice-agent-wait { flex: none; color: var(--attention); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
 /* What an agent said on the way, as opposed to what it answered: the live line is the one the
    operator is waiting on, so it reads as the foreground and the finished answer stays muted. */
+.voice-agent-line { color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; }
 .voice-agent-live { color: var(--fg); }
+.voice-agent-when { color: var(--fg-3); font-size: var(--fs-12); }
 
 /* ── the middle of the page, and what else can be in it ──────────────────────────────────── */
-/* The owner's ask, in one sentence: open the transcript without ending the conversation. So the
-   centre column is an area rather than a card — the orb is one thing that can be drawn in it and a
-   session's transcript is another — and the microphone leaves the middle for a small control in the
-   corner that says the same six states in the same six colours. Nothing here reaches the voice
-   session: it is in voicesession.ts, and it does not know this file exists. */
-.voice-centre { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* The centre is an area rather than a card: the call is one thing that can be drawn in it and a
+   session's transcript is another, and the conversation behind a swap never stops. Nothing here
+   reaches the voice session: it is in voicesession.ts, and it does not know this file exists. */
+.voice-centre { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .voice-centre-view { display: flex; flex-direction: column; flex: 1; min-height: 0; animation: voice-swap .2s ease-out both; }
 .voice-centre-view > * { flex: 1; min-height: 0; }
 @keyframes voice-swap { from { opacity: 0; } to { opacity: 1; } }
 
-/* The transcript, in the room the orb was using. The card is the frame; the session view inside it
-   takes the height it is given, which is what it has always done in a pane. */
-.voice-read { display: flex; flex-direction: column; overflow: hidden; padding: 0; min-height: min(72vh, 660px); }
-/* Reading is a pane, not a page. The session view takes the height it is given and scrolls inside
-   it — but only if something gives it one, and nothing did: the grid row sized itself to a six
-   hundred turn conversation, the page grew to whatever that came to, and the floating microphone and
-   the agents beside it went off the bottom of the window with it. So while a transcript is open the
-   page stops being the scroller and the transcript's own box starts. The phone block further down is
-   the same idea at that width; it only changes the padding and where the agents panel goes. */
-.main:has(.voice-grid.reading) { overflow: hidden; }
-.screen.voice:has(.voice-grid.reading) { display: flex; flex-direction: column; min-height: 0; }
-.voice-grid.reading { flex: 1; min-height: 0; }
-.voice-grid.reading .voice-centre, .voice-grid.reading .voice-agents { min-height: 0; }
-.voice-grid.reading .voice-read { height: 100%; min-height: 0; }
+/* The transcript, in the room the call was using: the conversation as a chat draws it, in its own
+   box that scrolls, with the field under it. */
+.voice-read { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .voice-read-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The session brings its own head — a back arrow, the title, the model — and directly under the
-   breadcrumb that says the same thing it is one row of chrome too many. Hidden rather than made
+   page's header that says the same thing it is one row of chrome too many. Hidden rather than made
    optional in Session.tsx: display:none takes it out of the tab order as well as out of the page. */
 .voice-read .chat-head { display: none; }
 /* Two composers a centimetre apart, both sending to the concierge, is a question the operator should
@@ -261,70 +243,48 @@
    An agent's transcript keeps its own composer, which is the reason for opening it. */
 .voice-read.own .composer { display: none; }
 .voice-read-wait { padding: 20px; }
-.voice-crumbs { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.voice-crumbs { flex: none; display: flex; align-items: center; gap: 8px; height: var(--row-h-2); padding: 0 12px; border-bottom: 1px solid var(--line); }
 .voice-crumbs b { min-width: 0; font-size: var(--fs-14); font-weight: 500; }
 .voice-to-transcript { margin-left: auto; }
 /* The captions and the field, under the concierge's own transcript: what is being said out loud now
    belongs with what was said before it, not on another screen. */
-.voice-read-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); }
+.voice-read-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 24px calc(14px + env(safe-area-inset-bottom)); }
 .voice-read-foot .voice-captions { max-height: 22vh; overflow-y: auto; }
-.voice-read-foot .voice-said { font-size: 16px; }
+.voice-read-foot .voice-said { font-size: var(--fs-prose); }
 .voice-read-foot .voice-compose { margin-top: 0; }
 .voice-read-foot .voice-captions:not(:has(p, span)) { display: none; }
 
-/* The agent whose transcript is open: the panel is a set of destinations now, and one of them is
-   where the reader already is. */
-.voice-agent.open { border-color: var(--line-strong); background: var(--surface-3); }
-
-@keyframes panel-slide { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
-
-@media (max-width: 900px) {
-  .voice-grid { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  /* On a phone the orb has to be under the thumb, so the captions move above it and the control sits
-     at the bottom of the card, just over the composer and the tab bar. The panel stacks below rather
-     than sliding in from a side that is not there. */
-  .voice-stage { min-height: 56vh; padding: 16px 12px 14px; justify-content: flex-end; gap: 12px; }
+@media (max-width: 1023px) {
+  /* On a phone the control has to be under the thumb, so the captions move above the sphere and the
+     field sits at the bottom, just over the edge of the screen. The agents are a sheet opened from
+     the header, so the column they stood in is gone. */
+  .voice-stage { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); gap: 12px; justify-content: flex-end; }
   .voice-chips { order: -3; }
   .voice-captions { order: -2; margin-bottom: auto; }
   .voice-orb { width: clamp(132px, 42vw, 180px); }
-  .voice-mascot-wrap { min-height:250px; }
-  .voice-mascot { width:min(100%,280px); }
-  .voice-mascot-mic { bottom:10px; width:36px; height:36px; }
-  .voice-hint { font-size: 12.5px; }
-  .voice-compose { margin-top: 12px; opacity: 1; }
-  .voice-agents { animation-name: panel-rise; }
-  /* Reading fills the screen on a phone, literally: the page stops scrolling and the transcript takes
-     every pixel under the header, with no card around it — a frame inside a screen this narrow was
-     two borders and a margin of nothing on each side. The agents are a sheet opened from the header. */
-  .screen.voice:has(.voice-grid.reading) { padding: 0; }
-  .voice-grid.reading { gap: 0; }
-  .voice-grid.reading .voice-read { border: 0; border-radius: 0; background: none; box-shadow: none; }
-  /* The call is the same: no frame, and only what a person talking needs — the state, the face that
-     is the microphone, the line of what was said and the field. The engine and timing lines are
-     for the Settings card and the wide window. */
-  .voice-stage { border: 0; background: none; box-shadow: none; }
-  .voice-chips .chip.quiet, .voice-stage .voice-timing, .voice-stage .voice-engine { display: none; }
+  .voice-mascot-wrap { min-height: 250px; }
+  .voice-mascot { width: min(100%, 280px); }
+  .voice-mascot-mic { bottom: 10px; }
+  .voice-hint { font-size: var(--fs-12); }
+  .voice-compose { margin-top: 12px; }
+  /* Only what a person talking needs: the state, the face that is the microphone, the line of what
+     was said and the field. The engine and timing lines are for the Settings card and the wide window. */
+  .voice-by, .voice-stage .voice-timing, .voice-stage .voice-engine { display: none; }
   .voice-read-foot { padding-inline: 12px; }
   .voice-read-foot .voice-captions { max-height: 14vh; }
-  .voice-read-foot .voice-said { font-size: 15px; }
 }
-.voice-agents-sheet .voice-agents { animation: none; overflow: visible; }
-@keyframes panel-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.voice-agents-sheet .voice-agents { width: auto; padding: 0; border: 0; overflow: visible; }
 /* The global rule at the top of this file takes every animation and transition away for a reader who
-   asked for less motion. That is not enough here: the orb's size and glow are driven by the
+   asked for less motion. That is not enough here: the sphere's size and glow are driven by the
    microphone through custom properties no animation rule can reach. The page stops writing them —
    the animation frame is not started at all under this preference, or while the tab is hidden — and
-   what they were left at is overridden below, so the six states stay apart by colour and by the word
-   on the chip. */
+   what they were left at is overridden below, so the states stay apart by colour and by the word. */
 @media (prefers-reduced-motion: reduce) {
   .voice-orb { transform: none !important; }
   .orb-halo { opacity: .3 !important; }
   .orb-sweep { opacity: .18 !important; }
   .voice-stage::before { opacity: .5 !important; }
-  /* The cross-fade between the orb and a transcript is a transition like any other, and a reader who
-     asked for less motion gets the swap without it. The floating microphone's miniature is pinned
-     the same way the orb above it is, and for the same reason: the six states are still six colours
-     and six words. */
+  /* The cross-fade between the sphere and a transcript is a transition like any other, and a reader
+     who asked for less motion gets the swap without it. */
   .voice-centre-view { animation: none !important; }
-  .voice-agents { transition: none !important; }
 }

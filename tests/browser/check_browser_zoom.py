@@ -120,7 +120,11 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     bs.add("g1", scene="qr", owner_id=S1)
     box = scenes["qr"].boxes["qr"]
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    url = f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}&panel=browser"
+    # The panel's own width (30 % of the window, at most 520 px) fits the page so small that even zoomed
+    # all the way the code stays just under the screen pixels a module this check asks for. An operator
+    # reading a code drags the panel wider; the stored width is that drag, about the old 42 % of the chat.
+    context.add_init_script("try { localStorage.setItem('daedalus.width.panel', '600'); } catch (e) {}")
+    url =f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}&panel=browser"
     page = open_page(context, bs, stub, url)
     page.wait_for_selector(f"{VIEWER}[data-state='live']", timeout=10000)
     wait_frames(page, ROOT, 1)
@@ -158,6 +162,17 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
         say(f"Ctrl with the wheel zoomed only to {scale:.2f}")
     if [i for i in bs.inputs("g1")[inputs:] if i.get("type") != "move"]:
         say(f"the zoom's wheel reached the page: {bs.inputs('g1')[inputs:]}")
+    # The picture fills its frame and the code lies near its top edge, so zooming about the pointer leaves the
+    # code's first rows outside the frame; drag it to the middle, as a person reading it would.
+    clip, _ = code_on_screen(page, box)
+    shown = page.locator(VIEWER).bounding_box()
+    dx = shown["x"] + shown["width"] / 2 - (clip["x"] + clip["width"] / 2)
+    dy = shown["y"] + shown["height"] / 2 - (clip["y"] + clip["height"] / 2)
+    page.mouse.move(shown["x"] + shown["width"] / 2, shown["y"] + shown["height"] / 2)
+    page.mouse.down(button="middle")
+    page.mouse.move(shown["x"] + shown["width"] / 2 + dx, shown["y"] + shown["height"] / 2 + dy, steps=6)
+    page.mouse.up(button="middle")
+    page.wait_for_timeout(300)
     if not wait_for(page, lambda: any(v.get("quality") == 92 and v.get("adaptive") is False for v in live.of("view")[views:])):
         say(f"zoomed, the view asked for no sharper frames: {live.of('view')[views:]}")
     page.wait_for_timeout(800)

@@ -18,16 +18,18 @@ import { navigate, pathFor } from "../router";
 import { hold, invalidate, prime, release, useOffline, useQuery } from "../store";
 import { SUMMARY_KEY } from "../events";
 import { useProjects } from "../projects";
-import { act, afterChange, byDay, byProject, categoryLabel, entryPath, listKey, markAllSeen, markSeen, noticeIcon, noticeLine, projectNames, resolutionLabel, toneClass, useNotifications, type ActResult } from "../notifications";
+import { act, afterChange, byDay, categoryLabel, entryPath, listKey, markAllSeen, markSeen, markUnseen, noticeIcon, noticeLine, projectNames, resolutionLabel, toneClass, type ActResult } from "../notifications";
+import { INBOX_FILTERS, INBOX_LIMIT, firstLine, useInboxLists, viewOf, type InboxFilter } from "./inboxdata";
 import { PushNudge } from "../pushui";
 import { MovesInProgress } from "../project/moves";
 import { errorText } from "../ui";
 import { deleteWithUndo, toast as statusLine, type MenuItem } from "../ui/dialogs";
 import { PendingSchedules, usePendingSchedules } from "../schedulecard";
-import { ActionSheet, Banner, BottomSheet, Chip, ChipBar, EmptyState, IconButton, ListRow, RowSkeleton, SectionHeader, TopBar } from "../ui/phone";
+import { Banner, Chip, ChipBar, EmptyState, RowSkeleton, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
+import { IconButton, Menu, Row, Sheet } from "../ui/primitives";
 
-type Filter = "all" | "unseen" | "problems" | "projects";
-type Open = { kind: "entry"; id: number } | { kind: "proposal"; id: string } | { kind: "menu" } | { kind: "bulk" } | null;
+type Open = { kind: "entry"; id: number } | { kind: "proposal"; id: string } | { kind: "menu" } | { kind: "project" } | { kind: "bulk" } | null;
 /** A request answered from this page, kept on it (dimmed) until the page is left: the answer, and
  *  whether someone else had answered first. */
 type Answered = { entry: Notification; resolution: string; conflict: boolean };
@@ -43,19 +45,16 @@ function answerClass(style: string, id: string, sheet = false): string {
   return "ph-btn sm";
 }
 
-/** The first line of a request's text: the command, the question. */
-function firstLine(body: string): string {
-  return body.split("\n").find((line) => line.trim()) ?? "";
-}
-
 export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; onOpen: (id: string) => void }) {
   const offline = useOffline();
-  const [filter, setFilter] = useState<Filter>("all");
-  const view = filter === "projects" ? "all" : filter;
-  const key = listKey(view, null, 200);
-  const list = useNotifications(view, null, 200);
-  const all = useNotifications("all", null, 200);
-  const needsList = useNotifications("needs_you", null, 50);
+  const [filter, setFilter] = useState<InboxFilter>("all");
+  const [project, setProject] = useState<string | null>(null);
+  const view = viewOf(filter);
+  const key = listKey(view, project, INBOX_LIMIT);
+  const lists = useInboxLists(project);
+  const list = lists.by[filter];
+  const all = lists.by.all;
+  const needsList = lists.by.needs;
   const proposals = useQuery<Proposal[]>("/api/proposals", { pollMs: 60000, staleMs: 30000 });
   const projects = useProjects();
   const names = projectNames(projects.data);
@@ -64,22 +63,24 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   const [answered, setAnswered] = useState<Map<number, Answered>>(new Map());
   const data = list.data;
   const unseen = data?.summary.unseen ?? all.data?.summary.unseen ?? 0;
-  const problems = (all.data?.entries ?? []).filter(problem).length;
-  const keep = (e: Notification) => (view === "unseen" ? !e.seen : view === "problems" ? problem(e) : true);
+  const keep = (e: Notification) => (view === "problems" ? problem(e) : view === "done" ? e.category === "run_finished" : true);
   const needs = (needsList.data?.entries ?? []).filter(keep);
   const kept = [...answered.values()].filter((a) => !needs.some((e) => e.id === a.entry.id));
   const entries = (data?.entries ?? []).filter((e) => !e.needs_you && !answered.has(e.id));
-  const pending = filter === "problems" ? [] : (proposals.data ?? []).filter((p) => p.status === "pending");
+  // A proposal or a schedule carries no project and no failure: only the views that could hold one show it.
+  const extras = project === null && (filter === "all" || filter === "needs");
+  const allPending = project === null ? (proposals.data ?? []).filter((p) => p.status === "pending") : [];
+  const pending = extras ? allPending : [];
   const waitingSchedules = usePendingSchedules();
-  const schedules = filter === "problems" ? [] : waitingSchedules;
-  const groups = filter === "projects" ? byProject(entries, names) : byDay(entries);
+  const schedules = extras ? waitingSchedules : [];
+  const groups = byDay(entries);
   const everything = [...needs, ...entries];
   const byId = useMemo(() => new Map([...(needsList.data?.entries ?? []), ...(data?.entries ?? []), ...[...answered.values()].map((a) => a.entry)].map((e) => [e.id, e])), [needsList.data, data, answered]);
 
   /** Show a change before the server confirms it; the badge follows from the same summary. */
   function patch(fn: (l: Notification[]) => Notification[]) {
-    for (const k of new Set([key, listKey("all", null, 200), listKey("needs_you", null, 50)])) {
-      const page = k === key ? data : k === listKey("all", null, 200) ? all.data : needsList.data;
+    for (const k of new Set([key, listKey("all", project, INBOX_LIMIT), listKey("needs_you", project, INBOX_LIMIT)])) {
+      const page = k === key ? data : k === listKey("all", project, INBOX_LIMIT) ? all.data : needsList.data;
       if (page) prime<NotificationPage>(k, { ...page, entries: fn(page.entries) });
     }
   }
@@ -87,9 +88,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
   function setSeen(ids: number[], seen: boolean) {
     if (!ids.length) return;
     patch((l) => l.map((e) => (ids.includes(e.id) ? { ...e, seen } : e)));
-    // Unread again is the reader's own mark: the host keeps no such state, so it lives in this list
-    // until the next read of it, as the desktop's does.
-    if (seen) void markSeen(ids);
+    void (seen ? markSeen(ids) : markUnseen(ids));
   }
 
   function remove(ids: number[]) {
@@ -113,8 +112,8 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
       () => {
         release(key);
         if (before[0]) prime(key, before[0]);
-        if (before[1]) prime(listKey("all", null, 200), before[1]);
-        if (before[2]) prime(listKey("needs_you", null, 50), before[2]);
+        if (before[1]) prime(listKey("all", project, INBOX_LIMIT), before[1]);
+        if (before[2]) prime(listKey("needs_you", project, INBOX_LIMIT), before[2]);
       },
       (e) => toast(errorText(e)),
     );
@@ -150,7 +149,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     ];
     const detail = needsYou && entry.body ? firstLine(entry.body) : "";
     return (
-      <ListRow
+      <Row
         key={entry.id}
         className={`ph-irow ${done ? "dim" : ""}`}
         data={{ notice: String(entry.id) }}
@@ -190,31 +189,24 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
     body = <EmptyState icon="alert" tone="bad" title={t("inbox.error")} body={list.error} action={<button type="button" className="ph-btn primary" onClick={() => list.refresh()}>{t("common.retry")}</button>} />;
   } else if (!data) {
     body = <RowSkeleton rows={7} lead="square" />;
-  } else if (nothing && filter === "all") {
+  } else if (nothing && filter === "all" && project === null) {
     body = <EmptyState icon="inbox" title={t("inbox.empty")} body={t("ph.inbox.empty.sub")} />;
   } else if (nothing) {
-    body = <EmptyState icon="check" tone="ok" title={t(filter === "unseen" ? "inbox.empty.unread" : filter === "problems" ? "inbox.empty.problems" : "inbox.empty")}
-      body={t(filter === "unseen" ? "ph.inbox.empty.unread" : "ph.inbox.empty.problems")}
-      action={<button type="button" className="ph-btn" onClick={() => setFilter("all")}>{t("ph.inbox.showall")}</button>} />;
+    body = <EmptyState icon="check" tone="ok" title={t(filter === "needs" ? "inbox.empty.needs" : filter === "problems" ? "inbox.empty.problems" : filter === "done" ? "inbox.empty.done" : "inbox.empty")}
+      body={t(filter === "needs" ? "ph.inbox.empty.needs" : filter === "problems" ? "ph.inbox.empty.problems" : filter === "done" ? "ph.inbox.empty.done" : "ph.inbox.empty.sub")}
+      action={<button type="button" className="ph-btn" onClick={() => { setFilter("all"); setProject(null); }}>{t("ph.inbox.showall")}</button>} />;
   } else {
     body = (
       <>
         <PushNudge />
-        {(needs.length > 0 || kept.length > 0) && (
+        {(needs.length > 0 || kept.length > 0 || (pending.length > 0 && selected === null)) && (
           <section className="ph-needs" aria-label={t("centre.needs")}>
-            <SectionHeader tone="warn" count={needs.length || undefined}>{t("centre.needs")}</SectionHeader>
+            <SectionHeader tone="warn" count={needs.length + (selected === null ? pending.length : 0) || undefined}>{t("centre.needs")}</SectionHeader>
             <div className="ph-list">
               {needs.map((e) => row(e))}
               {kept.map((a) => row(a.entry, { answered: a }))}
-            </div>
-          </section>
-        )}
-        {pending.length > 0 && selected === null && (
-          <section>
-            <SectionHeader count={pending.length}>{t("inbox.waiting")}</SectionHeader>
-            <div className="ph-list">
-              {pending.map((p) => (
-                <ListRow key={p.id} className="ph-irow" data={{ proposal: p.id }} title={p.title} unread
+              {selected === null && pending.map((p) => (
+                <Row key={p.id} className="ph-irow" data={{ proposal: p.id }} title={p.title} unread
                   lead={<span className="ph-kico"><Icon name="changes" size={18} /></span>}
                   trail={<span className="ph-irow-tm" title={absTime(p.created_at)}>{relTime(p.created_at)}<span className="ph-udot" aria-hidden /></span>}
                   meta={<span className="ph-ell">{[t("ph.inbox.proposal"), p.pr_number ? `PR #${p.pr_number}` : ""].filter(Boolean).join(" · ")}</span>}
@@ -227,7 +219,7 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
         {selected === null && <PendingSchedules views={schedules} header={(n) => <SectionHeader count={n}>{t("inbox.schedules")}</SectionHeader>} />}
         {groups.map((group) => (
           <section key={group.key || "-"}>
-            <SectionHeader count={group.key !== "today" && group.key !== "earlier" ? group.entries.length : undefined}>{group.label}</SectionHeader>
+            <SectionHeader>{group.label}</SectionHeader>
             <div className="ph-list">{group.entries.map((e) => row(e))}</div>
           </section>
         ))}
@@ -247,16 +239,14 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
         <TopBar back={() => setSelected(null)} backIcon="close" backLabel={t("ph.inbox.done")} title={plural("ph.inbox.selected", shown.size)}
           actions={<button type="button" className="ph-link" onClick={() => setSelected(new Set(everything.map((e) => e.id)))}>{t("ph.inbox.selectall")}</button>} />
       ) : (
-        <TopBar center title={t("nav.inbox")} sub={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
-          actions={<IconButton icon="vdots" label={t("ph.inbox.menu")} popup="menu" onClick={() => setOpen({ kind: "menu" })} />} />
+        <TopBar title={t("nav.inbox")} sub={unseen > 0 ? plural("inbox.unread", unseen) : undefined}
+          actions={<IconButton icon="vdots" label={t("ph.inbox.menu")} popup="menu" onClick={() => setOpen({ kind: "menu" })} className="ph-ib" />} />
       )}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
-      {!selected && (data || list.error) && !(nothing && filter === "all") && (
+      {!selected && (data || list.error) && !(nothing && filter === "all" && project === null) && (
         <ChipBar label={t("ph.inbox.filters")}>
-          <Chip on={filter === "all"} onClick={() => setFilter("all")}>{t("common.all")}</Chip>
-          <Chip on={filter === "unseen"} count={unseen} onClick={() => setFilter("unseen")}>{t("inbox.filter.unread")}</Chip>
-          <Chip on={filter === "problems"} count={problems || undefined} onClick={() => setFilter("problems")}>{t("inbox.filter.problems")}</Chip>
-          <Chip on={filter === "projects"} onClick={() => setFilter("projects")}>{t("centre.projects")}</Chip>
+          {INBOX_FILTERS.map((f) => <Chip key={f.id} on={filter === f.id} count={lists.count(f.id, allPending.length + (project === null ? waitingSchedules.length : 0)) || undefined} onClick={() => setFilter(f.id)}>{t(f.label)}</Chip>)}
+          <Chip on={project !== null} label={t("inbox.project")} onClick={() => setOpen({ kind: "project" })}>{project ? projectNames(projects.data).get(project) ?? t("inbox.project.all") : t("inbox.project.all")}</Chip>
         </ChipBar>
       )}
       <div className={`ph-page-body ${data && !nothing ? "list" : ""}`}><MovesInProgress projects={projects.data} />{body}</div>
@@ -267,12 +257,18 @@ export function PhoneInbox({ toast, onOpen }: { toast: (text: string) => void; o
           {toAllow.length > 0 && <button type="button" className="warn" disabled={offline} onClick={() => setOpen({ kind: "bulk" })}><Icon name="key" size={22} />{t("ph.inbox.allowN", { n: toAllow.length })}</button>}
         </div>
       )}
+      {open?.kind === "project" && (
+        <Menu onClose={() => setOpen(null)} label={t("inbox.project")} items={[
+          { label: t("inbox.project.all"), checked: project === null, onSelect: () => setProject(null) },
+          ...(projects.data ?? []).map((p) => ({ label: p.name, checked: project === p.id, onSelect: () => setProject(p.id) })),
+        ]} />
+      )}
       {open?.kind === "menu" && (
-        <ActionSheet onClose={() => setOpen(null)} items={[
+        <Menu onClose={() => setOpen(null)} items={[
           { label: t("inbox.markall"), icon: "check", disabled: unseen === 0, onSelect: () => void markAllSeen() },
           { label: t("ph.inbox.select"), icon: "check", onSelect: () => setSelected(new Set()) },
           { label: t("ph.inbox.settings"), icon: "settings", onSelect: () => navigate(pathFor("settings", "notifications")) },
-        ]} />
+        ]} label={t("dlg.menu")} />
       )}
       {current && <EntrySheet entry={current} names={names} offline={offline} onClose={() => setOpen(null)} onOpen={() => { setOpen(null); openEntry(current); }}
         onUnread={() => { setSeen([current.id], false); setOpen(null); }} onDelete={() => remove([current.id])}
@@ -330,7 +326,7 @@ function EntrySheet({ entry, names, offline, answered, onClose, onOpen, onUnread
   const opens = !!(entry.link || entry.session_id);
   const command = entry.category === "permission";
   return (
-    <BottomSheet onClose={onClose} className="ph-entry" label={entry.title}
+    <Sheet onClose={onClose} className="ph-sheet ph-entry" ariaLabel={entry.title}
       title={<span className="ph-sheet-kt"><span className={`ph-kico ${toneClass(entry)}`}><Icon name={noticeIcon(entry)} size={18} /></span><span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{entry.title}</span><span className="ph-sheet-kt-m">{categoryLabel(entry.category)} · {relTime(entry.updated_at)}</span></span></span>}
       footer={needsYou ? (
         <div className="ph-foot-stack">
@@ -352,7 +348,7 @@ function EntrySheet({ entry, names, offline, answered, onClose, onOpen, onUnread
         <div className="ph-kv"><span>{t("ph.inbox.when")}</span><span>{absTime(entry.updated_at)}{entry.count > 1 ? ` · ×${entry.count}` : ""}</span></div>
         {resolution && <div className="ph-kv"><span>{t("ph.inbox.outcome")}</span><span>{answered?.conflict ? t("ph.inbox.elsewhere", { outcome: resolutionLabel(resolution) }) : resolutionLabel(resolution)}</span></div>}
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -372,7 +368,7 @@ function ProposalSheet({ p, toast, onClose, onDone }: { p: Proposal; toast: (tex
     }
   }
   return (
-    <BottomSheet full onClose={onClose} className="ph-proposal" label={p.title}
+    <Sheet size="full" onClose={onClose} className="ph-sheet ph-proposal" ariaLabel={p.title}
       title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{t("ph.inbox.proposal")}</span><span className="ph-sheet-kt-m">{[p.pr_number ? `PR #${p.pr_number}` : "", relTime(p.created_at)].filter(Boolean).join(" · ")}</span></span>}
       footer={
         <div className="ph-foot-row">
@@ -389,7 +385,7 @@ function ProposalSheet({ p, toast, onClose, onDone }: { p: Proposal; toast: (tex
         <label className="ph-label" htmlFor={`reason-${p.id}`}>{t("ph.inbox.reason")}</label>
         <textarea id={`reason-${p.id}`} className="ph-field area" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("inbox.reason.placeholder")} />
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -415,13 +411,13 @@ function AllowSheet({ entries, names, toast, onClose, onDone }: { entries: Notif
     onDone(results);
   }
   return (
-    <BottomSheet onClose={onClose} className="ph-allow" label={plural("ph.inbox.allow.title", entries.length)}
+    <Sheet onClose={onClose} className="ph-sheet ph-allow" ariaLabel={plural("ph.inbox.allow.title", entries.length)}
       title={<span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{plural("ph.inbox.allow.title", entries.length)}</span><span className="ph-sheet-kt-m">{t("ph.inbox.allow.sub")}</span></span>}
       footer={<div className="ph-foot-row even"><button type="button" className="ph-btn" onClick={onClose}>{t("common.cancel")}</button><button type="button" className="ph-btn warn" disabled={busy} onClick={() => void allow()}>{t("ph.inbox.allow.do", { n: entries.length })}</button></div>}>
       <div className="ph-sheet-pad">
         <pre className="ph-code">{entries.map((e) => `${firstLine(e.body) || e.title}\n  ${e.project_id ? names.get(e.project_id) ?? "" : t("notice.anywhere")}`).join("\n")}</pre>
         <Banner tone="info" icon="alert">{t("ph.inbox.allow.note")}</Banner>
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }

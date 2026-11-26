@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from check_panel import BASE, CHROMIUM
 from playwright.sync_api import sync_playwright
-from screenshots import S1, UNHANDLED, detail, respond, stub
+from screenshots import S1, UNHANDLED, detail, open_tool, respond, stub
 
 
 def metrics_stub(route) -> None:  # type: ignore[no-untyped-def]
@@ -27,20 +27,24 @@ def run() -> None:
                 page = context.new_page()
                 page.route("**/api/**", metrics_stub)
                 page.goto(f"{BASE}/agents/{S1}?panel=details&token=t&scheme=dark&lang={language}")
-                # The inspector opens one section at a time: the context's page, then the usage's.
-                page.locator("[data-prop='context']").click()
-                panel = page.locator(".details")
+                # Context and usage are tools of their own beside the Details: the context line opens
+                # the Context tool, the cost row the Usage tool, and the Details stay a tab to go back to.
+                scope = ".panel-sheet" if width < 700 else ".panel"
+                page.locator(f"{scope} .details [data-prop='context']").first.click()
+                panel = page.locator(f"{scope} .details[data-page='context']")
+                panel.wait_for(timeout=5000)
                 assert ("Estimated after history changes" if language == "en" else "Оценка после изменения истории") in panel.inner_text()
-                page.locator(".dt-back").click()
-                page.locator("[data-prop='usage']").click()
-                page.wait_for_selector(".tool-timing")
+                open_tool(page, "details", scope)
+                page.locator(f"{scope} .details [data-prop='usage']").first.click()
+                panel = page.locator(f"{scope} .details[data-page='usage']")
+                page.wait_for_selector(f"{scope} .tool-timing")
                 assert ("Totals across all runs" if language == "en" else "Суммарно по всем запускам") in panel.inner_text()
-                assert not page.locator(".tool-timing").evaluate("el => el.open")
-                summary = page.locator(".tool-timing summary")
+                assert not page.locator(f"{scope} .tool-timing").evaluate("el => el.open")
+                summary = page.locator(f"{scope} .tool-timing summary")
                 # The sheet's entry translation can round a 44px box to 43.999999px.
                 assert summary.evaluate("el => parseFloat(getComputedStyle(el).height)") >= 44
                 summary.click()
-                assert page.locator(".tool-timing .dt-row").count() == 2
+                assert page.locator(f"{scope} .tool-timing .dt-row").count() == 2
                 assert ("9 calls" if language == "en" else "вызовов: 9") in panel.inner_text()
                 assert panel.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
                 if os.environ.get("SHOTS"):

@@ -1,0 +1,49 @@
+/* The prompt coach: a panel floating over the chat on a desktop, a tall sheet on a phone. Under the
+   overlays (30 and up), so the coach's own model list, question sheets and menus open above it. */
+.coach-window { position: fixed; z-index: 26; display: flex; flex-direction: column; background: var(--surface-1); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); overflow: hidden; animation: rise var(--t-base) var(--ease-out); }
+.coach-window.min { width: 260px; }
+.coach-head { flex: none; display: flex; align-items: center; gap: 6px; height: var(--row-h); padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); color: var(--fg-2); cursor: grab; user-select: none; touch-action: none; }
+.coach-head:active { cursor: grabbing; }
+.coach-window.min .coach-head { border-bottom: 0; cursor: default; }
+.coach-title { min-width: 0; color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
+.coach-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.coach-frame[hidden] { display: none; }
+.coach-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.coach-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The conversation takes the window's surface as its page colour, so the composer's fade and the
+   question tray blend into the window instead of drawing a band of the page behind it. */
+.coach-chat > .chat { flex: 1; height: auto; --bg: var(--surface-1); }
+.coach-note { padding: var(--space-4); }
+.coach-result { flex: none; display: flex; flex-direction: column; gap: 8px; margin: 8px 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.coach-result-head { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ok); }
+.coach-result-title { flex: 0 1 auto; min-width: 0; color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
+.coach-path { flex: 0 1 auto; min-width: 0; max-width: 55%; margin-left: auto; padding: 0; border: 0; background: none; color: var(--fg-2); font-family: var(--mono); font-size: var(--fs-12); text-align: right; }
+button.coach-path { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+button.coach-path:hover { color: var(--fg); }
+.coach-prompt { cursor: pointer; margin: 0; max-height: 6em; overflow: hidden; color: var(--fg-2); font-family: var(--font); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.coach-prompt.open { max-height: 40vh; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
+.coach-result-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.coach-result-actions .btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sheet.coach-sheet { padding-left: 0; padding-right: 0; }
+.coach-sheet .sheet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; margin: 0; padding: 0; }
+/* The coach's composer is for answering it: the mode chip and the folder chip of a working chat are noise
+   in a window this small (the folder is the chat's, which the window sits over). */
+/* The helpers' menu names the command each row also answers to, on the right where a shortcut stands. */
+/* The side question's empty window: one field, a line on what happens, and Ask. */
+.btw-ask { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.btw-ask textarea { width: 100%; resize: vertical; font: inherit; font-size: var(--fs-14); line-height: 1.45; }
+.btw-note { margin: 0; font-size: var(--fs-12); line-height: 1.45; }
+.btw-actions { display: flex; justify-content: flex-end; }
+
+/* On a phone: the prompt coach and the side question. */
+@media (max-width: 1023px) {
+  /* The prompt coach: as tall as the session's sheet, its conversation and composer filling it to the
+     bottom edge (the composer keeps its own room for the home indicator). */
+  .sheet.full.coach-sheet { height: calc(100% - var(--top-h) - env(safe-area-inset-top) + 2px); border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding-top: 0; padding-bottom: 0; }
+  .coach-sheet .sheet-head { margin: 0; padding: 0 var(--space-2) 0 var(--gutter); border-bottom: 1px solid var(--line); }
+  .coach-sheet .sheet-head h3 { flex: 1; min-width: 0; }
+  .coach-sheet .coach-result-actions .btn { flex: 1; justify-content: center; }
+  .btw-ask { padding: var(--space-3) var(--gutter); }
+  .btw-ask textarea { font-size: var(--fs-16); }
+  .btw-actions .btn { flex: 1; justify-content: center; min-height: 44px; }
+}

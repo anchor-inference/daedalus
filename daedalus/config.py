@@ -573,6 +573,9 @@ class ModelPresetConfig(BaseModel):
     reasoning_effort: ReasoningEffort = "medium"
     images: bool = False
     """The model accepts images (needed for ImageView and for photos sent in chat)."""
+    favourite: bool = False
+    """Starred by the operator: the model picker's first tab lists these. A mark on the preset and nothing
+    more, so a model removed takes its star with it."""
     free_only: bool = False
     """A free-catalog preset must stop on failure instead of entering the paid fallback chain."""
     context_window: int = Field(default=128_000, ge=8_000, le=4_000_000)
@@ -599,7 +602,7 @@ class ModelPresetConfig(BaseModel):
     """Which of those the listing no longer offers, for the model's settings to say. Written by the daily check
     and after a refusal; the choice itself stays, because a provider that comes back should be used again."""
     account: str = ""
-    """The subscription account this model's calls go out on (an id from Settings → Accounts), "" for the
+    """The subscription account this model's calls go out on (an id from Settings → Subscription accounts), "" for the
     upstream's default account. Like the OpenRouter route it is one choice per endpoint and model, written to
     every preset of the pair; an id that no longer exists is the default again (``SubscriptionAccounts.chain``)."""
 
@@ -2497,7 +2500,7 @@ NAV_LIST_MAX = 200
 
 
 class NavigationConfig(BaseModel):
-    """Where each destination of the app sits: the desktop rail, its More launcher, the phone drawer.
+    """Where each destination of the app sits: pinned in the sidebar (the phone's drawer is that sidebar) or in its More launcher.
 
     Every list empty is the layout the app ships with. An id the app does not know (a page that was
     removed, a screen of an older build) is kept here and ignored where it is drawn, so removing a
@@ -2505,19 +2508,17 @@ class NavigationConfig(BaseModel):
     this section, and a typo that silently vanished would read as a change that did not take.
     """
 
-    rail: list[str] = Field(default_factory=list)
-    """The desktop rail, top to bottom. A built-in place not listed anywhere keeps its usual spot."""
+    pinned: list[str] = Field(default_factory=list)
+    """Pinned under New chat at the top of the sidebar, top to bottom. A built-in place not
+    listed anywhere keeps its usual spot. A phone's drawer is the same sidebar, so it follows this list."""
     more: list[str] = Field(default_factory=list)
-    """Items in the rail's More launcher, in order within their group."""
-    drawer: list[str] = Field(default_factory=list)
-    """The phone drawer's places, top to bottom. Non-empty means the whole drawer: everything else
-    waits in the phone's More launcher. Empty is each mode's usual drawer."""
+    """Items in the sidebar's More launcher, in order within their group."""
     hidden: list[str] = Field(default_factory=list)
-    """Never shown, on any device. It wins over the three lists above."""
+    """Never shown, on any device. It wins over the two lists above."""
     icons: dict[str, str] = Field(default_factory=dict)
     """Item id → the name of a built-in icon to draw in place of its own."""
 
-    @field_validator("rail", "more", "drawer", "hidden")
+    @field_validator("pinned", "more", "hidden")
     @classmethod
     def _ids(cls, value: list[str]) -> list[str]:
         if len(value) > NAV_LIST_MAX:
@@ -2568,8 +2569,8 @@ class AgentSettingsConfig(BaseModel):
 
     auto_apply: list[str] = Field(default_factory=lambda: ["navigation", "answer_language", "compaction"])
     """Sections a change of the agent's applies at once, the operator told afterwards in the chat. The
-    defaults change how things look and read, never what the agent may do or spend: the rail and the
-    drawer, the language of the answers, and when and how long the history is summarised."""
+    defaults change how things look and read, never what the agent may do or spend: the sidebar's
+    pinned rows, the language of the answers, and when and how long the history is summarised."""
     proposal_hours: int = Field(default=24, ge=1, le=24 * 14)
     """How long a change waiting for the operator stays open; then it expires and the agent is told."""
 
@@ -2621,7 +2622,7 @@ class RuntimeConfig(BaseModel):
     presets: dict[str, ModelPresetConfig] = Field(default_factory=dict)
     """Named models keyed by id. Empty on a fresh install: a provider endpoint is not a model, and
     which model to run — and pay for — is the operator's to pick. The app asks for one at first login
-    (Settings → Models → Add a model); ``deploy/config.example.toml`` shows the shape of an entry."""
+    (Settings → Models and providers → Add a model); ``deploy/config.example.toml`` shows the shape of an entry."""
     providers: dict[str, ProviderConfig] = Field(
         default_factory=lambda: {
             "deepseek": ProviderConfig(kind="deepseek", base_url=keyproxy_base() + "/deepseek"),
@@ -2732,7 +2733,7 @@ class RuntimeConfig(BaseModel):
         on a subscription. What a preset does say is how hard it is asked to think and how much it
         may hold: the highest reasoning effort with thinking on wins, then the larger window, then the
         longer reply, and a tie goes to the default preset, then to the order of the table. It is a
-        guess the operator corrects once, in Settings → Models.
+        guess the operator corrects once, in Settings → Models and providers.
         """
         if not self.presets:
             return None
@@ -3382,12 +3383,22 @@ def _migrate_compaction_ratio(raw: dict[str, Any]) -> bool:
     return True
 
 
+def _drop_phone_drawer(raw: dict[str, Any]) -> bool:
+    """``[navigation] drawer`` is gone: the phone's drawer is the sidebar and follows ``pinned``.
+
+    The key is removed rather than left to be ignored, so the file does not keep advertising a list
+    nothing reads. It runs before the renames below, which no longer look at it.
+    """
+    navigation = raw.get("navigation")
+    return isinstance(navigation, dict) and navigation.pop("drawer", None) is not None
+
+
 def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
     """``[voice]`` became ``[companion]`` when the voice concierge became the standing companion.
 
     Every key carries over as it was — the model, the relay limits and the whole ``tts`` table — and
     the navigation's ``voice`` entry becomes ``companion`` wherever the operator placed it, so the
-    page keeps its spot on the rail rather than falling back to where a new screen ships.
+    page keeps its spot where the operator placed it rather than falling back to where a new screen ships.
     """
     changed = False
     voice = raw.pop("voice", None)
@@ -3400,7 +3411,7 @@ def _migrate_voice_to_companion(raw: dict[str, Any]) -> bool:
         changed = True
     navigation = raw.get("navigation")
     if isinstance(navigation, dict):
-        for field in ("rail", "more", "drawer", "hidden"):
+        for field in ("rail", "more", "hidden"):
             items = navigation.get(field)
             if isinstance(items, list) and "voice" in items:
                 renamed = ["companion" if item == "voice" else item for item in items]
@@ -3421,7 +3432,7 @@ def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
     if not isinstance(navigation, dict):
         return False
     changed = False
-    for field in ("rail", "more", "drawer", "hidden"):
+    for field in ("rail", "more", "hidden"):
         items = navigation.get(field)
         if isinstance(items, list) and "diagrams" in items:
             navigation[field] = list(dict.fromkeys("canvas" if item == "diagrams" else item for item in items))
@@ -3431,6 +3442,19 @@ def _migrate_diagrams_to_canvas(raw: dict[str, Any]) -> bool:
         icons.setdefault("canvas", icons.pop("diagrams"))
         changed = True
     return changed
+
+
+def _migrate_rail_to_pinned(raw: dict[str, Any]) -> bool:
+    """The desktop's rail of icons became the rows pinned at the top of the sidebar, and ``[navigation]
+    rail`` became ``pinned``. The list carries over as it was, so what the operator put on the rail is
+    what is pinned now. Runs after the renames above, which still read ``rail`` in the files they fix.
+    """
+    navigation = raw.get("navigation")
+    if not isinstance(navigation, dict) or "rail" not in navigation:
+        return False
+    rail = navigation.pop("rail")
+    navigation.setdefault("pinned", rail)
+    return True
 
 
 def _drop_session_modes(raw: dict[str, Any]) -> bool:
@@ -3465,9 +3489,11 @@ def _migrate(raw: dict[str, Any]) -> bool:
     changed = _seed_context_window_source(raw) or changed
     changed = _seed_from_setup(raw) or changed
     changed = _migrate_web_search(raw) or changed
+    changed = _drop_phone_drawer(raw) or changed
     changed = _migrate_voice_to_companion(raw) or changed
     changed = _drop_session_modes(raw) or changed
     changed = _migrate_diagrams_to_canvas(raw) or changed
+    changed = _migrate_rail_to_pinned(raw) or changed
     for provider in (raw.get("providers") or {}).values():
         pricing = provider.get("pricing") if isinstance(provider, dict) else None
         if not isinstance(pricing, dict):

@@ -39,7 +39,7 @@ def menu(page: Page, tid: str, item: str, phone: bool = False) -> None:
     if phone:
         # A phone's card keeps its commands behind a long press (or a right click), in a sheet.
         page.locator(f".ph-tcard[data-terminal='{tid}'] .ph-tcard-open").dispatch_event("contextmenu")
-        page.locator(".ph-actions .ph-mrow", has_text=item).first.click()
+        page.locator(".menu-sheet .menu-row", has_text=item).first.click()
         return
     page.locator(f"[data-terminal-menu='{tid}'] button").first.click()
     page.get_by_role("menuitem", name=item, exact=True).click()

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The effort beside a task's model: the first row says which default the task has, the rest are the
+// The effort beside a task's model: the first choice says which default the task has, the rest are the
 // composer's own words for the efforts, and a pick is handed on as the stored word.
 
 import { act } from "react";
@@ -22,13 +22,13 @@ describe("the words", () => {
     expect(effortDefaultLabel({ settings: "High" })).toBe("Default — as in Settings (High)");
   });
 
-  it("offers off and the efforts the session menu offers, with its hints", () => {
+  it("offers off and the efforts the model picker offers, in its words", () => {
     setLang("en");
     const items = taskEffortItems();
     expect(items.map((item) => item.id)).toEqual(["none", "low", "medium", "high", "xhigh"]);
-    expect(items[0].label).toBe("Off");
-    expect(items[4].label).toBe("Max");
-    expect(items.every((item) => !!item.detail)).toBe(true);
+    expect(items.map((item) => item.label)).toEqual(["Off", "Low", "Medium", "High", "Max"]);
+    setLang("ru");
+    expect(taskEffortItems().map((item) => item.label)).toEqual(["Выкл", "Низкое", "Среднее", "Высокое", "Максимум"]);
   });
 });
 
@@ -46,12 +46,15 @@ describe("the picker", () => {
     host.remove();
   });
 
-  it("hands on the stored word, and empty for the default", () => {
+  it("hands on the stored word, and empty for the default", async () => {
     const chosen = vi.fn();
-    act(() => root.render(<TaskEffortPicker id="e" value="" onChange={chosen} fallback="model" />));
-    expect(host.querySelector(".sel-current .sel-name")!.textContent).toBe("Default — as the model is set");
-    act(() => host.querySelector<HTMLButtonElement>(".sel-current button")!.click());
-    act(() => host.querySelector<HTMLElement>("[role=option][data-id='none']")!.click());
+    await act(async () => root.render(<TaskEffortPicker id="e" value="" onChange={chosen} fallback="model" />));
+    const trigger = host.querySelector<HTMLButtonElement>("#e")!;
+    expect(trigger.textContent).toBe("Default — as the model is set");
+    expect(host.querySelector(".task-effort-title")!.textContent).toBe("Reasoning");
+    await act(async () => trigger.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    await act(async () => document.querySelector<HTMLElement>("[role=option][data-value='none']")!.click());
     expect(chosen).toHaveBeenCalledWith("none");
   });
 });

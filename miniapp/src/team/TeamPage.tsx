@@ -4,9 +4,9 @@
 
 import { useState } from "react";
 import { Skeleton } from "../ui/components";
-import { Icon } from "../icons";
 import { navigate, pathFor, projectPagePath } from "../router";
-import { PageHeader } from "../shell";
+import { Page, PageHeader } from "../shell";
+import { Button, IconButton, Segmented } from "../ui/primitives";
 import { invalidate, useQuery } from "../store";
 import { useUsage } from "../project/data";
 import { spendLine, staffUsage } from "../project/usage";
@@ -49,26 +49,23 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
         actions={
           team && !closed ? (
             <>
-              <button className="iconbtn" onClick={() => navigate(projectPagePath(projectId, "board"))} title={t("pboard.title")} aria-label={t("pboard.title")}><Icon name="board" /></button>
-              <button className="iconbtn primary" onClick={() => setHiring(true)} title={t("team.hire")} aria-label={t("team.hire")}><Icon name="plus" /></button>
+              <IconButton icon="board" label={t("pboard.title")} onClick={() => navigate(projectPagePath(projectId, "board"))} />
+              <Button variant="primary" icon="plus" onClick={() => setHiring(true)}>{t("team.hire")}</Button>
             </>
           ) : undefined
         }
-      >
-        {team && !closed && (
-          <div className="chips">
-            <button className="chip select" aria-pressed={!showArchived} onClick={() => setShowArchived(false)}>{t("team.filter.active")}</button>
-            <button className="chip select" aria-pressed={showArchived} onClick={() => setShowArchived(true)}>{t("team.filter.all")}</button>
-          </div>
+        filters={team && !closed && (
+          <Segmented label={t("team.title")} value={showArchived ? "all" : "active"} onChange={(id) => setShowArchived(id === "all")}
+            options={[{ id: "active", label: t("team.filter.active") }, { id: "all", label: t("team.filter.all") }]} />
         )}
-      </PageHeader>
-      <div className="screen narrow team">
+      />
+      <Page width="list" className="team">
         {loading && !team && !error && <Skeleton rows={3} />}
         {error && !team && (
           <div className="empty">
             <b>{t("team.error")}</b>
             <div>{error}</div>
-            <button className="btn primary" onClick={refresh}>{t("common.retry")}</button>
+            <Button variant="primary" onClick={refresh}>{t("common.retry")}</Button>
           </div>
         )}
         {team && closed && (
@@ -81,9 +78,12 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
           <div className="empty">
             <b>{t("team.empty")}</b>
             <div>{t("team.empty.sub")}</div>
-            <button className="btn primary" onClick={() => setHiring(true)}><Icon name="plus" size={15} /> {t("team.hire")}</button>
+            <Button variant="primary" icon="plus" onClick={() => setHiring(true)}>{t("team.hire")}</Button>
             <Setups team={team} toast={toast} onDone={reload} />
           </div>
+        )}
+        {team && !closed && active.length > 0 && (
+          <div className="orch-label"><span>{t("team.members")}</span><span className="orch-label-n">{active.length}</span></div>
         )}
         {team && !closed && active.length > 0 && (
           <div className="staff-list">
@@ -93,13 +93,13 @@ export function TeamPage({ projectId, toast, back }: { projectId: string; toast:
         {team && !closed && (team.editing?.length ?? 0) > 0 && <EditingNow editing={team.editing ?? []} />}
         {team && !closed && showArchived && archived.length > 0 && (
           <>
-            <div className="section-title">{t("team.dismissed.section")}</div>
+            <div className="orch-label"><span>{t("team.dismissed.section")}</span><span className="orch-label-n">{archived.length}</span></div>
             <div className="staff-list archived">
               {archived.map((m) => <StaffRow key={m.id} member={m} team={team} spend={spendLine(staffUsage(usage, m.id))} />)}
             </div>
           </>
         )}
-      </div>
+      </Page>
       {hiring && team && <StaffSheet team={team} onClose={() => setHiring(false)} onDone={reload} toast={toast} />}
       {editing && team && <StaffSheet team={team} member={editing} onClose={() => setEditing(null)} onDone={reload} toast={toast} />}
     </>

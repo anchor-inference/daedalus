@@ -7,6 +7,7 @@ const renderMermaid = vi.fn(async (code: string) => {
 });
 vi.mock("./mermaidrender", () => ({ renderMermaid }));
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
 const { hydrateDiagrams } = await import("./diagrams");
 const { renderMarkdown } = await import("./md");
 
@@ -90,8 +91,8 @@ describe("drawing a mermaid fence", () => {
     const card = root.querySelector(".codecard") as HTMLElement;
     await vi.waitFor(() => expect(card.dataset.mermaid).toBe("done"));
     (card.querySelector("button[data-mermaid-open]") as HTMLButtonElement).click();
-    expect(document.querySelector(".diagram-zoom .diagram-zoom-body svg")).not.toBeNull();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(document.querySelector(".diagram-zoom")).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector(".diagram-zoom .diagram-zoom-body svg")).not.toBeNull());
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector(".diagram-zoom")).toBeNull());
   });
 });

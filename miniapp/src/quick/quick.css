@@ -1,92 +1,100 @@
 /* Quick Chat: the whole page is the box, in a frameless window the desktop sizes to fit it
-   (desktop/shell/desk-main.js). The top row is where the window is dragged from. */
+   (desktop/shell/desk-main.js). The top row is where the window is dragged from.
+   The box is the composer's card and nothing else: the window cannot round its corners, so the
+   card's edge is a square 1 px line and the page behind it is the card's own colour. */
 
-html:has(.quick), body:has(.quick) { background: var(--surface-1); overflow: hidden; }
+html:has(.quick), body:has(.quick) { background: var(--card); overflow: hidden; }
 body:has(.quick) #root { min-height: 0; }
 
+/* The window is 680 px wide, which the app's own rules take for a phone (40 px controls, 16 px prose).
+   It is a desktop window driven with a mouse, so the desktop's control heights come back for it, as
+   they do for the Chrome side panel. */
 .quick {
+  --row-h: 32px; --row-h-dense: 28px; --ctl-h: 32px; --ctl-h-sm: 28px; --fs-prose: 15px;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: 10px 10px 10px 14px;
   box-sizing: border-box;
   width: 100%;
-  background: var(--surface-1);
+  background: var(--card);
   color: var(--fg);
   font-family: var(--font);
   font-size: var(--fs-14);
   line-height: var(--lh-ui);
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
 }
 
 .quick-top {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   -webkit-app-region: drag;
   min-height: var(--ctl-h-sm);
 }
 .quick-top button { -webkit-app-region: no-drag; }
 
-.quick-target {
+/* The chips of the composer's row: 28 px, no fill until the pointer is on one. */
+.quick-target, .quick-mode {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  max-width: 60%;
   height: var(--ctl-h-sm);
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--fg);
+  background: transparent;
+  color: var(--fg-2);
   font: inherit;
-  font-size: var(--fs-12);
+  font-size: var(--fs-13);
   font-weight: 500;
   cursor: pointer;
+  transition: background-color var(--t-fast), color var(--t-fast);
 }
-.quick-target:hover { background: var(--surface-3); }
+.quick-target { max-width: 60%; }
+.quick-target:hover:not(:disabled), .quick-mode:hover { background: var(--hover); color: var(--fg); }
+.quick-target:focus-visible, .quick-mode:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.quick-target:disabled { cursor: default; opacity: 1; }
+.quick-mode.on { background: var(--selected); color: var(--fg); }
 .quick-target-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.quick-paused { font-size: var(--fs-12); color: var(--warn); }
-.quick-hint { margin-left: auto; font-size: var(--fs-11); color: var(--fg-3); white-space: nowrap; }
+.quick-paused { font-size: var(--fs-12); color: var(--attention); }
+.quick-hint { margin-left: auto; padding-right: var(--space-1); font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; }
 
+/* The field over one row of controls, as the composer lays them out. */
 .quick-box {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  box-shadow: var(--drop-sm);
+  padding: 0 4px 0 0;
 }
-.quick-box:focus-within { border-color: var(--line-strong); box-shadow: var(--shadow-focus); }
+.quick-box:has(.voicebar) { flex-direction: row; align-items: center; }
 .quick-box .voicebar { flex: 1; }
 
 /* The main composer's field (codefield.tsx, drawn by .composer-field in styles.css), sized for the box:
-   a few lines of prose, and room for a code card within the window's 640 px. */
+   a few lines of prose, and room for a code card within the window's 680 px. */
 .quick-field {
-  flex: 1;
   min-width: 0;
   min-height: var(--ctl-h);
   max-height: 160px;
   overflow-y: auto;
-  padding: 6px var(--space-1);
+  padding: 4px 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: var(--fs-14);
-  line-height: var(--lh-ui);
+  font-size: var(--fs-15);
+  line-height: 1.6;
 }
 .quick-field:has(.cf-card) { max-height: 320px; }
 .quick-field[data-empty]::before { color: var(--fg-3); }
-/* The box around it shows the focus; the app's own ring on a focused field would draw a second one. */
+/* The card shows the focus by being the window; the app's own ring on a focused field would draw a second one. */
 .quick .quick-field:focus, .quick .quick-field:focus-visible { border: 0; outline: 0; box-shadow: none; }
 
-.quick-actions { display: flex; align-items: center; gap: var(--space-1); }
+.quick-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-height: var(--ctl-h); }
+/* The send circle is the composer's: 32 px, the one violet thing in the box. */
+.quick-actions .roundbtn.primary { width: var(--ctl-h); height: var(--ctl-h); border-radius: 50%; }
 
 .quick-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .quick-chip {
@@ -94,15 +102,15 @@ body:has(.quick) #root { min-height: 0; }
   align-items: center;
   gap: var(--space-1);
   max-width: 100%;
-  height: var(--chip-h-dense);
+  height: var(--ctl-h-sm);
   padding: 0 var(--space-1) 0 var(--space-2);
-  border-radius: var(--radius-xs);
-  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  background: var(--hover);
   color: var(--fg-2);
   font-size: var(--fs-12);
 }
 .quick-chip.skill { color: var(--fg); }
-.quick-chip.image { height: auto; padding: 2px var(--space-1) 2px 2px; border-radius: var(--radius-sm); }
+.quick-chip.image { height: auto; padding: 2px var(--space-1) 2px 2px; }
 .quick-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
 .quick-chip button {
   display: inline-grid;
@@ -114,41 +122,28 @@ body:has(.quick) #root { min-height: 0; }
   color: inherit;
   cursor: pointer;
 }
-.quick-chip button:hover { background: var(--surface-3); }
+.quick-chip button:hover { background: var(--selected); }
 .quick-thumb img { display: block; width: 58px; height: 36px; object-fit: cover; border-radius: var(--radius-xs); }
 
-.quick-preview { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); cursor: zoom-out; }
+.quick-preview { padding: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--inset); cursor: zoom-out; }
 .quick-preview img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
 
+/* The lists are the model picker's rows (.combo-item) in the window itself: a popup outside the page
+   would be cut by the window's edge, which is sized to the page. */
 .quick-list {
-  display: flex;
-  flex-direction: column;
   max-height: 220px;
   overflow-y: auto;
-  padding: var(--space-1);
-  border: 0;
-  border-radius: var(--radius-md);
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   background: var(--surface-1);
-  box-shadow: var(--shadow-md);
 }
-.quick-option {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: var(--row-h-dense);
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--fs-13);
-  text-align: left;
-  cursor: pointer;
-}
-.quick-option.on, .quick-option:hover { background: var(--surface-3); }
-.quick-option-kind { flex: none; color: var(--fg-2); font-size: var(--fs-12); }
-.quick-option-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-option { width: 100%; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; }
+.quick-option:hover { background: var(--hover); }
+.quick-option:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.quick-option-kind { flex: none; color: var(--fg-3); font-size: var(--fs-12); }
+.quick-option-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-option > .ic:last-child { margin-left: auto; flex: none; }
 
 .quick-windows {
   display: grid;
@@ -163,15 +158,16 @@ body:has(.quick) #root { min-height: 0; }
   gap: var(--space-1);
   padding: var(--space-1);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--fg-2);
   font: inherit;
   font-size: var(--fs-12);
   cursor: pointer;
 }
-.quick-window:hover { border-color: var(--line-strong); background: var(--surface-3); }
-.quick-window img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--bg); border-radius: var(--radius-xs); }
+.quick-window:hover { border-color: var(--line-strong); background: var(--hover); }
+.quick-window:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.quick-window img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--inset); border-radius: var(--radius-xs); }
 .quick-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .quick-status {
@@ -182,34 +178,15 @@ body:has(.quick) #root { min-height: 0; }
   font-size: var(--fs-13);
   color: var(--fg-2);
 }
-.quick-status svg { color: var(--ok); flex: none; }
-.quick-status.bad { color: var(--bad); }
+.quick-status svg { color: var(--live); flex: none; }
+.quick-status.bad { color: var(--attention); }
 .quick-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 .quick-signedout { display: flex; align-items: center; gap: var(--space-3); justify-content: space-between; color: var(--fg-2); font-size: var(--fs-13); }
 
-/* The Computer chip beside the target, and the scope picker it opens. The picker unfolds by its grid
-   row going from nothing to its own height, so the window — sized to the page by a ResizeObserver —
-   grows with it frame by frame instead of jumping; it stays mounted until the fold has closed. */
-.quick-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: var(--ctl-h-sm);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-2);
-  font: inherit;
-  font-size: var(--fs-12);
-  cursor: pointer;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
-}
-.quick-mode:hover { background: var(--surface-2); color: var(--fg); }
-.quick-mode.on { border-color: transparent; background: var(--surface-3); color: var(--fg); }
-.quick-target:disabled { cursor: default; opacity: 1; }
-
+/* The scope picker the Computer chip opens unfolds by its grid row going from nothing to its own
+   height, so the window — sized to the page by a ResizeObserver — grows with it frame by frame
+   instead of jumping; it stays mounted until the fold has closed. */
 .quick-computer {
   display: grid;
   grid-template-rows: 0fr;

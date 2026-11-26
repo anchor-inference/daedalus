@@ -29,7 +29,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, settings_provider  # noqa: E402
 
 # The same invented installation the pictures are taken of.
 from screenshots import FRESH, S1, SETTINGS, stub  # noqa: E402
@@ -39,12 +39,16 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 
 GO_HINT = "OpenCode Go — subscription, not charged per token"
 ZEN_HINT = "OpenCode Zen — pay per token through OpenCode's gateway"
+# The endpoint rows carry the plan's line without the name the row already shows.
+GO_ROW = "Subscription, not charged per token"
+ZEN_ROW = "Pay per token through OpenCode's gateway"
 PICKED = "Claude Opus 5"  # $5.00/$25.00 in, a 1M window, sees pictures
 TYPED = "z-ai/glm-5.3-flash"  # $0.15/$0.50, 200k, text only
 
 
 def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]
-    """Settings -> Providers: the Go row says how it is paid for, and Zen is one click away."""
+    """Settings -> Models and providers: the Go row says how it is paid for, its connection names the plan,
+    and Zen is one click away under Add a provider."""
     settings = copy.deepcopy(SETTINGS)
     settings["keyproxy_base"] = "http://keyproxy:3200"
     settings["providers"] = {"opencode": {"kind": "opencode", "name": "OpenCode Go", "base_url": "http://keyproxy:3200/opencode", "billing": "subscription", "timeout_seconds": 900}}
@@ -65,17 +69,22 @@ def settings_tab(browser, failures: list[str]) -> None:  # type: ignore[no-untyp
         page = context.new_page()
         page.route("**/api/**", host)
         page.goto(f"{BASE}/settings/providers?token=t")
-        row = page.locator(".mrow", has_text="OpenCode Go").first
-        if GO_HINT not in row.inner_text():
+        row = page.locator(".prov[data-provider='opencode']")
+        row.wait_for(timeout=15000)
+        if width >= 1024 and row.locator(".prov-kind").inner_text() != "subscription":
             failures.append(f"{width}: the OpenCode Go row does not say it is a subscription")
-        add = page.locator(".opencode-add button", has_text="OpenCode Zen")
+        if GO_HINT not in settings_provider(page, "opencode").locator(".prov-connection").inner_text():
+            failures.append(f"{width}: the OpenCode Go connection does not name its plan")
+        page.get_by_role("button", name="Add a provider").click()
+        add = page.locator(".add-provider .opencode-add button", has_text="OpenCode Zen")
+        add.first.wait_for(timeout=5000)
         if add.count() != 1 or ZEN_HINT not in add.first.inner_text():
             failures.append(f"{width}: Settings does not offer OpenCode Zen with its line about paying per token")
         else:
             add.first.click()
             page.wait_for_timeout(300)
         if not page.evaluate("document.documentElement.scrollWidth <= innerWidth"):
-            failures.append(f"{width}: the providers tab scrolls sideways")
+            failures.append(f"{width}: the models and providers section scrolls sideways")
         context.close()
     expected = ("/api/providers/opencode_zen", {"kind": "opencode", "name": "OpenCode Zen", "base_url": "http://keyproxy:3200/opencode_zen", "billing": "metered"})
     if added != [expected, expected]:
@@ -90,13 +99,12 @@ def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-unty
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en")
         page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
-        reveal_composer(page)
         page.locator(".composer .model-select").first.click()
-        page.wait_for_selector(".model-list", timeout=5000)
-        if page.locator(".model-list input:not(.model-search)").count():
+        page.wait_for_selector(".model-picker [role=option]", timeout=5000)
+        if page.locator(".model-picker input:not(.model-search)").count():
             failures.append(f"{width}: the model picker still has a field to type a model into")
-        add = page.locator(".model-list .model-add")
-        if add.count() != 1 or "Add model" not in add.inner_text():
+        add = page.locator(".model-picker .model-add")
+        if add.count() != 1 or "Add model" not in (add.get_attribute("aria-label") or ""):
             failures.append(f"{width}: the model picker has no Add model row")
             context.close()
             continue
@@ -107,7 +115,7 @@ def from_composer(browser, failures: list[str]) -> None:  # type: ignore[no-unty
             pass
         if "/settings/models" not in page.url or "add=1" not in page.url or page.locator(".addmodel").count() == 0:
             failures.append(f"{width}: Add model went to {page.url} without the add sheet open")
-        elif page.locator(".model-list").count():
+        elif page.locator(".model-picker").count():
             failures.append(f"{width}: the picker stayed open over the add sheet")
         else:
             page.keyboard.press("Escape")
@@ -164,10 +172,10 @@ def run() -> int:
         third.goto(f"{BASE}/agents?token=t")
         third.wait_for_selector(".addmodel", timeout=15000)
         go = third.locator(".pickgrid .pick", has_text="OpenCode Go")
-        if go.count() != 1 or GO_HINT not in go.first.inner_text():
+        if go.count() != 1 or GO_ROW not in go.first.inner_text():
             failures.append(f"the OpenCode Go card does not say it is a subscription: {go.all_inner_texts()}")
         zen = third.locator(".pickgrid .pick.dashed", has_text="OpenCode Zen")
-        if zen.count() != 1 or ZEN_HINT not in zen.first.inner_text():
+        if zen.count() != 1 or ZEN_ROW not in zen.first.inner_text():
             failures.append(f"OpenCode Zen is not offered to add with its line about paying per token: {zen.all_inner_texts()}")
         else:
             zen.first.click()

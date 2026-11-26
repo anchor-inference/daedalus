@@ -5,8 +5,7 @@
 
 import type { CSSProperties } from "react";
 import { t } from "../i18n";
-import { Icon } from "../icons";
-import { Sheet } from "../ui/dialogs";
+import { Button, Segmented, Sheet, Switch } from "../ui/primitives";
 import { STATUSES, type EventStatus, type Group, type TypeDef } from "./blocks";
 import { TypeIcon, statusLabel } from "./structured";
 import type { CalendarRow, Item } from "./types";
@@ -69,18 +68,16 @@ export function FilterSheet({ filters, calendars, types, groups, tags, dense, on
     </button>
   );
   return (
-    <Sheet title={t("cal.filters")} onClose={onClose} size="narrow" className="cal-filters">
+    <Sheet title={t("cal.filters")} onClose={onClose} size="sm" className="cal-filters">
       <div className="cal-filter-body">
         <label className="cal-switch-row cal-filter-done">
-          <input type="checkbox" checked={filters.hideDone} onChange={(e) => onChange({ ...filters, hideDone: e.target.checked })} />
+          <Switch checked={filters.hideDone} onChange={(hideDone) => onChange({ ...filters, hideDone })} label={t("cal.filters.hide.done")} />
           <span>{t("cal.filters.hide.done")}</span>
         </label>
         <div className="cal-filter-group">
           <div className="cal-section-label">{t("cal.filters.density")}</div>
-          <div className="segmented inline" role="radiogroup" aria-label={t("cal.filters.density")}>
-            <button type="button" role="radio" aria-checked={!dense} className={!dense ? "on" : ""} onClick={() => onDense(false)}>{t("cal.density.normal")}</button>
-            <button type="button" role="radio" aria-checked={dense} className={dense ? "on" : ""} onClick={() => onDense(true)}>{t("cal.density.compact")}</button>
-          </div>
+          <Segmented label={t("cal.filters.density")} value={dense ? "compact" : "normal"} onChange={(v) => onDense(v === "compact")}
+            options={[{ id: "normal", label: t("cal.density.normal") }, { id: "compact", label: t("cal.density.compact") }]} />
         </div>
         {types.length > 0 && (
           <div className="cal-filter-group">
@@ -110,9 +107,9 @@ export function FilterSheet({ filters, calendars, types, groups, tags, dense, on
         </div>
       </div>
       <div className="sheet-foot cal-foot">
-        <button type="button" className="btn ghost" disabled={filterCount(filters) === 0} onClick={() => onChange({ ...filters, calendars: [], types: [], groups: [], tags: [], statuses: [], hideDone: false })}><Icon name="close" size={14} /> {t("cal.filters.clear")}</button>
+        <Button variant="quiet" icon="close" disabled={filterCount(filters) === 0} onClick={() => onChange({ ...filters, calendars: [], types: [], groups: [], tags: [], statuses: [], hideDone: false })}>{t("cal.filters.clear")}</Button>
         <span className="cal-spacer" />
-        <button type="button" className="btn primary" onClick={onClose}>{t("cal.filters.apply")}</button>
+        <Button variant="primary" onClick={onClose}>{t("cal.filters.apply")}</Button>
       </div>
     </Sheet>
   );

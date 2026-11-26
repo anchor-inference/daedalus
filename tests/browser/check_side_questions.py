@@ -182,7 +182,9 @@ def desktop(page: Page, feed: EventFeed, lang: str) -> None:
     chat.locator(".questions-line").click()
     tab = page.locator(".panel .panel-tab[data-tab='questions']")
     expect(tab).to_have_attribute("aria-selected", "true")
-    expect(page.locator(".panel .panel-tab").first).to_have_attribute("data-tab", "questions")
+    # What waits for the operator comes right after the Overview, before the tools they opened.
+    expect(page.locator(".panel .panel-tab").nth(0)).to_have_attribute("data-tab", "overview")
+    expect(page.locator(".panel .panel-tab").nth(1)).to_have_attribute("data-tab", "questions")
     expect(tab.locator(".count")).to_have_text("4")
     expect(card(page, "qp0rt1").locator(".q-meta")).to_contain_text(words["asker"])
     expect(card(page, "qp0rt1").locator(".q-attach")).to_be_visible()

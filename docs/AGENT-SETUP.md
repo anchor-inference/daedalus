@@ -149,7 +149,7 @@ docker exec deploy-daedalus-1 /srv/venv/bin/python -m daedalus check   # "model:
 
 ## 3b. Projects, when the operator has folders of their own on the server
 
-A **project** is a folder the operator adds in the app (Projects in the rail, or the grid icon on the
+A **project** is a folder the operator adds in the app (the "Projects" label of the sidebar, or the grid icon on the
 Agents screen): the agents started in it work in that folder, and every path they resolve is checked
 against it — the file tools, the file browser, the preview, the download and the files they send.
 `Exec` runs in the folder; the body of a command is bounded by `tools.exec.sandbox`, which is `off` by
@@ -469,7 +469,7 @@ Two shapes; both keep every feature:
    the files in your workspace and tell me the date"; it must answer within a minute and the run must
    show tool steps. Before a model exists this step answers 409 with "No model is configured yet",
    which is the correct behaviour, not a fault.
-2. Settings → Models shows the model they added, marked default; Usage shows the call you just made.
+2. Settings → Models and providers shows the model they added, marked default; Usage shows the call you just made.
 3. `docker logs deploy-daedalus-1 | grep -i error` shows nothing about providers.
 
 ## 7. Updating, and whether the agent may update itself

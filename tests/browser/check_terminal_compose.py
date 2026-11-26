@@ -144,7 +144,8 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     check.that(order[-3:] == ["tp-pane-body", "tp-pane-compose", "tp-pane-foot"], f"{lang}: the pane's parts are in the order {order}")
     line = page.locator(f"{pane(IRA)} .tp-compose")
     height = line.bounding_box()["height"]  # type: ignore[index]
-    check.that(31 <= height <= 33, f"{lang}: the compose line is {height:.0f} px tall, not a dense row")
+    # A dense row is 28 px since the rows took the design's 32 / 28 (it was 32).
+    check.that(27 <= height <= 29, f"{lang}: the compose line is {height:.0f} px tall, not a dense row")
     field = f"{pane(IRA)} .tp-compose-field"
     expect(page.locator(field)).to_have_attribute("placeholder", words["placeholder"])
     # The member waiting on a request: the line says the message waits for the answer.
@@ -254,26 +255,25 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
         page.wait_for_timeout(100)
     check.that(sent[3:4] == [("st-naya", {"text": "hold the deploy", "when": "after_turn"})], f"{lang}: Naya's message went as {sent[3:4]}")
 
-    # Another agent's message lights Ira's tab and pane header, then lets go.
+    # Another agent's message lights Ira's pane header, then lets go.
     deadline = time.monotonic() + 10
     while feed.connected() == 0 and time.monotonic() < deadline:
         page.wait_for_timeout(100)
-    tab = page.locator(".tp-tab[data-slot='1']")
-    before = tab.get_attribute("data-state")
+    lit = page.locator(pane(IRA))
+    before = lit.get_attribute("data-state")
     feed.send("agent.message", {"message_id": "am-1", "kind": "message", "state": "sent", "from": "Max", "to": "Ira", "hop": 1, "text": "port?", "from_staff_id": "st-max", "to_staff_id": "st-ira"}, project=P1, staff="st-max")
-    expect(tab).to_have_attribute("data-state", "message", timeout=4000)
-    expect(page.locator(pane(IRA))).to_have_attribute("data-state", "message")
-    expect(tab.locator(".tp-tab-state")).to_have_attribute("data-state", "message")
+    expect(lit).to_have_attribute("data-state", "message", timeout=4000)
     dot = page.eval_on_selector(f"{pane(IRA)} .tp-pane-head .tp-dot", "(e) => getComputedStyle(e).backgroundColor")
-    info = page.evaluate("() => { const probe = document.createElement('span'); probe.style.color = 'var(--info)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }")
-    check.that(dot == info, f"{lang}: the message dot is {dot}, not the theme's information colour {info}")
+    # Violet, the accent: cyan is running and orange needs you, so a message is the third colour.
+    info = page.evaluate("() => { const probe = document.createElement('span'); probe.style.color = 'var(--accent)'; document.body.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }")
+    check.that(dot == info, f"{lang}: the message dot is {dot}, not the theme's accent {info}")
     shot(page, f"{lang}-terminals-message-flash.png")
-    expect(tab).to_have_attribute("data-state", before or "idle", timeout=6000)
+    expect(lit).to_have_attribute("data-state", before or "idle", timeout=6000)
     # A refusal, and a message to the member waiting on a request: nothing lights.
     feed.send("agent.message", {"message_id": "am-2", "kind": "message", "state": "refused", "from": "Max", "to": "Ira", "hop": 1, "text": "x", "to_staff_id": "st-ira"}, project=P1)
     feed.send("agent.message", {"message_id": "am-3", "kind": "message", "state": "sent", "from": "Max", "to": "Naya", "hop": 1, "text": "x", "to_staff_id": "st-naya"}, project=P1)
     page.wait_for_timeout(700)
-    check.that(page.locator(".tp-tab[data-state='message']").count() == 0, f"{lang}: a refused message or one to a waiting member lit a tab")
+    check.that(page.locator(".tp-pane[data-state='message']").count() == 0, f"{lang}: a refused message or one to a waiting member lit a pane")
     check.that(page.locator(f"{pane(NAYA)}").get_attribute("data-state") == "waiting", f"{lang}: Naya's pane stopped saying waiting")
 
     sideways = int(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"))

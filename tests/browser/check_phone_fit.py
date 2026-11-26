@@ -6,11 +6,11 @@ the whole sheet scrolled sideways, a card border crossing the chips and the Send
 it. Every option now wraps inside its card, and nothing in the sheet scrolls sideways; the same card
 is looked at beside a project's orchestrator on a desktop and in the Main orchestrator's list.
 
-The composer: the toggles chip, the one pill for the model and its effort, the microphone and the
-circle, at 360, 375, 390 and 430 px, with a short and a long model name, idle and running. The chip
-once hugged its label and was cut to "Age…" beside a long model name; now it keeps its
-whole word, each pill has room inside it, the model name is what gives way (never the effort), every
-control stays inside the pill and at least 40 px tall.
+The composer: the access chip (its shield alone on a phone), the one pill for the model and its effort,
+the microphone and the circle, at 360, 375, 390 and 430 px, with a short and a long model name, idle and
+running. A word chip there once hugged its label and was cut to "Age…" beside a long model name; now
+the access is a round shield that keeps its place, the model pill has room inside it, the model name is
+what gives way (never the effort), and every control stays inside the pill and 44 px to the finger.
 
     APP_URL=http://127.0.0.1:<port>/app python tests/browser/check_phone_fit.py
 
@@ -27,7 +27,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, FocusStub, MainStub, expect_app  # noqa: E402
 from check_main import serve as serve_main  # noqa: E402
 from check_project_focus import PID, fits, serve  # noqa: E402
 
@@ -119,7 +119,7 @@ def main_questions(browser, lang: str, width: int) -> list[str]:  # type: ignore
     if phone:
         # On a phone the main chat is the first row of orchestration's list, and its questions a sheet away.
         page.goto(f"{BASE}/orchestration/projects?token=t&lang={lang}")
-        page.locator(".ph-orch [data-main-entry] .ph-row").click()
+        page.locator(".ph-orch [data-main-entry]").click()
         page.locator(".chat-head .questions-headbtn").tap()
         scope = ".panel-sheet"
     else:
@@ -145,7 +145,6 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
     page.wait_for_selector(".composer .roundbtn.primary", timeout=15000)
     page.wait_for_timeout(300)
     # The phone's composer rests as one row; its toolbar (toggles, model, effort) is the open shape's.
-    reveal_composer(page)
     try:
         facts = page.evaluate("""() => {
           const box = document.querySelector('.composer-box').getBoundingClientRect();
@@ -167,8 +166,8 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
               const grow = a.content !== 'none' && a.position === 'absolute' ? -(parseFloat(a.top) || 0) - (parseFloat(a.bottom) || 0) : 0;
               return r.height + grow < 43.5;
             }).map((e) => e.className),
-            mode: pill('.composer .composer-mode'), model: pill('.composer .model-select'),
-            modeCut: cut('.composer .composer-mode .truncate'), effortCut: cut('.composer .model-select .model-effort'),
+            mode: pill('.composer .composer-access'), model: pill('.composer .model-select'),
+            effortCut: cut('.composer .model-select .model-effort'),
             effort: document.querySelector('.composer .model-select .model-effort')?.textContent ?? null,
             doc: document.documentElement.scrollWidth - window.innerWidth,
           };
@@ -183,14 +182,7 @@ def composer_fits(browser, lang: str, width: int, model: str, running: bool) -> 
         problems.append(f"{where}: {facts['short']} are under the 44 px target")
     mode, pill = facts["mode"], facts["model"]
     if not mode:
-        problems.append(f"{where}: no toggles chip")
-    else:
-        if facts["modeCut"]:
-            problems.append(f"{where}: the toggles chip's word is cut")
-        # The phone's pills are the design's: 14 px type with room inside (15 until the phone's scale
-        # came down a step, a size too large beside the chat apps on the same phone).
-        if mode["pad"] < 8 or mode["fs"] != 14:
-            problems.append(f"{where}: the toggles chip has {mode['pad']}px inside and {mode['fs']}px type")
+        problems.append(f"{where}: no access chip")
     if running:
         if pill:
             problems.append(f"{where}: the model pill did not give way to steering")

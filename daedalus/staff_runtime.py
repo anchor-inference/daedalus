@@ -60,6 +60,8 @@ class BoardTask:
     """The operator's note when the work was sent back from review; the next session starts from it."""
     returned: str = ""
     """The orchestrator's note when it checked the work and returned it; the next session starts from it."""
+    origin_session_id: str | None = None
+    """The chat that created the task; its events carry it so that chat's board can follow them."""
 
     def missing(self) -> list[str]:
         """The brief's fields still empty; a task is not handed to anyone until all four are written."""

@@ -2,7 +2,7 @@
 
 At 1440 × 900 and on a 390 px phone, in English and Russian:
 
-- Settings → Models marks a broken preset with a red pill and the upstream's own words under its row,
+- Settings → Models and providers marks a broken preset with a red pill and the upstream's own words under its row,
   and a slow one with an amber pill whose tooltip says how slow;
 - Check models sends one request (``POST /api/models/check``) and redraws the marks from its answer,
   with its foot counting the models that answered;
@@ -69,9 +69,17 @@ def shot(page, name: str) -> None:  # type: ignore[no-untyped-def]
 
 
 def row(page, pid: str):  # type: ignore[no-untyped-def]
-    """A preset's row in Settings → Models, found by its title, which the stub's labels make unique."""
-    label = SETTINGS["presets"][pid]["label"]
-    return page.locator(".mlist .mrow").filter(has=page.locator(".mtitle", has_text=label)).first
+    """A preset's row in Settings → Models and providers, inside its provider's row."""
+    return page.locator(f'.pmodel[data-preset="{pid}"]').first
+
+
+def open_providers(page) -> None:  # type: ignore[no-untyped-def]
+    """Every provider row opened: only the default model's provider is open at first, and a model is drawn inside its own."""
+    for _ in range(page.locator(".prov-row").count()):
+        closed = page.locator('.prov-row[aria-expanded="false"]')
+        if not closed.count():
+            break
+        closed.first.click()
 
 
 def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> None:  # type: ignore[no-untyped-def]
@@ -95,19 +103,20 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
 
     page.route("**/api/**", route)
 
-    # Settings → Models: the marks from the calls already made.
+    # Settings → Models and providers: the marks from the calls already made.
     page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
-    page.wait_for_selector(".mlist .mrow", timeout=15000)
+    page.wait_for_selector(".prov-row", timeout=15000)
+    open_providers(page)
     broken = row(page, BROKEN)
-    pill = broken.locator('.pill[data-health="broken"]')
+    pill = broken.locator('.pmodel-tag[data-health="broken"]')
     if not pill.is_visible():
         say("the broken model has no broken pill")
     elif "failed" not in (pill.get_attribute("class") or ""):
         say(f"the broken pill is not drawn as a failure: {pill.get_attribute('class')}")
-    detail = broken.locator(".mhealth")
+    detail = broken.locator(".pmodel-health")
     if not detail.is_visible() or CODEX not in detail.inner_text():
         say("the upstream's words are not under the broken model's row")
-    slow = row(page, SLOW).locator('.pill[data-health="slow"]')
+    slow = row(page, SLOW).locator('.pmodel-tag[data-health="slow"]')
     if not slow.is_visible():
         say("the slow model has no slow pill")
     elif "13.6" not in (slow.get_attribute("title") or ""):
@@ -125,12 +134,12 @@ def run(browser, lang: str, viewport: dict, problems: list[str], **context) -> N
         with page.expect_response(lambda reply: "/api/models/check" in reply.url):
             button.click()
         try:
-            row(page, CHECKED_BROKEN).locator('.pill[data-health="broken"]').wait_for(timeout=5000)
+            row(page, CHECKED_BROKEN).locator('.pmodel-tag[data-health="broken"]').wait_for(timeout=5000)
         except Exception:  # noqa: BLE001
             say("the check's broken model was not marked")
-        if GONE not in row(page, CHECKED_BROKEN).locator(".mhealth").inner_text():
+        if GONE not in row(page, CHECKED_BROKEN).locator(".pmodel-health").inner_text():
             say("the check's refusal is not shown under its row")
-        if not row(page, SLOW).locator('.pill[data-health="ok"]').is_visible():
+        if not row(page, SLOW).locator('.pmodel-tag[data-health="ok"]').is_visible():
             say("a model that answered the check does not show its time")
         count = page.locator('[data-setting="models.check"] [data-checked]')
         if not count.is_visible() or "2" not in count.inner_text() or "4" not in count.inner_text():

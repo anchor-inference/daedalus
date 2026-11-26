@@ -316,11 +316,14 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page.wait_for_url(f"**/project/{pid}/staff/st-ira**")
     expect(page.locator(".focus-staff.current")).to_contain_text("Ira")
 
-    # A staff member's card on the Terminals screen says what it is doing, and Answer leads here.
+    # A staff member's row on the Terminals page says it waits, its pane says what for, and Answer leads here.
     page.goto(f"{BASE}/terminals?lang={lang}")
-    card = page.locator(".term-card[data-terminal='tm-ira']")
-    expect(card.locator(".term-card-status")).to_contain_text(words["permission"], timeout=10000)
-    card.locator(".term-card-foot .btn", has_text=words["answer"]).click()
+    row = page.locator(".tp-row[data-terminal='tm-ira']")
+    expect(row.locator(".tp-row-tag")).to_have_attribute("data-level", "wait", timeout=10000)
+    row.locator(".tp-row-open").click()
+    attn = page.locator(".tp-pane[data-pane='tm-ira'] .tp-attn")
+    expect(attn).to_contain_text(words["answer"], timeout=10000)
+    attn.click()
     page.wait_for_url(f"**/project/{pid}/staff/st-ira**")
     check.that(sideways(page) <= 0, f"{lang}: the desktop scrolls sideways")
     context.close()
@@ -346,7 +349,7 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(sideways(page) <= 0, f"{lang} phone: the sheet scrolls sideways by {sideways(page)} px")
     page.keyboard.press("Escape")
     expect(page.locator(".sheet .staff-panel")).to_have_count(0, timeout=3000)
-    buttons = page.locator(".staff-request .ph-ask .ph-btn")
+    buttons = page.locator(".staff-request .ph-ask .btn")
     expect(buttons).to_have_count(4, timeout=5000)
     # What the finger reaches: the button's box and the ::after that extends a 40 px button to 44.
     heights = [round(buttons.nth(i).evaluate("el => { const a = getComputedStyle(el, '::after'); const r = el.getBoundingClientRect().height; return a.content === 'none' ? r : r - (parseFloat(a.top) || 0) - (parseFloat(a.bottom) || 0); }")) for i in range(buttons.count())]
@@ -372,9 +375,9 @@ def phone(browser, lang: str, check: Check) -> None:  # type: ignore[no-untyped-
     check.that(words["always"] in above, f"{lang} phone: the terminal's request offers {above}")
     # A tap on a command-line member's row in the team lands on its terminal, not on the Feed.
     page.goto(f"{BASE}/project/{pid}/team?token=t&lang={lang}")
-    row = page.locator(".ph-row-wrap[data-staff='st-ira'] .ph-row")
+    row = page.locator(".list-row-wrap[data-staff='st-ira'] .list-row")
     row.wait_for(timeout=10000)
-    row.locator(".ph-row-lead").tap()
+    row.locator(".list-row-lead").tap()
     page.wait_for_url("**/terminals/tm-ira**", timeout=10000)
     context.close()
     feed.close()

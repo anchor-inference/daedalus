@@ -1,10 +1,10 @@
 """Does every task's model in Settings have its effort beside it, and does a pick save the right field?
 
 Each task that names a model (the translator, the main orchestrator, the heartbeat…) has an effort
-picker under its model picker. This check opens Settings → Translation, Settings → Models → Tasks and
-Settings → Schedules at a desktop and a phone width, in English and Russian, and asserts that:
+list under its model picker. This check opens Settings → Translation, Settings → Models for tasks and
+Settings → Scheduled runs at a desktop and a phone width, in English and Russian, and asserts that:
 
-- the first row says which default the task has: "no reasoning" for the translator, a helper's call,
+- the first choice says which default the task has: "no reasoning" for the translator, a helper's call,
   and "as the model is set" for the main orchestrator and the heartbeat, which run whole runs;
 - choosing an effort sends exactly that field: ``translation.effort`` and ``dispatcher.effort`` to
   ``PUT /api/settings``, ``effort`` to ``PUT /api/heartbeat``;
@@ -49,12 +49,12 @@ def _merge(into: dict[str, Any], patch: dict[str, Any]) -> None:
 
 
 def _pick(page: Page, picker_id: str, effort: str) -> str:
-    """Open the effort picker with ``picker_id``, choose ``effort``, and return what its first row said."""
+    """Open the effort list whose button is ``picker_id``, choose ``effort``, and return what the button said."""
     picker = page.locator(f"#{picker_id}")
     picker.scroll_into_view_if_needed()
-    shown = picker.locator(".sel-current .sel-name").inner_text()
-    picker.locator(".sel-current button").click()
-    picker.locator(f"[role=option][data-id='{effort}']").click()
+    shown = picker.locator(".dropdown-value").inner_text()
+    picker.click()
+    page.locator(f".dropdown-list [role=option][data-value='{effort}']").click()
     page.wait_for_timeout(400)
     return shown
 
@@ -119,7 +119,7 @@ def run() -> int:
                 page.wait_for_selector("#main-effort")
                 for picker in ("subagents-effort", "quick-effort", "orchestrator-effort", "vision-effort", "models-review-effort"):
                     if page.locator(f"#{picker}").count() != 1:
-                        failures.append(f"{where}: Settings → Models → Tasks has no effort {picker!r}")
+                        failures.append(f"{where}: Settings → Models for tasks has no effort {picker!r}")
                 shown = _pick(page, "main-effort", "none")
                 if shown != words["model"]:
                     failures.append(f"{where}: the main orchestrator's default reads {shown!r}, not {words['model']!r}")

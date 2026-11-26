@@ -20,7 +20,16 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, BoardStub, TeamStub, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from api_stub import (  # noqa: E402
+    DEFAULT_APP,
+    BoardStub,
+    TeamStub,
+    Unhandled,
+    choose_option,
+    expect_app,
+    folders,
+    fulfil_shared,
+)
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -81,8 +90,8 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
 
     def edit(name: str) -> None:
         if phone:
-            page.locator(row, has_text=name).locator(".ph-row").dispatch_event("contextmenu")
-            page.locator(".ph-actions .ph-mrow", has_text=words["edit.phone"]).click()
+            page.locator(row, has_text=name).locator(".list-row").dispatch_event("contextmenu")
+            page.locator(".menu-sheet .menu-row", has_text=words["edit.phone"]).click()
         else:
             page.get_by_role("button", name=words["edit"].format(name=name)).click()
     expect(page.get_by_role("heading", name="Bakery" if phone else words["title"], exact=True)).to_be_visible()
@@ -115,7 +124,7 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(sheet.locator(".executor", has_text="Daedalus")).to_have_attribute("aria-pressed", "true")
     sheet.locator("#staff-name").fill("Ada Lovelace")
     sheet.locator("#staff-role").fill("Writes the menu page")
-    sheet.locator("#staff-agent").select_option("reviewer")
+    choose_option(page, sheet.locator("#staff-agent"), "reviewer")
     expect(sheet.locator(".branch-preview")).to_contain_text("agent/ada-lovelace/")
     fits(page, f"{lang} {width} hire sheet")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["hire"], exact=True).click()
@@ -138,15 +147,15 @@ def run_one(page: Page, lang: str, width: int, unhandled: Unhandled) -> None:
     expect(sheet).to_be_visible()
     sheet.locator(".executor", has_text="Claude Code").click()
     expect(sheet.locator("#staff-permissions")).to_be_visible()
-    isolation = sheet.get_by_role("group", name="Isolation" if lang == "en" else "Изоляция")
+    isolation = sheet.get_by_role("radiogroup", name="Isolation" if lang == "en" else "Изоляция")
     # A machine that cannot contain a shared writer still offers it: the worker then runs uncontained.
-    isolation.get_by_role("button", name=words["shared"]).click()
+    isolation.get_by_role("radio", name=words["shared"]).click()
     expect(sheet.get_by_text(words["blocked"], exact=False)).to_have_count(0)
     fits(page, f"{lang} {width} shared without containment")
-    isolation.get_by_role("button", name=words["worktree"]).click()
+    isolation.get_by_role("radio", name=words["worktree"]).click()
     sheet.locator("#staff-name").fill("Rex")
-    sheet.locator("#staff-agent").select_option("code-reviewer")
-    sheet.locator("#staff-model").select_option("opus")
+    choose_option(page, sheet.locator("#staff-agent"), "code-reviewer")
+    choose_option(page, sheet.locator("#staff-model"), "opus")
     sheet.locator("#staff-permissions").fill("acceptEdits")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["hire"], exact=True).click()
     expect(sheet).to_have_count(0)

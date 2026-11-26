@@ -64,7 +64,7 @@ def main() -> None:
         page.on("request", lambda request: requests.append(request.url))
         page.route("**/api/**", stub)
         page.goto(base + "/?token=t&scheme=dark&lang=en")
-        page.wait_for_selector(".rail", timeout=15000)
+        page.wait_for_selector("nav.sidebar", timeout=15000)
         assert page.locator(".pet-host").count() == 0
         assert not any("/assets/stage-" in address for address in requests)
         # The companion is turned on where the rest of the app's looks are: it left the More menu.
@@ -75,14 +75,17 @@ def main() -> None:
         assert page.locator(".pet-host").count() == 1
         page.goto(base + "/settings/appearance?token=t&scheme=dark&lang=en")
         page.wait_for_selector(".settings-themes", timeout=15000)
-        page.get_by_label("Reaction model").select_option("deepseek-flash")
+        # The companion floats over this corner of the page, so the list is opened from the keyboard.
+        page.get_by_label("Reaction model").focus()
+        page.keyboard.press("Enter")
+        page.locator('.dropdown-item[data-value="deepseek-flash"]').click()
         page.locator(".pet-figure").click(button="right")
         page.get_by_role("button", name="Generate a line").click()
         page.locator(".pet-bubble").get_by_text("I'm here.").wait_for()
         page.locator(".pet-figure").click(button="right")
-        page.get_by_label("Emotion").select_option("surprised")
-        page.get_by_label("Animation").select_option("wave")
-        page.get_by_label("Object").select_option("mug")
+        for name, choice in (("Emotion", "surprised"), ("Animation", "wave"), ("Object", "mug")):
+            page.locator(f".menu.pet-menu [aria-label^='{name}:']").click()
+            page.get_by_role("option", name=choice, exact=True).click()
         original = say(page, 7, ".pet-figure")
         assert original["background"].startswith("rgb("), original["background"]
         original_figure, original_bubble, original_font = original[".pet-figure"], original[".pet-bubble"], original["font"]
@@ -121,9 +124,9 @@ def main() -> None:
         restored = page.locator(".pet-host").bounding_box()
         assert restored and restored["x"] <= 10 and restored["y"] <= 10, restored
         page.locator(".pet-figure").click(button="right")
-        page.locator(".pet-menu").wait_for()
-        with_menu = say(page, 10, ".pet-menu")
-        menu, bubble = with_menu[".pet-menu"], with_menu[".pet-bubble"]
+        page.locator(".menu.pet-menu").wait_for()
+        with_menu = say(page, 10, ".menu.pet-menu")
+        menu, bubble = with_menu[".menu.pet-menu"], with_menu[".pet-bubble"]
         assert menu and menu["x"] >= 8 and menu["y"] >= 8, menu
         assert menu["x"] + menu["width"] <= 1352 and menu["y"] + menu["height"] <= 892, menu
         overlap = max(0, min(menu["x"] + menu["width"], bubble["x"] + bubble["width"]) - max(menu["x"], bubble["x"])) * max(0, min(menu["y"] + menu["height"], bubble["y"] + bubble["height"]) - max(menu["y"], bubble["y"]))
@@ -159,7 +162,7 @@ def main() -> None:
         assert phone_bubble["x"] >= 8 and phone_bubble["y"] >= 8, phone_bubble
         assert phone_bubble["x"] + phone_bubble["width"] <= 382 and phone_bubble["y"] + phone_bubble["height"] <= 836, phone_bubble
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, pointerType: 'touch', clientX: 330, clientY: 120}))")
-        phone.locator(".pet-menu").wait_for()
+        phone.locator(".menu.pet-menu").wait_for()
         phone.locator(".pet-figure").evaluate("node => node.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerType: 'touch'}))")
         phone.get_by_role("slider", name="Size").press("Home")
         small_phone_boxes = say(phone, 12, ".pet-figure")

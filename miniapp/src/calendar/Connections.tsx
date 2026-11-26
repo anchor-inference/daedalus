@@ -1,14 +1,15 @@
-import { useCopied } from "../ui/components";
 // Connected calendars: what is connected and how its sync is going, and how to connect another. Each
 // provider is a card; picking one shows the few steps it takes, in order, beside the form they fill.
 // A conflict is offered as the two versions to keep, read from the account's conflict fields.
 
 import { useState, type CSSProperties } from "react";
+import { useCopied } from "../ui/components";
 import { api } from "../api";
 import { relTime } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
-import { Sheet } from "../ui/dialogs";
+import { Button, Field, IconButton, Sheet } from "../ui/primitives";
+import { FamilyGlyph } from "../ui/provider-mark";
 import { confirmAsync, errorText } from "../ui";
 import { useQuery, invalidate } from "../store";
 import { ACCOUNTS, CALENDARS, PALETTE, refreshPlanner } from "./data";
@@ -44,14 +45,7 @@ function whereOf(account: Account): string {
 export function ProviderGlyph({ provider }: { provider: Provider }) {
   return (
     <span className={`cal-provider cal-provider-${provider}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        {provider === "google" ? <path d="M20 12.2c0 4.6-3.2 7.8-8 7.8a8 8 0 1 1 5.4-13.9M20 12h-8" />
-          : provider === "outlook" ? <><rect x="3" y="6" width="11" height="12" rx="2" /><circle cx="8.5" cy="12" r="2.5" /><path d="M14 8h7v8h-7M14 9l3.5 3L21 9" /></>
-          : provider === "yandex" ? <path d="M14 20V4h-1.6C9.6 4 8 5.6 8 8.2s1.4 4 4 4.6M12 12.8L7.5 20" />
-          : provider === "icloud" ? <path d="M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.4A3.3 3.3 0 0 0 7 18z" />
-          : provider === "ics" ? <><path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14" /><circle cx="6" cy="18" r="1.5" /></>
-          : <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4M9 15l2 2 4-4" /></>}
-      </svg>
+      <FamilyGlyph family={`cal-${provider}`} size={14} />
     </span>
   );
 }
@@ -77,8 +71,8 @@ function AccountConflicts({ calendarId, count, busy, onResolve }: { calendarId: 
         <div key={o.event_id} className="cal-account-conflict-row">
           <span className="cal-account-conflict-title">{t("cal.conflict.event", { title: o.title || t("cal.untitled") })}</span>
           <div className="cal-conflict-actions">
-            <button type="button" className="btn small" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "local")}>{t("cal.conflict.local")}</button>
-            <button type="button" className="btn small" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "remote")}>{t("cal.conflict.remote.use")}</button>
+            <Button size="sm" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "local")}>{t("cal.conflict.local")}</Button>
+            <Button size="sm" disabled={busy === o.event_id} onClick={() => onResolve(o.event_id, "remote")}>{t("cal.conflict.remote.use")}</Button>
           </div>
         </div>
       ))}
@@ -115,19 +109,19 @@ export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toas
   }
 
   return (
-    <Sheet title={adding ? t(`cal.provider.${adding}`) : t("cal.connections")} onClose={onClose} className="cal-connections-sheet"
-      head={adding ? <button type="button" className="btn small ghost cal-back" onClick={() => setAdding(null)}><Icon name="back" size={14} /> {t("cal.connect.back")}</button> : undefined}>
+    <Sheet title={adding ? t(`cal.provider.${adding}`) : t("cal.connections")} onClose={onClose} size="md" className="cal-connections-sheet"
+      head={adding ? <Button variant="quiet" size="sm" className="cal-back" icon="back" onClick={() => setAdding(null)}>{t("cal.connect.back")}</Button> : undefined}>
       {adding ? <ConnectForm provider={adding} toast={toast} onDone={() => { setAdding(null); after(); }} /> : (
-        <div className="cal-connections">
+        <div className="cal-set">
           {error && !accounts && <div className="cal-error">{error}</div>}
           {accounts && accounts.length > 0 && (
-            <section>
-              <h4 className="cal-section-title">{t("cal.connections.yours")}</h4>
-              <ul className="cal-accounts">
+            <>
+              <div className="cal-set-label">{t("cal.connections.yours")}</div>
+              <ul className="cal-set-card cal-accounts">
                 {accounts.map((account) => {
                   const status = statusOf(account);
                   return (
-                    <li key={account.id} className={`cal-account ${status}`}>
+                    <li key={account.id} className={`cal-set-row cal-account ${status}`}>
                       <ProviderGlyph provider={providerOf(account)} />
                       <div className="cal-account-main">
                         <b>{account.name}</b>
@@ -138,25 +132,24 @@ export function ConnectionsSheet({ onClose, toast }: { onClose: () => void; toas
                         {whereOf(account) && <span className="cal-account-where">{whereOf(account)}</span>}
                         {!!account.conflicts && account.calendar_id && <AccountConflicts calendarId={account.calendar_id} count={account.conflicts} busy={busy} onResolve={(id, choice) => void resolve(id, choice)} />}
                       </div>
-                      <button type="button" className="iconbtn" disabled={busy === account.id} onClick={() => void sync(account)} aria-label={t("cal.sync.now.named", { name: account.name })} title={t("cal.sync.now")}><Icon name="reload" size={16} /></button>
-                      <button type="button" className="iconbtn" onClick={() => void disconnect(account)} aria-label={t("cal.disconnect.named", { name: account.name })} title={t("cal.disconnect")}><Icon name="unlink" size={16} /></button>
+                      <IconButton icon="reload" label={t("cal.sync.now.named", { name: account.name })} disabled={busy === account.id} onClick={() => void sync(account)} />
+                      <IconButton icon="unlink" label={t("cal.disconnect.named", { name: account.name })} onClick={() => void disconnect(account)} />
                     </li>
                   );
                 })}
               </ul>
-            </section>
+            </>
           )}
-          <section>
-            <h4 className="cal-section-title">{t("cal.connect.add")}</h4>
-            <div className="cal-provider-grid">
-              {PROVIDERS.map((provider) => (
-                <button key={provider} type="button" className="cal-provider-card" onClick={() => setAdding(provider)}>
-                  <ProviderGlyph provider={provider} />
-                  <span><b>{t(`cal.provider.${provider}`)}</b><small>{t(`cal.provider.${provider}.what`)}</small></span>
-                </button>
-              ))}
-            </div>
-          </section>
+          <div className="cal-set-label">{t("cal.connect.add")}</div>
+          <div className="cal-set-card cal-provider-list">
+            {PROVIDERS.map((provider) => (
+              <button key={provider} type="button" className="cal-set-row cal-provider-card" onClick={() => setAdding(provider)}>
+                <ProviderGlyph provider={provider} />
+                <span className="cal-provider-text"><b>{t(`cal.provider.${provider}`)}</b><small>{t(`cal.provider.${provider}.what`)}</small></span>
+                <Icon name="forward" size={14} />
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </Sheet>
@@ -206,41 +199,30 @@ function ConnectForm({ provider, toast, onDone }: { provider: Provider; toast: (
         <div className="cal-redirect">
           <span>{t("cal.redirect")}</span>
           <code>{redirect}</code>
-          <button type="button" className="iconbtn small" onClick={() => void copy(redirect)} aria-label={t("cal.copy.redirect")} title={t("cal.copy.redirect")}><Icon name={copied ? "check" : "copy"} size={14} /></button>
+          <IconButton icon={copied ? "check" : "copy"} size={28} label={t("cal.copy.redirect")} onClick={() => void copy(redirect)} />
         </div>
       )}
-      <label className="field" htmlFor="cal-connect-name">{t("cal.connect.name")}</label>
-      <input id="cal-connect-name" className="field" required value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label={t("cal.connect.name")} required value={name} onChange={(e) => setName(e.target.value)} />
       {oauth && <>
-        <label className="field" htmlFor="cal-client-id">{t("cal.client.id")}</label>
-        <input id="cal-client-id" className="field" required value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
-        <label className="field" htmlFor="cal-client-secret">{t("cal.client.secret")}</label>
-        <input id="cal-client-secret" className="field" type="password" required value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="off" />
+        <Field label={t("cal.client.id")} required value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off" />
+        <Field label={t("cal.client.secret")} type="password" required value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="off" />
       </>}
-      {(provider === "caldav") && <>
-        <label className="field" htmlFor="cal-server">{t("cal.server")}</label>
-        <input id="cal-server" className="field" type="url" required value={server} onChange={(e) => setServer(e.target.value)} placeholder="https://" />
-      </>}
+      {(provider === "caldav") && <Field label={t("cal.server")} type="url" required value={server} onChange={(e) => setServer(e.target.value)} placeholder="https://" />}
       {!oauth && provider !== "ics" && <>
-        <label className="field" htmlFor="cal-user">{t("cal.username")}</label>
-        <input id="cal-user" className="field" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
-        <label className="field" htmlFor="cal-pass">{t(provider === "caldav" ? "cal.password" : "cal.app.password")}</label>
-        <input id="cal-pass" className="field" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+        <Field label={t("cal.username")} required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+        <Field label={t(provider === "caldav" ? "cal.password" : "cal.app.password")} type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       </>}
       {provider === "ics" && <>
-        <label className="field" htmlFor="cal-ics">{t("cal.ics.url")}</label>
-        <input id="cal-ics" className="field" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
-        <label className="field" id="cal-ics-color">{t("cal.field.color")}</label>
-        <div className="cal-swatches" role="group" aria-labelledby="cal-ics-color">{PALETTE.map((p) => <button key={p.id} type="button" className={`cal-swatch ${color === p.hex ? "on" : ""}`} style={{ "--c": p.hex } as CSSProperties} aria-pressed={color === p.hex} onClick={() => setColor(p.hex)} aria-label={t(`cal.color.${p.id}`)} title={t(`cal.color.${p.id}`)}>{color === p.hex && <Icon name="check" size={12} />}</button>)}</div>
+        <Field label={t("cal.ics.url")} type="url" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
+        <div className="field-box">
+          <span className="field-label" id="cal-ics-color">{t("cal.field.color")}</span>
+          <div className="cal-swatches" role="group" aria-labelledby="cal-ics-color">{PALETTE.map((p) => <button key={p.id} type="button" className={`cal-swatch ${color === p.hex ? "on" : ""}`} style={{ "--c": p.hex } as CSSProperties} aria-pressed={color === p.hex} onClick={() => setColor(p.hex)} aria-label={t(`cal.color.${p.id}`)} title={t(`cal.color.${p.id}`)}>{color === p.hex && <Icon name="check" size={12} />}</button>)}</div>
+        </div>
       </>}
-      {provider !== "ics" && <>
-        <label className="field" htmlFor="cal-remote">{t("cal.remote.id")}</label>
-        <input id="cal-remote" className="field" value={remoteId} onChange={(e) => setRemoteId(e.target.value)} />
-        <div className="cal-hint">{t("cal.remote.hint")}</div>
-      </>}
+      {provider !== "ics" && <Field label={t("cal.remote.id")} value={remoteId} onChange={(e) => setRemoteId(e.target.value)} hint={t("cal.remote.hint")} />}
       <div className="sheet-foot cal-foot">
         <span className="cal-spacer" />
-        <button type="submit" className="btn primary" disabled={busy}>{oauth ? t("cal.connect.signin") : provider === "ics" ? t("cal.subscribe") : t("cal.connect")}</button>
+        <Button variant="primary" type="submit" busy={busy}>{oauth ? t("cal.connect.signin") : provider === "ics" ? t("cal.subscribe") : t("cal.connect")}</Button>
       </div>
     </form>
   );

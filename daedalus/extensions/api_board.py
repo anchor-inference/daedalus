@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from daedalus.extensions.board import Board
 from daedalus.extensions.board_commands import BoardCommands
+from daedalus.extensions.board_history import task_history
 from daedalus.extensions.orchestrator_domain import DomainConflict
 from daedalus.stores.control import ControlConflict, ControlDenied, Principal, Scope
 
@@ -41,7 +42,12 @@ class CreateBody(BaseModel):
     brief: Brief = Field(default_factory=Brief)
     session_id: str | None = Field(default=None, max_length=200)
     assignee_staff_id: str | None = Field(default=None, max_length=200)
+    assignee_operator: bool = False
+    due_at: str | None = Field(default=None, max_length=40)
     folder_id: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["todo", "doing", "review", "done", "blocked", "dropped"] | None = None
+    """The column the card is made in; absent, its dependencies decide. A column a new card cannot be
+    in is refused as the move to it would be (409)."""
 
 
 class UpdateBody(BaseModel):
@@ -57,6 +63,8 @@ class UpdateBody(BaseModel):
     note: str = Field(default="", max_length=1000)
     status: str | None = None
     assignee_staff_id: str | None = Field(default=None, max_length=200)
+    assignee_operator: bool | None = None
+    due_at: str | None = Field(default=None, max_length=40)
     check_ids: list[str] | None = Field(default=None, max_length=12)
     uncheck_ids: list[str] | None = Field(default=None, max_length=12)
     folder_id: str | None = Field(default=None, min_length=1, max_length=200)
@@ -163,3 +171,17 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             return await projection(result)
         except (ControlConflict, ControlDenied, KeyError, ValueError) as exc:
             raise rejected(exc) from exc
+
+    @api.get("/api/board/{task_id}/events")
+    async def history(task_id: str, limit: int = Query(default=200, ge=1, le=1000),
+                      _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+        """What happened to one card, oldest first, from the card's own history table.
+
+        Read for a removed card too: its history stays readable. Every change of its status, owner,
+        priority, due date or title, its accepted result and its removal is a line, written with the
+        change itself whichever path made it; a line marked ``backfilled`` was reconstructed when the
+        table was made, and what happened before it was not recorded.
+        """
+        if await app.db.fetchone("SELECT 1 FROM board_tasks WHERE id = ?", (task_id,)) is None:
+            raise HTTPException(404, "no such task")
+        return await task_history(app.db, task_id, limit=limit)

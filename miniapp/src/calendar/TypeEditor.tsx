@@ -8,7 +8,7 @@ import { t } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { invalidate } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Sheet } from "../ui/dialogs";
+import { Button, Select, Sheet, Switch } from "../ui/primitives";
 import { ADDABLE_KINDS, type FieldSchema, type TypeAggregate, type TypeDef } from "./blocks";
 import { TYPES, deleteType, refreshPlanner, saveType } from "./data";
 import { ColorPicker } from "./fields";
@@ -28,7 +28,7 @@ export function TypesSheet({ types, onClose, toast }: { types: TypeDef[]; onClos
   const [editing, setEditing] = useState<TypeDef | "new" | null>(null);
   if (editing) return <TypeForm type={editing === "new" ? null : editing} taken={types.map((x) => x.id)} onClose={() => setEditing(null)} toast={toast} />;
   return (
-    <Sheet title={t("cal.types")} onClose={onClose} size="narrow" className="cal-types">
+    <Sheet title={t("cal.types")} onClose={onClose} size="sm" className="cal-types">
       <p className="cal-hint">{t("cal.types.hint")}</p>
       <ul className="cal-type-list">
         {types.map((type) => (
@@ -100,7 +100,7 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
   const setField = (i: number, patch: Partial<FieldRow> | Partial<FieldSchema>, schema = false) => setFields(fields.map((f, j) => (j === i ? (schema ? { ...f, schema: { ...f.schema, ...(patch as Partial<FieldSchema>) } } : { ...f, ...(patch as Partial<FieldRow>) }) : f)));
 
   return (
-    <Sheet title={type ? t("cal.type.edit") : t("cal.type.new")} onClose={onClose} className="cal-editor cal-type-form">
+    <Sheet title={type ? t("cal.type.edit") : t("cal.type.new")} onClose={onClose} size="lg" className="cal-editor cal-type-form">
       <form className="cal-form" onSubmit={save}>
         <div className="cal-type-top" style={{ "--c": color } as CSSProperties}>
           <TypeIcon icon={icon} color={color} size={20} className="cal-type-preview" />
@@ -124,9 +124,8 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
             <div key={i} className="cal-type-field">
               <input className="field" value={f.key} placeholder={t("cal.type.field.key")} aria-label={t("cal.type.field.key.n", { n: i + 1 })} onChange={(e) => setField(i, { key: e.target.value.replace(/[^\w-]/g, "_") })} />
               <input className="field" value={f.schema.label ?? ""} placeholder={t("cal.type.field.label")} aria-label={t("cal.type.field.label.n", { n: i + 1 })} onChange={(e) => setField(i, { label: e.target.value || undefined }, true)} />
-              <select className="field" value={f.schema.type} aria-label={t("cal.type.field.type.n", { n: i + 1 })} onChange={(e) => setField(i, { type: e.target.value as FieldSchema["type"] }, true)}>
-                {FIELD_TYPES.map((x) => <option key={x} value={x}>{t(`cal.type.ftype.${x}`)}</option>)}
-              </select>
+              <Select size="md" value={f.schema.type} label={t("cal.type.field.type.n", { n: i + 1 })} onChange={(type) => setField(i, { type }, true)}
+                options={FIELD_TYPES.map((x) => ({ id: x, label: t(`cal.type.ftype.${x}`) }))} />
               {f.schema.type === "enum" ? (
                 <input className="field" value={(f.schema.values ?? []).join(", ")} placeholder={t("cal.type.field.values")} aria-label={t("cal.type.field.values.n", { n: i + 1 })} onChange={(e) => setField(i, { values: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) }, true)} />
               ) : (
@@ -142,10 +141,8 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
         <div className="cal-bedit-items">
           {blocks.map((b, i) => (
             <div key={i} className="cal-type-block">
-              <select className="field" value={b.source ? "fields:source" : b.kind} aria-label={t("cal.type.block.kind.n", { n: i + 1 })} onChange={(e) => setBlocks(blocks.map((x, j) => (j === i ? (e.target.value === "fields:source" ? { kind: "fields", source: "fields", title: x.title } : { kind: e.target.value, title: x.title }) : x)))}>
-                <option value="fields:source">{t("cal.type.block.fields")}</option>
-                {ADDABLE_KINDS.map((k) => <option key={k} value={k}>{t(`cal.block.kind.${k}`)}</option>)}
-              </select>
+              <Select size="md" value={b.source ? "fields:source" : b.kind} label={t("cal.type.block.kind.n", { n: i + 1 })} onChange={(kind) => setBlocks(blocks.map((x, j) => (j === i ? (kind === "fields:source" ? { kind: "fields", source: "fields", title: x.title } : { kind, title: x.title }) : x)))}
+                options={[{ id: "fields:source", label: t("cal.type.block.fields") }, ...ADDABLE_KINDS.map((k) => ({ id: k as string, label: t(`cal.block.kind.${k}`) }))]} />
               <input className="field" value={b.title ?? ""} placeholder={t("cal.block.title")} aria-label={t("cal.type.block.title.n", { n: i + 1 })} onChange={(e) => setBlocks(blocks.map((x, j) => (j === i ? { ...x, title: e.target.value || undefined } : x)))} />
               <button type="button" className="iconbtn small" disabled={i === 0} onClick={() => { const next = [...blocks]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; setBlocks(next); }} aria-label={t("cal.block.up")}><Icon name="up" size={14} /></button>
               <button type="button" className="iconbtn small" onClick={() => setBlocks(blocks.filter((_, j) => j !== i))} aria-label={t("cal.type.block.remove", { n: i + 1 })}><Icon name="close" size={14} /></button>
@@ -164,14 +161,10 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
             <div className="cal-bedit-items">
               {aggregates.map((a, i) => (
                 <div key={i} className="cal-type-agg">
-                  <select className="field" value={a.op} aria-label={t("cal.type.total.op.n", { n: i + 1 })} onChange={(e) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, op: e.target.value as TypeAggregate["op"] } : x)))}>
-                    <option value="sum">{t("cal.block.total.sum")}</option>
-                    <option value="avg">{t("cal.block.total.avg")}</option>
-                    <option value="count">{t("cal.type.total.count")}</option>
-                  </select>
-                  <select className="field" value={a.field} aria-label={t("cal.type.total.field.n", { n: i + 1 })} onChange={(e) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))}>
-                    {numeric.map((f) => <option key={f.key} value={f.key}>{f.schema.label || f.key}</option>)}
-                  </select>
+                  <Select size="md" value={a.op} label={t("cal.type.total.op.n", { n: i + 1 })} onChange={(op) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, op } : x)))}
+                    options={[{ id: "sum", label: t("cal.block.total.sum") }, { id: "avg", label: t("cal.block.total.avg") }, { id: "count", label: t("cal.type.total.count") }]} />
+                  <Select size="md" value={a.field} label={t("cal.type.total.field.n", { n: i + 1 })} onChange={(field) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, field } : x)))}
+                    options={numeric.map((f) => ({ id: f.key, label: f.schema.label || f.key }))} />
                   <input className="field" type="number" value={a.target?.[0] ?? ""} placeholder={t("cal.type.total.min")} aria-label={t("cal.type.total.min")} onChange={(e) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, target: e.target.value === "" ? undefined : [Number(e.target.value), x.target?.[1] ?? Number(e.target.value)] } : x)))} />
                   <input className="field" type="number" value={a.target?.[1] ?? ""} placeholder={t("cal.type.total.max")} aria-label={t("cal.type.total.max")} onChange={(e) => setAggregates(aggregates.map((x, j) => (j === i ? { ...x, target: e.target.value === "" ? undefined : [x.target?.[0] ?? 0, Number(e.target.value)] } : x)))} />
                   <button type="button" className="iconbtn small" onClick={() => setAggregates(aggregates.filter((_, j) => j !== i))} aria-label={t("cal.type.total.remove", { n: i + 1 })}><Icon name="close" size={14} /></button>
@@ -186,17 +179,17 @@ function TypeForm({ type, taken, onClose, toast }: { type: TypeDef | null; taken
         <div className="cal-type-quick">
           {(["mark_done", "skip"] as const).map((q) => (
             <label key={q} className="cal-switch-row">
-              <input type="checkbox" checked={quick.includes(q)} onChange={(e) => setQuick(e.target.checked ? [...quick, q] : quick.filter((x) => x !== q))} />
+              <Switch checked={quick.includes(q)} onChange={(on) => setQuick(on ? [...quick, q] : quick.filter((x) => x !== q))} label={t(`cal.type.quick.${q}`)} />
               <span>{t(`cal.type.quick.${q}`)}</span>
             </label>
           ))}
         </div>
 
         <div className="sheet-foot cal-foot">
-          {type && <button type="button" className="btn danger" onClick={() => void remove()}><Icon name="trash" size={14} /> {t("common.delete")}</button>}
+          {type && <Button variant="danger" icon="trash" onClick={() => void remove()}>{t("common.delete")}</Button>}
           <span className="cal-spacer" />
-          <button type="button" className="btn" onClick={onClose}>{t("common.cancel")}</button>
-          <button type="submit" className="btn primary" disabled={busy || !name.trim()}>{t("common.save")}</button>
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button variant="primary" type="submit" disabled={busy || !name.trim()}>{t("common.save")}</Button>
         </div>
       </form>
     </Sheet>

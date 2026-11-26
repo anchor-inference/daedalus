@@ -12,9 +12,11 @@ import { errorText } from "../ui";
 
 export type ChatFinishInfo = { session_id: string; title: string | null; note: string; at: string };
 
-export function ChatFinish({ task, onOpenSession, onChanged, toast }: {
+/** `reopen` false leaves the way back to work to the caller: the task pane carries it in its footer,
+ *  where every other way to end or reopen the card is. */
+export function ChatFinish({ task, onOpenSession, onChanged, toast, reopen: offerReopen = true }: {
   task: { id: string; status: string; entity_revision?: number; finished_by?: ChatFinishInfo | null };
-  onOpenSession: (sessionId: string) => void; onChanged: () => void; toast: (text: string) => void;
+  onOpenSession: (sessionId: string) => void; onChanged: () => void; toast: (text: string) => void; reopen?: boolean;
 }) {
   const offline = useOffline();
   const [busy, setBusy] = useState(false);
@@ -40,10 +42,10 @@ export function ChatFinish({ task, onOpenSession, onChanged, toast }: {
         {t("board.finishedBy.who")} <button type="button" className="linkbtn" onClick={() => onOpenSession(finished.session_id)}>{finished.title || t("board.of.gone")}</button>
         <span className="sep"> · </span><span title={absTime(finished.at)}>{relTime(finished.at)}</span>
       </div>
-      {finished.note ? <div className="proposal-text">{finished.note}</div> : <div className="sub">{t("board.finishedBy.noNote")}</div>}
-      <div className="btnrow">
+      {finished.note ? <div className="proposal-text chat-finish-note">{finished.note}</div> : <div className="sub">{t("board.finishedBy.noNote")}</div>}
+      {offerReopen && <div className="btnrow">
         <button type="button" className="btn small" disabled={busy || offline || typeof revision !== "number"} onClick={() => void reopen()}>{t("board.finishedBy.reopen")}</button>
-      </div>
+      </div>}
     </section>
   );
 }

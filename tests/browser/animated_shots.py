@@ -19,7 +19,7 @@ TOURS = {
     "session": ["session", "session-panel-files", "session-panel-preview", "session-mcp", "session-browser"],
     "orchestration": ["main", "project-focus", "project-questions", "board"],
     "phone": ["phone-bots", "phone-session", "phone-session-panel", "phone-browser", "phone-project", "phone-more"],
-    "selfdev": ["changes", "changes-summary", "changes-diff"],
+    "selfdev": ["changes-list", "changes", "changes-split"],
 }
 
 

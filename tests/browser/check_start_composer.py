@@ -31,7 +31,7 @@ from screenshots import S1, UNHANDLED, stub  # noqa: E402
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 HEARD = "buy rye flour"
-WORDS = {"en": {"mic": "record a voice note", "low": "low", "high": "high"}, "ru": {"mic": "записать голосовую заметку", "low": "низкая", "high": "высокая"}}
+WORDS = {"en": {"mic": "record a voice note", "low": "Low", "high": "High"}, "ru": {"mic": "записать голосовую заметку", "low": "Низкое", "high": "Высокое"}}
 ASR = {"configured": True, "reason": "", "provider": "openrouter", "model": "asr", "max_seconds": 600, "autosend": False, "transcriber": "cloud", "fallback": ""}
 PRESET = {"provider": "openai", "model": "gpt-6-luna", "label": "gpt-6-luna", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 400000, "max_output_tokens": 32000}
 
@@ -82,33 +82,34 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     page.wait_for_timeout(800)
 
     if phone:
-        # A phone's home is a new chat: the composer rests as one 44 px row at the bottom, the
-        # question above it, and the model is the top bar's title.
+        # A phone's home is a new chat: the composer is the chat's card at the bottom, its controls
+        # one 44 px row under the field, the question above it, and the model is the top bar's title.
         box = composer.locator(".composer-box").bounding_box()
+        row = composer.locator(".composer-row").bounding_box()
         greeting = page.locator(".ph-hero h1").bounding_box()
         vh = size["height"]
         assert box and greeting
-        if round(box["height"]) != 44 or vh - (box["y"] + box["height"]) > 24:
-            say(f"the composer {box} is not one 44 px row at the bottom")
+        if not row or round(row["height"]) != 44 or vh - (box["y"] + box["height"]) > 24:
+            say(f"the composer {box} is not a card over one 44 px row at the bottom ({row})")
         if greeting["y"] + greeting["height"] > box["y"]:
             say("the question is not above the composer")
-        expect(page.locator(".ph-top .ph-top-tb")).to_contain_text("gpt-6-luna")
+        expect(page.locator(".ph-top .pagehead-tb")).to_contain_text("gpt-6-luna")
         if page.evaluate("document.documentElement.scrollWidth - innerWidth") > 0:
             say("the page scrolls sideways")
 
     # The effort: the preset's own first, then a pick (from the title's sheet on a phone).
     model = composer.locator(".model-select")
     expect(model.locator(".model-effort")).to_contain_text(words["high"])
+    # The reasoning is a row of the picker, which stays open on a pick; Escape puts it away.
     if phone:
-        page.locator(".ph-top .ph-top-tb").click()
-        page.locator(".sheet .ph-model-effort button[role='radio']").nth(1).click()
-        page.wait_for_timeout(200)
+        page.locator(".ph-top .pagehead-tb").click()
     else:
         model.click()
-        page.locator(".effort-entry").click()
-        page.locator(".effort-menu .effort-option input[value='low']").click()
+    page.locator(".model-picker .model-effort-seg button[role='radio']").nth(1).click()
+    page.wait_for_timeout(200)
+    page.keyboard.press("Escape")
     expect(model.locator(".model-effort")).to_contain_text(words["low"])
-    expect(page.locator(".model-list")).to_have_count(0)
+    expect(page.locator(".model-picker")).to_have_count(0)
 
     # Switching from an empty field to typed Send must reserve exactly the same toolbar geometry.
     field = composer.locator(".composer-field")
@@ -131,7 +132,7 @@ def run(browser, lang: str, phone: bool, problems: list[str]) -> None:  # type: 
     expect(composer.locator(".roundbtn.primary")).to_be_visible()
     composer.locator(".plus").click()
     # A menu item on the desktop, a row of the + sheet on a phone.
-    mic = page.get_by_role("menuitem", name=words["mic"]).or_(page.locator(".ph-plus-sheet .ph-mrow").filter(has_text=re.compile(words["mic"], re.I)))
+    mic = page.get_by_role("menuitem", name=words["mic"]).or_(page.locator(".ph-plus-sheet .menu-row").filter(has_text=re.compile(words["mic"], re.I)))
     expect(mic).to_be_visible()
     mic.click()
     page.wait_for_selector(".start-composer .voicebar[data-phase=recording]", timeout=5000)

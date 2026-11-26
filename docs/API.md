@@ -17,6 +17,30 @@ through the containment the file browser uses, so a symlink out of the tree, a `
 belonging to the installation itself are absent from the answer rather than refused. Content search
 needs ripgrep: without it, `files/grep` answers **501** and a sentence saying to search by name.
 
+**A chat's changes.** `GET /api/sessions/{id}/changes` lists what changed in the folder the chat works
+in against its last commit: `{"repository", "env", "directory", "root", "prefix", "branch", "head",
+"upstream", "ahead", "behind", "files": [{"path", "status", "added", "removed", "binary"}], "added",
+"removed", "truncated", "busy"}`. `status` is git's letter or `?` for a file git does not track yet;
+paths are from the repository's top, and a chat in a sub-folder sees only that sub-folder. A folder
+outside any repository is `"repository": false`, not an error, and so is a remote conversation's,
+whose tools run on your own machine where this host cannot run git (`"reason": "out_of_reach"`). At
+most 500 files are listed, with `truncated` saying there are more. `GET …/changes/diff?path=` is one
+file's unified diff, cut at 512 KB, with `binary` for a file git only says differs. `POST
+…/changes/revert` with `{"confirm": true, "paths": [...]}` or `{"confirm": true, "all": true}` puts the
+files back as committed and **deletes** new ones, answering `restored` and `deleted`; `POST
+/api/sessions/{id}/commit` with `{"message", "paths"?}` commits those files, or every changed one, as
+the identity the repository's git configuration names, and answers `commit`. Neither pushes. Both
+take only paths the list shows, exactly, are refused with **409** while a run of the chat — or of
+another chat in the same folder — is in progress or waits on a question, and publish a
+`session.changes` event. git runs where the chat's tools run, through that environment's terminal
+daemon, with the repository's hooks, external diffs, pager, signing program and prompts switched off.
+Whether to offer the tab at all needs no git: the session detail (`GET /api/sessions/{id}`) carries
+`repository` beside `branch`, read from the folder's `.git` and `HEAD` files on every poll — `true` in a
+repository (a detached `HEAD` included, with `branch` null), `false` outside one, `null` while it is not
+known. For a chat working in a host folder both come from git on the host through the terminal daemon,
+kept for fifteen seconds and asked again in the background, so they are `null` until the host first
+answers; a remote conversation's are always `null`.
+
 **The queue in front of a working agent.** A message sent to a session that is already running is a
 steer: it waits in a queue and is placed in front of the model's next call rather than starting a
 second run. `GET /api/sessions/{id}/steer` lists what is still waiting, oldest first, as
@@ -113,7 +137,20 @@ tool the same answer carries `server`: `{"name", "hours", "default_hours"}`, and
 for the rest of the session) allows every tool of that server for that long. `GET …/policy/standing`
 lists the session's standing grants of both kinds with the time each has left, and `DELETE
 …/policy/standing/{id}` takes one back. A guest's turn, and a run that has read another agent's reply,
-neither uses nor makes one. An action the
+neither uses nor makes one. The same answer carries `project`: `{"available": true, "project": {"id",
+"name"}}` when the family can also be allowed for every chat of the chat's project, or `{"available":
+false, "reason"}`; `POST …/policy/grant-project` with `{"key"}` does it, with the same family and the same
+matcher as the session grant, until it is taken back, and answers 400 with the reason for a chat in no
+project, a call the auto-review blocked, a question that is always asked again (anything but a host outside
+the egress allowlist, an MCP tool's annotations and the operator's own rules) and an orchestrator's
+request. `GET /api/projects/{id}/approval-rules` lists a project's rules (`{"rules": [{"id", "tool",
+"rule", "kind", "value", "hosts", "label", "created_at", "session_id", "via"}]}`) and `DELETE
+…/approval-rules/{rule_id}` takes one back for every chat; `GET …/policy/standing` lists them too, as
+`project`. Granting announces `permission.resolved` with `scope: "project"` and `rule_id`, and a change of the
+list `project.changed` with `change: "approvals"`. `POST /api/providers/{id}/test` reads the endpoint's
+model list through the adapter requests use and answers `{"ok", "latency_ms", "status", "detail",
+"models"?}` within eight seconds; an endpoint that is down or refuses the key is the answer with `ok` false,
+and only an id that names nothing is a 404. An action the
 operator's rules hand back (`docs/POLICY.md`, *Action rules*) arrives as `permission.pending` with
 `kind: "handoff"` and is closed with `POST /api/sessions/{id}/handoffs/{key}/done`; it cannot be
 granted. A call the auto-review blocked arrives as `permission.pending` with `blocked: {"reason",
@@ -161,14 +198,25 @@ agent adds is drawn on the board of the project it works in. `GET /api/projects/
 (`objective`, `deliverable`, `boundaries`, `done_when`) and its `assignee` with that staff member's
 live status; `needs_you` is the project's open requests routed to the operator, read from the
 requests themselves each time, so an answer from anywhere ends one. `POST` to the same address adds a
-task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority"}`; `PUT /api/board/{id}`
+task with `{"title", "brief", "assignee_staff_id", "depends_on", "priority", "status"?}`; without
+`status` its dependencies decide (`todo`, or `blocked` while one is open), and with it the task is made
+in that column only where a move would take it: `todo` with nothing open before it, `blocked` always,
+`doing` for a task you keep for yourself (`assignee_operator`) with nothing open; `review`, `done` and
+`dropped` are refused (**409**, with the sentence the move gets). `PUT /api/board/{id}`
 also takes `assignee_staff_id` (`""` unassigns), `brief` (the parts sent) and `depends_on`; `POST
 /api/board/{id}/accept` moves a task from review to done, and on a task with a staff branch it is the
 merge below (**409** when it is not in review, or the merge is refused); `GET /api/board?project=<id>`
 is one project's tasks. A project's staff
 and orchestrator see its whole board, move only their own tasks and never to done; an ordinary agent
 keeps its own board, without the team's tasks. Each change is a `task.created`, `task.moved`,
-`task.assigned` or `task.accepted` event naming its `actor`.
+`task.assigned` or `task.accepted` event naming its `actor`. `GET /api/board/{id}/events?limit=` is a
+card's history, oldest first, from a table written with each change whichever path made it — a member's
+report into review, a verdict, a dependent a close freed and a CI or contract change that sent it back
+included, though those announce no event: one line per change of its status (`task.moved`), owner
+(`task.assigned`), accepted result, title, priority or due date (`task.changed` with `field`), and its
+removal, each with `actor` (`system` when no command made it), the command's `operation`, `cause` for a
+dependent moved by another card, and `backfilled` for a line reconstructed from what was left when the
+table was made, before which the card's history was not recorded.
 
 **A card's contract and its acceptance.** A project task also carries `requirements`: the conditions
 all of its work must meet, each numbered (`R1` …) with its `text`, `kind` (`quality`, `scope`,
@@ -256,7 +304,7 @@ the one it replaces. It sleeps between turns and is woken by its project's event
 seconds (at once for a question, a permission, an error or a stuck report); every turn begins with the
 project as it is now, which `GET /api/projects/{id}/state` shows as it sees it. Its questions never
 pause it: they are requests you answer like a staff member's, and the answer wakes it. Its model is
-the project's own choice, else the default for project orchestrators in Settings → Models, else the
+the project's own choice, else the default for project orchestrators in Settings → Models for tasks, else the
 strongest preset; the model chip in its chat changes the project's choice. In `GET /api/sessions`
 such a project carries `orchestrator: {"enabled", "session_id", "staff", "working", "needs_you"}`
 (null for a project without one), and `GET /api/sessions/{id}` names what a session is to its
@@ -372,8 +420,8 @@ can download or preview (`GET /api/files?ids=…`, `GET /api/files/{id}/download
 lists where a file may be used and every time it moved, with who, where, its size and its hash. One
 file is at most 50 MB, one hand-over at most 20 files.
 
-**The main orchestrator.** One chat, the home of the app's orchestration mode (the rail's
-Orchestration item; on a phone, the first row of that mode's list), where you say "in Bakery, add a
+**The main orchestrator.** One chat, the home of the app's orchestration mode (the sidebar's
+mode menu; on a phone, the first row of that mode's list), where you say "in Bakery, add a
 gluten-free menu": it hands the work to that project's orchestrator as a *dispatch* and follows it. It
 never touches files, staff or a board; its tools are `Projects`, `Delegate`, `Progress`, `Cancel`,
 `CreateProject`, `Answer` and `Files`, beside `Notify`, `StaySilent` and the history tools. A dispatch wakes the
@@ -384,7 +432,7 @@ worked, and it tells you in a line or two — pushed to your phone when you are 
 A question a project puts to you about a dispatch (`AskOperator(dispatch_id=…)`) is shown in the main
 chat as well as the project's, as one request answered once wherever you answer it; its model is not
 woken for it. It answers one for you only when your latest message says the answer (`Answer` quotes
-your words), and never a permission. Its model is Settings → Models → Main orchestrator, a mid-tier
+your words), and never a permission. Its model is Settings → Models for tasks → Main orchestrator, a mid-tier
 preset unless you choose one; the model chip in its chat writes that setting. `GET /api/main` is the
 chat as the app draws it (the session, the dispatches, the questions), `POST /api/main` opens it the
 first time and `POST /api/main/replace` gives it a fresh chat; `GET /api/dispatches/{id}` and `POST

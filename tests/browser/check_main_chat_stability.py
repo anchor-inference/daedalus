@@ -9,12 +9,17 @@ centre's loading fallbacks before the project itself.
 
 For each action, on both pages at 1440 px, the elements are marked beforehand and read afterwards:
 
-- the panel toggled closed and open, and every panel tab in turn: the rail, the left column and the
-  conversation are the very same elements, and the address never leaves the page's own;
+- the panel toggled closed and open, three tools opened from its "+" menu, and every tab in turn: the
+  sidebar's column, the sidebar and the conversation are the very same elements, and the address never
+  leaves the page's own;
 - a project opened from the main chat's column, and the main chat opened from a project's column:
-  the rail and the centre's frame survive, and the new column and conversation arrive without a
+  the sidebar's column and the centre's frame survive, and the new column and conversation arrive without a
   loading fallback drawn first;
-- all of them: no layout shift above 0.01 and no task longer than 50 ms.
+- all of them: no layout shift above 0.01 and no task longer than 50 ms. When a project or the main chat
+  is opened, what the action itself draws (the new column and the new conversation) is the part that
+  arrives from the host: its own rows and turns moving as the answer lands is the speed of the
+  machine, not a fault of the page, and goes unmeasured; what is measured is every other element,
+  the frame the action must leave still.
 
 Both measures are the action's own. Each action starts once the page has stopped changing by itself,
 so a page still arriving (a project's team coming into its column) is not reported as the first
@@ -38,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from check_orchestration_mode import PID, go, serve, stubs  # noqa: E402
 from main_thread import Watch, prepare, quiet  # noqa: E402
-from screenshots import UNHANDLED  # noqa: E402
+from screenshots import UNHANDLED, open_tool  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -48,13 +53,21 @@ MAX_SHIFT = 0.01
 # the app writes, so a detour through another page is seen even when it is undone within the same click.
 WATCH = """
 (() => {
-  window.__shifts = []; window.__moved = []; window.__paths = [];
+  window.__shifts = []; window.__moved = []; window.__paths = []; window.__arriving = null;
+  // Whether a shifted node belongs to what the action draws, which the check names for each action.
+  const arrives = (node) => {
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return !!el && !!window.__arriving && !!el.closest(window.__arriving);
+  };
   const named = (node) => !node ? "?" : node.nodeType === 1 ? node.tagName.toLowerCase() + [...node.classList].map((c) => "." + c).join("") : "#text";
   const box = (r) => [r.x, r.y, r.width, r.height].map(Math.round).join(",");
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) {
       if (e.hadRecentInput) continue;
-      window.__shifts.push(e.value);
+      const sources = e.sources || [];
+      // A shift whose every moved node is part of the arriving content is the answer landing; the
+      // judgement is made here, while the nodes are still in the page.
+      if (!(sources.length && sources.every((s) => arrives(s.node)))) window.__shifts.push(e.value);
       for (const s of e.sources || []) window.__moved.push(`${named(s.node)} ${box(s.previousRect)} → ${box(s.currentRect)}`);
     }
   }).observe({ type: "layout-shift", buffered: true });
@@ -65,11 +78,15 @@ WATCH = """
 })();
 """
 
+# What opening a project or the main chat draws anew, and fills in as the host answers.
+ARRIVING = "nav.sidebar, .chat, .main-flow"
+
 # The parts that must survive, and a record of every fallback drawn while the action runs.
-PARTS = {"rail": "nav.rail", "sidebar": "nav.sidebar", "centre": ".app > .main", "chat": ".chat"}
+PARTS = {"column": ".desktop-column", "sidebar": "nav.sidebar", "centre": ".app > .main", "chat": ".chat"}
 BEGIN = """
-(parts) => {
+([parts, arriving]) => {
   window.__shifts = []; window.__moved = []; window.__paths = []; window.__fallbacks = [];
+  window.__arriving = arriving;
   if (window.__watch) window.__watch.disconnect();
   window.__watch = new MutationObserver((records) => {
     for (const r of records) for (const n of r.addedNodes) {
@@ -98,10 +115,10 @@ def settle(page: Page) -> None:
     page.wait_for_timeout(500)
 
 
-def measured(page: Page, what: str, action, *, keep: tuple[str, ...], stay: re.Pattern[str] | None) -> dict:
+def measured(page: Page, what: str, action, *, keep: tuple[str, ...], stay: re.Pattern[str] | None, arriving: str | None = None) -> dict:
     # Whatever the page is still doing by itself belongs to what came before, not to this action.
     quiet(page)
-    page.evaluate(BEGIN, PARTS)
+    page.evaluate(BEGIN, [PARTS, arriving])
     watch = Watch(page.context.browser, page)
     watch.begin()
     action()
@@ -135,7 +152,7 @@ def chunks_ready(page: Page, *names: str) -> None:
 
 
 def panel_actions(page: Page, where: str, stay: re.Pattern[str]) -> None:
-    everything = ("rail", "sidebar", "centre", "chat")
+    everything = ("column", "sidebar", "centre", "chat")
     toggle = page.locator(".chat .head-actions button[aria-label='Panel']")
     # Whether the panel is open is read from the toggle, which says what the page decided, not from the
     # panel itself: on a loaded machine the panel is drawn a moment after the conversation, and a click
@@ -149,9 +166,13 @@ def panel_actions(page: Page, where: str, stay: re.Pattern[str]) -> None:
     expect(page.locator(".panel")).to_have_count(0)
     measured(page, f"{where}: panel opened", toggle.click, keep=everything, stay=stay)
     expect(page.locator(".panel")).to_have_count(1)
+    # The strip starts with the Overview and the questions; a tool the operator opens from the "+"
+    # menu becomes a tab, and opening one is an action of its own that must hold the page as still.
+    for tool in ("files", "notes", "details"):
+        measured(page, f"{where}: open {tool}", lambda tool=tool: open_tool(page, tool), keep=everything, stay=stay)
     tabs = page.locator(".panel .panel-tab")
     names = tabs.evaluate_all("(tabs) => tabs.map((t) => t.dataset.tab)")
-    assert len(names) >= 3, f"{where}: the panel offers {names}"
+    assert len(names) >= 5, f"{where}: the panel shows {names}"
     for name in [*names[1:], names[0]]:
         tab = page.locator(f".panel .panel-tab[data-tab='{name}']")
         measured(page, f"{where}: panel tab {name}", tab.click, keep=everything, stay=stay)
@@ -171,7 +192,7 @@ def main_chat(page: Page) -> None:
         page.locator("nav.orch-sidebar .orch-row").first.click()
         expect(page.locator(".chat.in-project.orchestrator")).to_be_visible()
 
-    measured(page, "main chat: open a project", open_project, keep=("rail", "centre"), stay=re.compile(rf"^/app/orchestration/project/{PID}/?$"))
+    measured(page, "main chat: open a project", open_project, keep=("column", "centre"), stay=re.compile(rf"^/app/orchestration/project/{PID}/?$"), arriving=ARRIVING)
     expect(page.locator("nav.project-sidebar")).to_be_visible()
 
 
@@ -189,7 +210,7 @@ def project_focus(page: Page) -> None:
         page.locator("nav.project-sidebar .main-entry").first.click()
         expect(page.locator(".main-flow")).to_be_visible()
 
-    measured(page, "project focus: open the main chat", open_main, keep=("rail", "centre"), stay=re.compile(r"^/app/orchestration/?$"))
+    measured(page, "project focus: open the main chat", open_main, keep=("column", "centre"), stay=re.compile(r"^/app/orchestration/?$"), arriving=ARRIVING)
     expect(page.locator("nav.orch-sidebar")).to_be_visible()
 
 

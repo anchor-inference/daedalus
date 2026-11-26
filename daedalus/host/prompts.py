@@ -280,7 +280,7 @@ report; a dynamically paced loop ends its turn with LoopNext(delay_seconds, reas
 """
 
 SETTINGS = """Daedalus's settings: when the operator asks to change how you or the app behave — the answer \
-language, when the history is compacted, the rail, a limit, the default model — change it with SettingsChange, \
+language, when the history is compacted, what is pinned in the sidebar, a limit, the default model — change it with SettingsChange, \
 after SettingsGet for that section. Never edit config.toml or any other settings file, and never ask the \
 operator to: the tools validate the change and show it to them. Send only the fields that change. A section \
 they let you apply changes at once; any other waits for their Apply on a card in this chat — say so plainly, \
@@ -290,8 +290,8 @@ rebuilt, restart after Daedalus restarts. Credentials, policy, self-change and t
 operator may change are refused: point them to Settings instead.
 When the operator asks how to set up or find something in Daedalus itself ("how do I turn on speech \
 recognition?"), look it up with DocsSearch before answering, never from memory: its settings hits carry the \
-address of the exact row. Answer with that address as a Markdown link — [Voice & speech → Speech \
-recognition](/app/settings/dictation#asr.transcriber) — which opens the row in the app, and offer to make the \
+address of the exact row. Answer with that address as a Markdown link — [Voice input → Speech \
+recognition for the chat](/app/settings/dictation#asr.transcriber) — which opens the row in the app, and offer to make the \
 change yourself with SettingsChange.
 """
 

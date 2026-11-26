@@ -266,6 +266,44 @@ async def test_listing_the_models_of_an_unkeyed_endpoint_says_what_is_missing(cl
     assert claude.status_code == 400 and "signed in" in claude.json()["detail"]
 
 
+async def test_testing_an_unkeyed_endpoint_says_what_is_missing_and_sends_nothing(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The connection test asks the proxy first, so the answer names the missing key rather than a 401 from the endpoint."""
+    seen: list[httpx.Request] = []
+    _keyproxy_answering(monkeypatch, ONE_KEY, seen=seen)
+    adapter = client.daedalus.manager.providers.get("deepseek")  # type: ignore[attr-defined]
+    reached: list[httpx.Request] = []
+
+    def endpoint(request: httpx.Request) -> httpx.Response:
+        reached.append(request)
+        return httpx.Response(401)
+
+    adapter._client = REAL_CLIENT(transport=httpx.MockTransport(endpoint))
+    response = await client.post("/api/providers/deepseek/test", headers=H)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is False and body["status"] is None and body["latency_ms"] is None
+    assert "key" in body["detail"] and "deepseek" in body["detail"]
+    assert reached == [], "the endpoint was asked anyway"
+
+
+async def test_testing_a_keyed_endpoint_goes_through_the_proxy_the_way_a_request_does(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _keyproxy_answering(monkeypatch, ONE_KEY, seen=[])
+    adapter = client.daedalus.manager.providers.get("openrouter")  # type: ignore[attr-defined]
+    reached: list[httpx.Request] = []
+
+    def endpoint(request: httpx.Request) -> httpx.Response:
+        reached.append(request)
+        return httpx.Response(200, json={"data": [{"id": "z-ai/glm-5.3"}]})
+
+    adapter._client = REAL_CLIENT(transport=httpx.MockTransport(endpoint))
+    response = await client.post("/api/providers/openrouter/test", headers=H)
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True and response.json()["models"] == 1
+    [sent] = reached
+    assert str(sent.url) == adapter.endpoint.base_url.rstrip("/") + "/models"
+    assert sent.headers["x-daedalus-metered"] == "1", "marked as the bot's own call, which the proxy then does not meter"
+
+
 async def test_a_keyed_endpoint_is_listed_through_the_proxy(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """With a credential the lookup goes ahead, and ``/v1`` is found for a base written without it."""
     asked: list[str] = []

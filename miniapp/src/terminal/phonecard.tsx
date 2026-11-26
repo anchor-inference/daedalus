@@ -13,7 +13,8 @@ import { peek, useOffline, useQuery } from "../store";
 import { colourVar, initials } from "../team/team";
 import { alwaysServer, askWords, canAlways } from "../staff/model";
 import { PhoneAskAnswers } from "../staff/phoneask";
-import { ActionSheet, Banner, BottomSheet, RowSkeleton, useLongPress } from "../ui/phone";
+import { Banner, RowSkeleton } from "../ui/primitives";
+import { Menu, Sheet, useLongPress } from "../ui/primitives";
 import { cardStatus, ownerLine, previewRows, runStyle, running } from "./preview";
 import { useTerminalCommands } from "./rowmenu";
 
@@ -64,9 +65,9 @@ export function TerminalCard({ row, projectName, toast }: { row: TerminalRow; pr
         {live && !offline && <button type="button" className="ph-btn sm ghost danger ph-tcard-end" data-action="end" aria-label={t("term.close")} onClick={() => void end()}>{t("term.end")}</button>}
       </div>
       {menu && (
-        <ActionSheet onClose={() => setMenu(false)}
+        <Menu onClose={() => setMenu(false)}
           preview={{ title: <span className="mono">{row.title || t("term.untitled")}</span>, meta: [t(`term.env.${row.env}`), ownerLine(row, projectName), status.text].join(" · ") }}
-          items={[{ label: t("term.card.open"), icon: "expand", onSelect: open }, ...(offline ? [] : items)]} />
+          items={[{ label: t("term.card.open"), icon: "expand", onSelect: open }, ...(offline ? [] : items)]} label={t("dlg.menu")} />
       )}
       {layer}
       {answering && row.owner.id && row.project_id && <AnswerSheet row={row} staffId={row.owner.id} projectId={row.project_id} toast={toast} onClose={() => setAnswering(false)} onOpen={() => { setAnswering(false); open(); }} />}
@@ -83,14 +84,14 @@ function AnswerSheet({ row, staffId, projectId, toast, onClose, onOpen }: { row:
   const name = row.owner.label || t("term.card.unnamed");
   const colour = peekColour(projectId, staffId);
   return (
-    <BottomSheet onClose={onClose} className="ph-answer" label={t("ph.term.asks", { name })}
+    <Sheet onClose={onClose} className="ph-sheet ph-answer" ariaLabel={t("ph.term.asks", { name })}
       title={<span className="ph-sheet-kt"><span className="ph-avatar" style={{ ["--c" as string]: colourVar(colour) }} aria-hidden>{initials(name)}</span><span className="ph-sheet-kt-w"><span className="ph-sheet-kt-t">{t("ph.term.asks", { name })}</span><span className="ph-sheet-kt-m">{[row.title, ask ? relTime(ask.created_at) : ""].filter(Boolean).join(" · ")}</span></span></span>}
       footer={<div className="ph-foot-stack">{ask ? <PhoneAskAnswers ask={ask} projectId={projectId} toast={toast} always={canAlways(ask, view?.capabilities)} server={alwaysServer(ask, view?.capabilities)} onDone={onClose} /> : null}<button type="button" className="ph-btn ghost" onClick={onOpen}>{t("ph.term.openTerminal")}</button></div>}>
       <div className="ph-sheet-pad">
         {ask ? <pre className="ph-code">{askWords(ask)}{row.cwd ? `\n${t("ph.term.cwd", { path: row.cwd })}` : ""}</pre> : data ? <div className="ph-prose quiet">{t("ph.term.noask")}</div> : <RowSkeleton rows={1} lead="none" />}
         {row.env === "host" && <Banner tone="warn" icon="lock" sub={t("ph.term.host.sub")}>{t("ph.term.host")}</Banner>}
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 

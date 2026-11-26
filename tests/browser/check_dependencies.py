@@ -60,8 +60,8 @@ def run() -> None:
                 # Reopening a ready proposal after reload must require fresh consent.
                 page.reload()
                 expect(dialog).to_be_visible()
-                expect(dialog.get_by_role("checkbox")).not_to_be_checked()
-                dialog.get_by_role("checkbox").check()
+                expect(dialog.get_by_role("switch")).not_to_be_checked()
+                dialog.get_by_role("switch").click()
                 expect(dialog.get_by_role("button", name=install)).to_be_enabled()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 if directory := os.environ.get("DEPENDENCY_SCREENSHOTS"):

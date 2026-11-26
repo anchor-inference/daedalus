@@ -1,6 +1,6 @@
 """An open subagent has the list of its leader's subagents down its left side, to switch between them in place.
 
-With the room (a wide panel) the list stands beside the conversation, the current helper marked; a click
+With the room (a panel dragged wide) the list stands beside the conversation, the current helper marked; a click
 shows another helper's conversation without going back to the cards. Without it (a narrow panel, a
 phone) the list folds into a button in the head and opens over the conversation, closing again once a
 helper is picked. Checked in both languages.
@@ -38,6 +38,9 @@ def shown(scope, id_: str) -> None:  # type: ignore[no-untyped-def]
 
 
 def wide(page: Page, lang: str, problems: list[str]) -> None:
+    # The list docks only in a panel 560 px wide or more, and the panel's own width stops at 520: the
+    # room is a panel the operator dragged wider, which the stored width stands for.
+    page.add_init_script("try { localStorage.setItem('daedalus.width.panel', '760'); } catch (e) {}")
     page.goto(f"{BASE}/agents/{S1}?token=t&lang={lang}&panel=subagents&sub={S12}", wait_until="networkidle")
     scope = page.locator(".panel")
     rail = scope.locator(".subagent-rail.docked")

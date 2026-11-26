@@ -17,7 +17,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { BrowserGroup } from "../api";
 import { dismissToast, toast as statusToast } from "../ui/dialogs";
-import { ActionSheet, BottomSheet } from "../ui/phone";
+import { Menu, Sheet } from "../ui/primitives";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { resizeViewport, useLiveSnapshot, useLiveView } from "./data";
@@ -190,10 +190,10 @@ export function PhoneDrive({ group, live, snap, agent, url, saving, onGiveBack }
       </div>
       <ComposeLine live={live} />
       {giving && (
-        <BottomSheet
+        <Sheet
           title={t("browser.give.note")}
           onClose={() => setGiving(false)}
-          className="bp-give ph-givesheet"
+          className="ph-sheet bp-give ph-givesheet"
           footer={<>
             <button type="button" className="ph-givesheet-keep" onClick={() => setGiving(false)}>{t("browser.ph.keep")}</button>
             <button type="submit" form="bp-drive-give-form" className="ph-givesheet-go"><Icon name="undo" size={18} />{t("browser.give")}</button>
@@ -203,10 +203,10 @@ export function PhoneDrive({ group, live, snap, agent, url, saving, onGiveBack }
             <textarea id="bp-drive-note" className="bp-give-note" rows={3} value={note} maxLength={2000} placeholder={t("browser.give.placeholder")} aria-label={t("browser.give.note")} onChange={(e) => setNote(e.target.value)} />
             <p className="ph-givesheet-why">{t("browser.give.why")}</p>
           </form>
-        </BottomSheet>
+        </Sheet>
       )}
       {menu && (
-        <ActionSheet
+        <Menu
           onClose={() => setMenu(false)}
           preview={{ title: domainOf(url) || t("browser.blank"), meta: url }}
           items={[
@@ -214,7 +214,7 @@ export function PhoneDrive({ group, live, snap, agent, url, saving, onGiveBack }
             { label: t("panel.forward"), icon: "forward", onSelect: () => live.input({ t: "nav", action: "forward" }) },
             { label: t("panel.reload"), icon: "reload", onSelect: () => live.input({ t: "nav", action: "reload" }) },
             { label: t("browser.keyboard.show"), icon: "pen", onSelect: () => focusViewer(root.current) },
-          ]}
+          ]} label={t("dlg.menu")}
         />
       )}
     </div>

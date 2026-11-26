@@ -2,7 +2,7 @@
 
 A custom page is a screen of your own inside the Daedalus app: a dashboard, a form, a specialised
 client for some API, a 3D or CAD viewer, a calculator, or an existing web application you already
-run. It opens at `/app/p/<slug>`, can sit in the rail and the phone drawer, follows your theme, and
+run. It opens at `/app/p/<slug>`, can be pinned in the sidebar and the phone drawer, follows your theme, and
 works on a phone and a desktop.
 
 A page is **data, not app code**. It is a folder in the state volume, so adding, changing or removing
@@ -160,7 +160,10 @@ collides with a page's own styles or a framework; the classes are added to, neve
 The tokens are usable directly: `var(--bg)`, `var(--surface-1)`, `var(--fg)`, `var(--fg-2)`,
 `var(--accent)`, `var(--line)`, `var(--ok)`, `var(--bad)`, `var(--font)`, `var(--mono)`, the type steps
 `var(--fs-12)` … `var(--fs-22)`, the spacing `var(--space-1)` … `var(--space-8)`, the radii, and the
-row and control sizes. Below 1024 px they switch to the phone's sizes, the same as the app.
+row and control sizes. Below 1024 px they switch to the phone's sizes, the same as the app. The colours
+are neutral greys and three accents with one meaning each: violet (`--accent`, `--primary`) for what is
+chosen and the primary action, cyan (`--ok`, `--info`) for running, done or added, orange (`--warn`,
+`--bad`) for what needs the reader or failed. Nothing is drawn under 12 px; `--fs-11` is 12 px too.
 
 ## The bridge
 
@@ -251,7 +254,7 @@ token and closed when the check ends, inside a frame that answers the bridge as 
 page's `/api` requests are answered 401 there, and the result says so. The check is advice: the
 agent decides when to publish.
 
-The agent puts a published page on the rail through the `[navigation]` setting (`page:<slug>`).
+The agent pins a published page in the sidebar through the `[navigation]` setting (`page:<slug>` in `pinned`).
 
 ## A page's own agent
 

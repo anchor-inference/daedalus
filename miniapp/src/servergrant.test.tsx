@@ -7,6 +7,7 @@ import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "./i18n";
 import { leftLabel, ServerGrantButton, StandingGrants } from "./servergrant";
+import { ConfirmHost } from "./ui/dialogs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,21 +27,28 @@ afterEach(() => {
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+/** The span list opens over the page; one span is picked from it, the way a pointer does. */
+async function chooseSpan(hours: number) {
+  await act(async () => host.querySelector<HTMLButtonElement>(".dropdown-btn")!.click());
+  await flush();
+  await act(async () => document.querySelector<HTMLElement>(`[role='option'][data-value='${hours}']`)!.click());
+  await flush();
+}
 
 describe("the button on the approval", () => {
   it("grants six hours unless another span is chosen", async () => {
     const granted: number[] = [];
     await act(async () => root.render(<ServerGrantButton server="mobile-mcp" onGrant={(hours) => granted.push(hours)} />));
     expect(host.textContent).toContain("Allow all from mobile-mcp");
-    const select = host.querySelector("select")!;
-    expect(select.value).toBe("6");
-    expect([...select.options].map((o) => o.value)).toEqual(["1", "2", "6", "12", "0"]);
+    const span = host.querySelector<HTMLButtonElement>(".dropdown-btn")!;
+    expect(span.dataset.value).toBe("6");
     await act(async () => host.querySelector("button")!.click());
     await flush();
-    act(() => {
-      select.value = "1";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await act(async () => span.click());
+    await flush();
+    expect([...document.querySelectorAll<HTMLElement>("[role='option']")].map((o) => o.dataset.value)).toEqual(["1", "2", "6", "12", "0"]);
+    await act(async () => document.querySelector<HTMLElement>("[role='option'][data-value='1']")!.click());
+    await flush();
     await act(async () => host.querySelector("button")!.click());
     await flush();
     expect(granted).toEqual([6, 1]);
@@ -48,21 +56,22 @@ describe("the button on the approval", () => {
 
   it("asks before a grant with no end, and grants nothing when told no", async () => {
     const granted: number[] = [];
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    await act(async () => root.render(<ServerGrantButton server="mobile-mcp" onGrant={(hours) => granted.push(hours)} />));
-    const select = host.querySelector("select")!;
-    act(() => {
-      select.value = "0";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(select.hasAttribute("data-forever")).toBe(true);
+    await act(async () => root.render(<><ServerGrantButton server="mobile-mcp" onGrant={(hours) => granted.push(hours)} /><ConfirmHost /></>));
+    const answer = async (yes: boolean) => {
+      const buttons = document.querySelectorAll<HTMLButtonElement>(".dialog .dialog-actions button");
+      expect(buttons).toHaveLength(2);
+      await act(async () => buttons[yes ? 1 : 0].click());
+      await flush();
+    };
+    await chooseSpan(0);
+    expect(host.querySelector(".srv-grant-span.forever")).not.toBeNull();
     await act(async () => host.querySelector("button")!.click());
     await flush();
-    expect(confirm).toHaveBeenCalledOnce();
+    await answer(false);
     expect(granted).toEqual([]);
-    confirm.mockReturnValue(true);
     await act(async () => host.querySelector("button")!.click());
     await flush();
+    await answer(true);
     expect(granted).toEqual([0]);
   });
 });

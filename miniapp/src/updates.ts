@@ -1,7 +1,7 @@
 // The desktop application's own updates, as the launcher beside the server reports them.
 //
-// One state for the whole page: the rail's button, the update dialog and Settings → About read the
-// same answer, so a check started in Settings lights the rail and a download started in the dialog
+// One state for the whole page: the sidebar's button, the update dialog and Settings → About read the
+// same answer, so a check started in Settings lights the sidebar and a download started in the dialog
 // shows its progress in Settings as well. Each of them polling on its own would have asked the
 // launcher three times over and could show three different answers for a few seconds.
 

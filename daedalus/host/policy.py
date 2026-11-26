@@ -846,6 +846,34 @@ def similar_covers(grant: dict[str, Any], tool: str, rule: str, family: dict[str
     return grant["kind"] in ("host", "tool") and theirs == value
 
 
+PROJECT_SCOPE_RULES = frozenset({"egress.allowlist", "mcp.annotations"})
+"""The built-in questions "Allow similar in this project" may answer for good: a host outside the egress
+allowlist, and an MCP tool that does not say it only reads. Every other question stays a question the
+operator answers for a chat or a call: the ones that destroy (a workspace, a pushed history), reach the
+operator's machine (``host.*``), say a message, a payment or a publication goes out (``rules.*``,
+``review.*``, the operator's own action levels) or came from another agent's words. A grant that outlives
+the chat is the one place the operator is not looking at the call, so it is kept to what repeats safely."""
+_RESERVED_RULE_PREFIXES = ("host.", "shell.", "git.", "egress.", "browser.", "mcp.", "agent_talk.", "rules.", "review.", "session.", "guest.", "approval.")
+
+
+def project_scope_refusal(rule: str, operator_rules: Iterable[str] = ()) -> str | None:
+    """Why a question cannot be answered for a whole project, or ``None`` when it can.
+
+    ``operator_rules`` are the ids of the operator's own ``[policy].rules``: a rule they wrote to ask is
+    theirs to stop asking about, unless its id borrows the name of a built-in family, which no operator
+    rule may use to widen what that family refuses."""
+    if rule in PROJECT_SCOPE_RULES:
+        return None
+    if rule in set(operator_rules) and not rule.startswith(_RESERVED_RULE_PREFIXES):
+        return None
+    return f"the question {rule!r} is always asked again in each chat; allow it once, or for this chat"
+
+
+def standing_words(grant: dict[str, Any]) -> str:
+    """Whose grant answered a call, for the decision's reason: ``for this session`` or ``for this project``."""
+    return "for this project" if grant.get("scope") == "project" else "for this session"
+
+
 class Policy:
     """The rule set: built-ins plus the operator's, evaluated per call."""
 
@@ -1137,7 +1165,7 @@ class Policy:
                 if grant is not None:
                     # Not the key: a standing grant is not spent, and consuming a key it never held
                     # would take a once-grant for a different call off the list.
-                    return Decision(ALLOW, f"allowed by the operator for this session: {grant.get('label')}", decision.rule, hosts=decision.hosts)
+                    return Decision(ALLOW, f"allowed by the operator {standing_words(grant)}: {grant.get('label')}", decision.rule, hosts=decision.hosts)
         return decision
 
     def describe(self) -> list[dict[str, str]]:

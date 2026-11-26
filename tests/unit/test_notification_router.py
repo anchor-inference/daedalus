@@ -591,6 +591,46 @@ async def test_the_router_writes_in_the_operators_language(settings: Settings, d
         await host.close()
 
 
+async def test_buttons_say_what_they_do_where_the_host_knows_and_nowhere_else(settings: Settings, db: Database) -> None:
+    host, service = await host_with(settings, db)
+    router = NotificationRouter(service, host.manager)
+    try:
+        await router.handle(event("permission.pending", permission_payload("s1"), session_id="s1"))
+        await router.handle(event("ask.pending", ask_payload("s2"), session_id="s2"))
+        await router.handle(event("ask.pending", ask_payload("s3", options=6), session_id="s3"))
+        blocked = {**permission_payload("s4", quick=False), "blocked": {"reason": "nobody asked for a release.", "category": "publish", "level": "auto"}}
+        await router.handle(event("permission.pending", blocked, session_id="s4"))
+        await router.handle(event("permission.pending", {**permission_payload("s5"), "kind": "handoff"}, session_id="s5"))
+        by_session = {e["session_id"]: {a["id"]: a for a in e["actions"]} for e in await entries(service)}
+        for session in ("s1", "s2", "s3", "s4", "s5"):
+            # Open goes where its label says; the host has nothing to add to it, so it carries no key at all.
+            assert "description" not in by_session[session]["open"]
+        assert by_session["s1"]["allow"]["description"] == "Allows this one action, once, and the agent carries on."
+        assert by_session["s1"]["deny"]["description"] == "Keeps it refused; nothing runs."
+        assert by_session["s2"]["answer:0"]["description"] == by_session["s2"]["answer:1"]["description"] == "Answers the question with this option, and the run goes on."
+        assert list(by_session["s3"]) == ["open"]  # too many options for buttons: nothing to describe
+        assert by_session["s4"]["allow"]["description"] == "Lets this one action through, once, over the auto-review's block."
+        assert by_session["s4"]["deny"]["description"] == "Leaves the action blocked; nothing runs."
+        assert by_session["s5"]["done"]["description"].startswith("Only closes this entry")
+    finally:
+        await host.close()
+
+
+async def test_a_button_describes_itself_in_the_operators_language(settings: Settings, db: Database) -> None:
+    host, service = await host_with(settings, db)
+    try:
+        await host.manager.presence.report(PresenceReport(client="tab", visible=False, lang="ru", tz="Europe/Moscow"))
+        await NotificationRouter(service, host.manager).handle(event("permission.pending", permission_payload("s1"), session_id="s1"))
+        [entry] = await entries(service)
+        assert {a["id"]: a.get("description") for a in entry["actions"]} == {
+            "allow": "Разрешает это одно действие, один раз, и агент продолжает работу.",
+            "deny": "Оставляет отказ в силе, ничего не выполняется.",
+            "open": None,
+        }
+    finally:
+        await host.close()
+
+
 def placeholders(template: str) -> set[str]:
     return {name for _, name, _, _ in string.Formatter().parse(template) if name}
 

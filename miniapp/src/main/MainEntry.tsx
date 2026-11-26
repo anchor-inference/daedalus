@@ -22,19 +22,16 @@ export function MainEntry({ current }: { current: boolean }) {
   const questions = data?.questions ?? 0;
   const going = (data?.dispatches ?? []).filter((d) => d.status === "open" || d.status === "blocked").length;
   const label = t("main.title");
+  // One 32 px line, the Agents column's row: the questions that wait are its state word in the
+  // attention colour, and otherwise whether it works or how many dispatches are under way.
+  const sub = working ? t("main.entry.working") : going ? plural("main.entry.going", going) : "";
   return (
-    <a className={`main-entry ${current ? "current" : ""} ${working ? "working" : ""}`} href={MAIN_PATH} onClick={(e) => go(e, MAIN_PATH)} aria-current={current ? "page" : undefined} data-main-entry>
-      <span className="main-entry-icon"><Icon name="compass" size={16} /></span>
-      <span className="main-entry-text">
-        {/* The pill rides on the name's line and drops under it when the column is narrow, so the
-            status line below always has the column's whole width. Beside the text, it once squeezed
-            "2 dispatches under way" to "2 dispatches under…" in the desktop sidebar. */}
-        <span className="main-entry-head">
-          <span className="main-entry-name">{label}</span>
-          {questions > 0 && <span className="main-pill" data-questions={questions}>{plural("main.questions", questions)}</span>}
-        </span>
-        <span className="main-entry-sub truncate">{working ? t("main.entry.working") : going ? plural("main.entry.going", going) : t("main.entry.sub")}</span>
-      </span>
+    <a className={`sb-row main-entry ${current ? "current" : ""} ${working ? "working" : ""}`} href={MAIN_PATH} onClick={(e) => go(e, MAIN_PATH)} aria-current={current ? "page" : undefined} title={working || going ? `${label} · ${sub}` : `${label} · ${t("main.entry.sub")}`} data-main-entry data-nav="main">
+      <span className="sb-tile"><Icon name="compass" size={16} /></span>
+      <span className="sb-t main-entry-name">{label}</span>
+      {questions > 0
+        ? <span className="sb-word waiting main-pill" data-questions={questions}>{plural("main.questions", questions)}</span>
+        : sub && <span className={`main-entry-sub ${working ? "sb-word running" : "sb-time"}`}>{sub}</span>}
     </a>
   );
 }

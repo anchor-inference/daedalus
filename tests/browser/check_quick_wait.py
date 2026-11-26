@@ -27,6 +27,7 @@ from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, Unhandled, expect_app, folders, fulfil_shared  # noqa: E402
+from waiting import until  # noqa: E402
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -182,7 +183,7 @@ def check(browser, width: int, height: int, lang: str, kind: str) -> list[str]: 
         problems.append(f"{where}: the row runs off the screen ({box})")
     if kind == "captcha":
         row.locator("button", has_text=words["decline"]).click()
-        page.wait_for_timeout(400)
+        until(page, lambda: bool(stub.declined))
         if stub.declined != [f"/api/browsers/{GROUP}/decline"]:
             problems.append(f"{where}: Decline did not tell the host ({stub.declined})")
         row.locator("button", has_text=words["open"]).click()

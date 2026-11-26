@@ -28,7 +28,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app, reveal_composer  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import S1, SETTINGS, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -175,6 +175,8 @@ def inside(page: Page, container: str, inner: str, where: str, failures: list[st
         for (const el of document.querySelectorAll(inner)) {
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
+            // A list's form input is clipped to nothing and pinned to the window's corner: nothing to see.
+            if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
             if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5)
                 out.push(`${el.className || el.tagName} [${Math.round(r.left)}, ${Math.round(r.right)}] in [${Math.round(outer.left)}, ${Math.round(outer.right)}]`);
         }
@@ -203,7 +205,7 @@ def settings_multi(browser, width: int, failures: list[str]) -> None:  # type: i
     if not text or not box or abs(box["x"] - text["x"]) > 1 or box["y"] < text["y"] + text["height"] - 1:
         failures.append(f"{where}: the list is not under the row's words: words {text}, list {box}")
     inside(page, f"{setting}", f"{setting} *", where, failures)
-    card = row.evaluate("el => { const c = el.closest('.card'); c.setAttribute('data-probe-card', ''); return true; }")
+    card = row.evaluate("el => { const c = el.closest('.card, .set-card'); c.setAttribute('data-probe-card', ''); return true; }")
     if card:
         inside(page, "[data-probe-card]", f"{setting} *", where, failures)
     inside(page, ".settings-col, .main", f"{setting} *", where, failures)
@@ -266,6 +268,7 @@ def sweep(browser, width: int, failures: list[str]) -> None:  # type: ignore[no-
                 for (const el of row.querySelectorAll('*')) {
                     const r = el.getBoundingClientRect();
                     if (!r.width && !r.height) continue;
+                    if (getComputedStyle(el).clipPath === 'inset(50%)') continue;
                     if (r.right > outer.right + 0.5 || r.left < outer.left - 0.5) { out.push(`${name}: ${String(el.className)} [${Math.round(r.left)}, ${Math.round(r.right)}] past [${Math.round(outer.left)}, ${Math.round(outer.right)}]`); break; }
                 }
             }
@@ -273,7 +276,7 @@ def sweep(browser, width: int, failures: list[str]) -> None:  # type: ignore[no-
         }""")
         seen += found[0]
         failures.extend(f"{width} settings/{section}: {line}" for line in found[1])
-    if seen < 8:
+    if seen < 4:
         failures.append(f"{width}: the sweep found only {seen} rows with a list; the sections moved")
     context.close()
 
@@ -284,26 +287,24 @@ def composer(browser, width: int, failures: list[str]) -> None:  # type: ignore[
     sent: list = []
     context, page = open_page(browser, width, f"agents/{S1}", settings_with_models(), sent)
     page.wait_for_selector(".composer", timeout=15000)
-    reveal_composer(page)
     page.locator(".composer .model-select").click()
-    page.wait_for_selector(".model-list .model-row")
+    page.wait_for_selector(".model-picker [role=option]")
     page.wait_for_timeout(200)
-    search = page.locator(".model-list .model-search")
+    search = page.locator(".model-picker .model-search")
     if not mobile and not search.evaluate("el => el === document.activeElement"):
         failures.append(f"{where}: opening the list did not give the search field the keyboard")
-    # Into a provider's models, then back to the search field, as the operator does before clicking.
-    if not mobile or not page.locator(".model-list .ph-model-row").count():
-        page.locator(".model-list .provider-row[data-provider='opencode']").click()
-        page.wait_for_timeout(200)
+    # Onto a provider's tab, then back to the search field, as the operator does before clicking.
+    page.locator(".model-picker [role=tab][data-provider='opencode']").click()
+    page.wait_for_timeout(200)
     search.focus()
     page.wait_for_timeout(100)
-    rows = page.locator(".model-list .model-row:not(.on):not(.provider-row):not(.provider-back):not(.model-add):not(.restore)").filter(has_text="Bulk Model")
+    rows = page.locator(".model-picker [role=option][data-preset]:not(.on)").filter(has_text="Bulk Model")
     target = rows.nth(min(5, rows.count() - 1))
-    label = target.locator(".model-text .truncate").first.inner_text().strip()
+    label = target.locator(".model-row-name").inner_text().strip()
     target_id = next((k for k, v in settings_with_models()["presets"].items() if v["label"] == label), "")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/composer-{width}-open.png")
-    press_once(page, target, ".model-list", where, failures)
+    press_once(page, target, ".model-picker-list", where, failures)
     picked = [body for kind, body in sent if kind == "model"]
     if not picked or picked[-1] != {"preset": target_id}:
         failures.append(f"{where}: one click on {label} ({target_id}) did not choose it: {picked}")

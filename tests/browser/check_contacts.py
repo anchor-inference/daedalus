@@ -24,6 +24,7 @@ import api_stub  # noqa: E402
 from api_stub import DEFAULT_APP, FakeContacts, FakeGuests, FakeTalks, expect_app  # noqa: E402
 from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
 from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -143,7 +144,7 @@ def check(browser, lang: str, scheme: str, width: int, height: int) -> None:  # 
     expect(reader.locator(".guest-msg[data-author='owner'] .guest-msg-head > b")).to_have_text(words["guest_owner"])
     reader.locator("[data-owner-say] textarea").fill("Hello Tomas, it is me.")
     reader.locator("[data-owner-send]").click()
-    page.wait_for_timeout(300)
+    until(page, lambda: any(verb == "POST" and path.endswith("/say") for verb, path, body in guests.calls))
     said = [body for verb, path, body in guests.calls if verb == "POST" and path.endswith("/say")]
     assert said and said[0] == {"text": "Hello Tomas, it is me."}, said
     snap(page, f"guests-{name}")

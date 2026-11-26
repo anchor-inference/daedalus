@@ -2,7 +2,7 @@
 // as in the chat. A guest is a stranger, so everything they wrote is shown as plain text, in a frame
 // that says whose it is, and nothing here turns it into markdown, a link or a picture.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, GuestDefaults, GuestDoor, GuestExchange, GuestInvite, GuestLink, GuestLinkBody, GuestLinkDetail, GuestMessage, GuestBilling, GuestMode, GuestTools, LinkFile, LinkTask } from "./api";
 import { absTime, relTimeLong, usd } from "./format";
 import { Icon } from "./icons";
@@ -15,6 +15,7 @@ import { BackgroundNote } from "./backgroundnote";
 import { AddressNote } from "./publicaddress";
 import { invalidate, useQuery } from "./store";
 import { Segmented, Switch, useCopied } from "./ui/components";
+import { Button, Field } from "./ui/primitives";
 import { SelectionSingle } from "./ui/selection";
 import { Sheet } from "./ui/dialogs";
 import { confirmAsync, errorText } from "./ui";
@@ -55,7 +56,7 @@ export function GuestLinksSheet({ sessionId, toast, onClose }: { sessionId: stri
   const door = useQuery<GuestDoor>(`/api/guest/door?session_id=${encoded(sessionId)}`, { pollMs: 15000 });
   const data = door.data;
   return (
-    <Sheet title={t("guest.title")} onClose={onClose} size="narrow">
+    <Sheet title={t("guest.title")} onClose={onClose} size="md">
       <div className="guest-sheet" data-guest-sheet="">
         {!data ? (
           <div className="sub" role="status">{door.error ? t("guest.off") : t("common.loading")}</div>
@@ -126,7 +127,7 @@ function GuestList({ sessionId, door, toast, onNew, onRead, onEdit, onMade }: {
   return (
     <>
       <div className="guest-bar">
-        <button type="button" className="btn primary" data-guest-new="" onClick={onNew}><Icon name="plus" size={14} />{t("guest.make")}</button>
+        <Button variant="primary" icon="plus" data-guest-new="" onClick={onNew}>{t("guest.make")}</Button>
       </div>
       {!links.data ? (
         <div className="sub" role="status">{links.error ?? t("common.loading")}</div>
@@ -189,12 +190,12 @@ function GuestLinkCard({ link, busy, onDecide, onRevoke, onReissue, onRead, onEd
         <div className="sub attn" data-guest-redeems={link.refused_redeems}>{plural("guest.redeems", link.refused_redeems)}</div>
       )}
       <div className="guest-actions">
-        {pending && <button type="button" className="btn small primary" disabled={busy} onClick={() => onDecide(link, "admit")}>{t("guest.admit")}</button>}
-        {pending && <button type="button" className="btn small" disabled={busy} onClick={() => onDecide(link, "refuse")}>{t("guest.refuse")}</button>}
-        {conversation && !pending && <button type="button" className="btn small" onClick={() => onRead(link.id)}>{t("guest.read")}</button>}
-        {link.refused_redeems > 0 && link.state !== "revoked" && <button type="button" className="btn small" disabled={busy} title={t("guest.reissue.title")} onClick={() => onReissue(link)}>{t("guest.new")}</button>}
-        {link.state !== "revoked" && <button type="button" className="btn small" disabled={busy} data-guest-edit={link.id} onClick={() => onEdit(link.id)}>{t("guest.edit")}</button>}
-        {live && <button type="button" className="btn small danger" disabled={busy} onClick={() => onRevoke(link)}>{t("guest.revoke")}</button>}
+        {pending && <Button size="sm" variant="primary" disabled={busy} onClick={() => onDecide(link, "admit")}>{t("guest.admit")}</Button>}
+        {pending && <Button size="sm" disabled={busy} onClick={() => onDecide(link, "refuse")}>{t("guest.refuse")}</Button>}
+        {conversation && !pending && <Button size="sm" onClick={() => onRead(link.id)}>{t("guest.read")}</Button>}
+        {link.refused_redeems > 0 && link.state !== "revoked" && <Button size="sm" disabled={busy} title={t("guest.reissue.title")} onClick={() => onReissue(link)}>{t("guest.new")}</Button>}
+        {link.state !== "revoked" && <Button size="sm" disabled={busy} data-guest-edit={link.id} onClick={() => onEdit(link.id)}>{t("guest.edit")}</Button>}
+        {live && <Button size="sm" variant="danger" disabled={busy} onClick={() => onRevoke(link)}>{t("guest.revoke")}</Button>}
       </div>
     </div>
   );
@@ -257,7 +258,7 @@ function DailyLimit({ door, toast }: { door: GuestDoor; toast: (text: string) =>
                 onChange={(e) => { setText(e.target.value); setDirty(true); }} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
               <span className="settings-unit">$</span>
             </span>
-            <button type="button" className="btn small" disabled={!dirty || !valid || saving} onClick={() => void save()}>{t("common.save")}</button>
+            <Button size="sm" disabled={!dirty || !valid || saving} onClick={() => void save()}>{t("common.save")}</Button>
           </>
         )}
         <button type="button" className="chip select guest-nolimit" aria-pressed={none} data-guest-nolimit="usd_per_day" disabled={saving} onClick={toggle}>{t("guest.nolimit")}</button>
@@ -307,7 +308,7 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
   return (
     <div className="guest-reader" data-guest-reader="">
       <div className="guest-bar">
-        <button type="button" className="btn small ghost" onClick={onBack}><Icon name="back" size={14} />{t("guest.back")}</button>
+        <Button size="sm" variant="quiet" icon="back" onClick={onBack}>{t("guest.back")}</Button>
         {link && <span className={`chip ${linkState(link).tone}`}>{t(`guest.state.${linkState(link).key}`)}</span>}
       </div>
       {!link ? (
@@ -318,7 +319,7 @@ function GuestReader({ id, sessionId, toast, onBack }: { id: string; sessionId: 
           {link.conversation && <LinkExport target={{ kind: "guest", id: link.id, conversation: picked && current ? current.id : undefined }} toast={toast} />}
           {link.mode === "stand_in" && link.briefing && (
             <>
-              <button type="button" className="btn small ghost guest-toggle" aria-expanded={briefing} onClick={() => setBriefing((open) => !open)}>{t("guest.briefing")}</button>
+              <Button size="sm" variant="quiet" className="guest-toggle" aria-expanded={briefing} onClick={() => setBriefing((open) => !open)}>{t("guest.briefing")}</Button>
               {briefing && <div className="guest-briefing guest-msg-text" data-guest-briefing="">{link.briefing}</div>}
             </>
           )}
@@ -516,10 +517,7 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
   const [drafting, setDrafting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
-  const labelField = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!editing) labelField.current?.focus();
-  }, [editing]);
+  const [more, setMore] = useState(false);
 
   const setText = (name: NumberName) => (next: string) => {
     setTouched(true);
@@ -641,10 +639,8 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
       </div>
       {level === "trusted" && <div className="sub guest-warning" data-guest-warning="trusted"><Icon name="alert" size={13} />{t("guest.trusted.warning")}</div>}
 
-      <label className="field" htmlFor="guest-label">{t("guest.field.label")}</label>
-      <input id="guest-label" ref={labelField} className="field" value={label} maxLength={120} placeholder={t("guest.field.label.ph")} autoComplete="off" onChange={(e) => setLabel(e.target.value)} />
-      <label className="field" htmlFor="guest-topic">{t(standIn ? "guest.field.topic" : "guest.field.topic.direct")}</label>
-      <input id="guest-topic" className="field" value={topic} maxLength={240} placeholder={t("guest.field.topic.ph")} autoComplete="off" onChange={(e) => setTopic(e.target.value)} />
+      <Field id="guest-label" autoFocus={!editing} label={t("guest.field.label")} value={label} maxLength={120} placeholder={t("guest.field.label.ph")} autoComplete="off" onChange={(e) => setLabel(e.target.value)} />
+      <Field id="guest-topic" label={t(standIn ? "guest.field.topic" : "guest.field.topic.direct")} value={topic} maxLength={240} placeholder={t("guest.field.topic.ph")} autoComplete="off" onChange={(e) => setTopic(e.target.value)} />
 
       {standIn ? (
         <>
@@ -659,11 +655,8 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
               </div>
             </div>
           )}
-          <label className="field" htmlFor="guest-briefing">{t("guest.field.briefing")}</label>
-          <textarea id="guest-briefing" className="field" rows={5} maxLength={20_000} value={briefing} placeholder={t("guest.field.briefing.ph")} onChange={(e) => writeBriefing(e.target.value)} />
-          <button type="button" className="btn small guest-draft" data-guest-draft="" disabled={drafting} onClick={() => void draft()}>
-            <Icon name="wand" size={14} />{t(drafting ? "guest.drafting" : "guest.draft")}
-          </button>
+          <Field multiline id="guest-briefing" label={t("guest.field.briefing")} rows={5} maxLength={20_000} value={briefing} placeholder={t("guest.field.briefing.ph")} onChange={(e) => writeBriefing(e.target.value)} />
+          <Button size="sm" icon="wand" className="guest-draft" data-guest-draft="" disabled={drafting} onClick={() => void draft()}>{t(drafting ? "guest.drafting" : "guest.draft")}</Button>
           {drafted && (
             <label className="toggle-row" data-guest-read="">
               <input type="checkbox" checked={read} onChange={(e) => setRead(e.target.checked)} />
@@ -675,14 +668,13 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
         <>
           {level === "direct" && (
             <>
-              <label className="field">{t("guest.field.tools")}</label>
+              <span className="link-label">{t("guest.field.tools")}</span>
               <Segmented value={chosenTools} options={toolOptions} onChange={setTools} label={t("guest.field.tools")} />
               {!door.full_tools && <div className="sub" data-guest-tools-why={door.full_tools_why || "other"}>{t(door.full_tools_why === "no_sandbox" || door.full_tools_why === "no_limits" || door.full_tools_why === "host_folder" || door.full_tools_why === "project_folder" ? `guest.tools.why.${door.full_tools_why}` : "guest.tools.why.other")}</div>}
               {chosenTools === "all" && <div className="sub" data-guest-tools-all="">{t("guest.tools.all.note")}</div>}
             </>
           )}
-          <label className="field" htmlFor="guest-instructions">{t("guest.field.instructions")}</label>
-          <textarea id="guest-instructions" className="field" rows={2} maxLength={4000} value={instructions} placeholder={t("guest.field.instructions.ph")} onChange={(e) => setInstructions(e.target.value)} />
+          <Field multiline id="guest-instructions" label={t("guest.field.instructions")} rows={2} maxLength={4000} value={instructions} placeholder={t("guest.field.instructions.ph")} onChange={(e) => setInstructions(e.target.value)} />
         </>
       )}
 
@@ -705,17 +697,21 @@ function GuestForm({ sessionId, door, editing, onCancel, onMade, onSaved }: {
         <span className="settings-row-text"><span className="settings-row-title">{t("guest.field.approval")}</span></span>
         <div className="settings-row-ctl"><Switch checked={approval} onChange={setApproval} label={t("guest.field.approval")} /></div>
       </div>
-      <details className="guest-more" data-guest-more="">
-        <summary>{t("guest.more")}</summary>
+      <button type="button" className="guest-more-toggle" data-guest-more-toggle="" aria-expanded={more} onClick={() => setMore((open) => !open)}>
+        <Icon name="chevron" size={14} />{t("guest.more")}
+      </button>
+      {more && (
+      <div className="guest-more" data-guest-more="">
         <LimitRow name="turns_total" title={t("guest.field.turnstotal")} numbers={numbers} onText={setText("turns_total")} onNone={setNone("turns_total")} />
         <LimitRow name="conversation_hours" title={t("guest.field.conversation")} unit={t("guest.unit.hours")} never numbers={numbers} onText={setText("conversation_hours")} onNone={setNone("conversation_hours")} />
         <LimitRow name="idle_hours" title={t("guest.field.idle")} unit={t("guest.unit.hours")} never numbers={numbers} onText={setText("idle_hours")} onNone={setNone("idle_hours")} />
         <NumberRow name="retention_days" title={t(standIn ? "guest.field.retention" : "guest.field.retention.direct")} unit={t("guest.unit.days")} value={numbers.text.retention_days} onChange={setText("retention_days")} />
-      </details>
+      </div>
+      )}
       {problem && <div className="sub guest-problem" role="alert" data-guest-problem="">{problem}</div>}
       <div className="sheet-foot">
-        <button type="button" className="btn ghost" onClick={onCancel}>{t("common.cancel")}</button>
-        <button type="submit" className="btn primary" data-guest-create="" disabled={!valid || busy}>{t(editing ? "common.save" : "guest.create")}</button>
+        <Button variant="quiet" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button type="submit" variant="primary" data-guest-create="" disabled={!valid || busy}>{t(editing ? "common.save" : "guest.create")}</Button>
       </div>
     </form>
   );
@@ -748,14 +744,13 @@ function MadeLink({ url, topic, toast, onDone }: { url: string; topic: string; t
   }
   return (
     <div className="guest-made" data-guest-made="">
-      <label className="field" htmlFor="guest-url">{t("guest.made")}</label>
       {/* The whole text, wrapped: an address cut short at the field's edge looks broken and cannot be checked. */}
-      <textarea id="guest-url" className="field mono" readOnly rows={3} value={text} onFocus={(e) => e.target.select()} />
-      <button type="button" className="btn primary guest-copy" data-guest-copy="" onClick={() => void copy()}><Icon name={copied ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
+      <Field multiline mono id="guest-url" label={t("guest.made")} readOnly rows={3} value={text} onFocus={(e) => e.currentTarget.select()} />
+      <Button variant="primary" icon={copied ? "check" : "copy"} className="guest-copy" data-guest-copy="" onClick={() => void copy()}>{t("common.copy")}</Button>
       <div className="sub attn" data-guest-once="">{t("guest.once")}</div>
       <BackgroundNote />
       <div className="sheet-foot">
-        <button type="button" className="btn primary" onClick={onDone}>{t("guest.done")}</button>
+        <Button variant="primary" onClick={onDone}>{t("guest.done")}</Button>
       </div>
     </div>
   );

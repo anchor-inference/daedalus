@@ -1,0 +1,37 @@
+/* ── the page before the app: sign-in, its second factor, and the first-run frame ───────────── */
+
+/* A page outside the shell, on the canvas colour the pages inside it are drawn on. The language
+   choice sits in the window's corner rather than in the card: the card is for what has to be done. */
+.gate { position: relative; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--wash); }
+.gate-lang { position: absolute; top: 16px; right: 16px; }
+/* A flow is taller than a sign-in box: it starts at the top and the page scrolls, rather than being
+   centred around a middle that leaves the first step above the fold. */
+.gate.tall { align-items: flex-start; height: 100dvh; height: var(--vh, 100dvh); overflow-y: auto; padding: clamp(20px, 4vh, 48px) clamp(14px, 3vw, 40px) 40px; }
+
+/* The card: small, centred, one column. Its title is the page's only large word. */
+.login { width: 100%; max-width: 380px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 24px; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.login-logo { align-self: center; border-radius: 10px; }
+.login h1 { margin: 4px 0 0; font-size: var(--fs-20); font-weight: 500; letter-spacing: -0.015em; text-wrap: balance; }
+.login > .sub { margin: 0; color: var(--fg-2); font-size: var(--fs-14); }
+.login .sub.small { margin: 0; font-size: var(--fs-12); line-height: 1.45; }
+.login-methods { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.login-or { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: var(--fs-12); }
+.login-or::before, .login-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.login-widget { min-height: 48px; display: flex; justify-content: center; }
+.login-pair { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; text-align: left; }
+.login-pair .field-box { margin: 0; }
+.login-pair .sub.small { margin: 0; }
+.login-step { font-size: var(--fs-14); font-weight: 500; }
+.login-wide { width: 100%; justify-content: center; }
+.login-error { display: flex; align-items: flex-start; gap: 8px; color: var(--attention); font-size: var(--fs-13); text-align: left; }
+.login-error .ic { flex: none; margin-top: 2px; }
+.login-foot { margin-top: 4px; color: var(--fg-3); }
+
+/* Two-factor enrolment (Settings → Security). The code is drawn black on white in either theme: a
+   scanner reads dark on light, and an inverted code is one many authenticator apps refuse. */
+.totp-setup { display: flex; flex-direction: column; gap: 8px; }
+.totp-qr { width: 200px; max-width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); }
+.totp-secret { align-self: flex-start; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); font-size: var(--fs-14); letter-spacing: 0.04em; user-select: all; overflow-wrap: anywhere; }
+.totp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.totp-actions .field.totp-code { width: 12ch; flex: none; }
+.totp-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(17ch, 1fr)); gap: 4px 16px; margin: 0; padding-left: 2.2em; font-size: var(--fs-14); user-select: all; }

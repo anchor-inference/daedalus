@@ -30,9 +30,10 @@ import urllib.request
 import zipfile
 import zlib
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs, unquote, unquote_plus, urlsplit
+from urllib.parse import parse_qs, quote, unquote, unquote_plus, urlsplit
 
 from calendar_stub import CalendarStub
+from changes_stub import DEFAULT as CHANGES
 from companion_stub import CompanionStub
 from folder_stub import DEFAULT as FOLDERS
 from import_stub import DEFAULT as IMPORTS
@@ -41,6 +42,7 @@ from memory_stub import MemoryStub
 from move_stub import DEFAULT as MOVES
 from notes_stub import NotesStub
 from pages_stub import PagesStub
+from proposals_stub import DEFAULT as PROPOSALS
 
 # Outside services_port_range (8100-8119), the range this product hands to an agent's own preview
 # servers: a harness that serves its build into that range competes with the installation running
@@ -192,6 +194,23 @@ def standing_grants() -> list[dict[str, object]]:
     ]
 
 
+PROJECT_APPROVAL_RULES: list[dict[str, object]] = [
+    {"id": "4d3c2b1a0f9e", "tool": "Exec", "rule": "egress.allowlist", "kind": "prefix", "value": "npm install", "hosts": ["registry.npmjs.org"],
+     "label": "npm install* (registry.npmjs.org)", "server": None, "created_at": "2026-11-20T09:30:00+00:00", "session_id": "stub-session", "via": "app"},
+]
+"""What every stub project has been allowed for all its chats. ``DELETE`` takes one out for the rest of the run."""
+
+
+def provider_test_result(provider_id: str) -> dict[str, object]:
+    """``POST /api/providers/<id>/test``: the stub's providers answer, except one that is named as down.
+
+    ``broken`` answers as an endpoint that refuses its key does, as data and not as an error, so Settings
+    draws a failed row without a check having to stub a 4xx."""
+    if provider_id == "broken":
+        return {"ok": False, "latency_ms": 212, "status": 401, "detail": "the endpoint refused the key (HTTP 401)"}
+    return {"ok": True, "latency_ms": 184, "status": 200, "detail": "", "models": 12}
+
+
 def session_tool_groups() -> dict[str, object]:
     """``GET /api/sessions/<id>/tool-groups`` for a session that loaded the browser, cannot sign in to MCP
     servers and chose its own mode for the board. Every other group is where its mode puts it, as the
@@ -216,7 +235,7 @@ this exact text anywhere on the page."""
 
 def launcher_state(*, upgrade: bool = False, package: str = "", installable: bool = True, download: dict | None = None, **over: object) -> dict[str, object]:
     """``GET /api/system/launcher``: by default a desktop application beside the server, up to date,
-    so every picture and check that does not ask about updates draws the rail as it always has."""
+    so every picture and check that does not ask about updates draws the sidebar without an update button."""
     offer = {
         "from": "desktop-v0.15.1", "to": "desktop-v0.15.2", "url": "https://example.invalid/releases/tag/desktop-v0.15.2",
         "command": LAUNCHER_COMMAND, "package": package,
@@ -667,7 +686,20 @@ GATES: dict[str, object] = {
     "/api/conversation-search/settings": {"mode": "off", "paused": False, "reason": "off", "busy": False, "indexed": 0, "pending": 0, "label": "ruBERT mini FRIDA", "size_bytes": 131205411, "licence": "MIT", "installed": False},
     # Drawn before any screen: no model means the whole app is the "Add a model" flow.
     "/api/onboarding": {"has_model": True, "presets": 1, "default_preset": "p", "providers": [], "keyproxy_base": "", "needs": [], "message": ""},
-    "/api/providers/free-catalog": {"providers": [], "updated_at": None, "stale": False},
+    "/api/providers/free-catalog": {
+        "providers": [
+            {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key_url": "https://openrouter.ai/settings/keys", "key_required": True, "fresh": True,
+             "models": [
+                 {"id": "vendor/free-chat:free", "name": "Free Chat", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": True},
+                 {"id": "vendor/free-code:free", "name": "Free Code", "provider": "openrouter", "mechanism": "zero_price", "tools_reported": False, "agent_ready": False, "may_train": False},
+                 {"id": "vendor/promo", "name": "Promo", "provider": "openrouter", "mechanism": "unverified_promotion", "tools_reported": True, "agent_ready": False, "may_train": False},
+             ]},
+            {"id": "kilo", "name": "Kilo Gateway", "base_url": "https://api.kilo.ai/api/gateway", "key_url": "https://kilo.ai", "key_required": False, "fresh": True,
+             "models": [{"id": "kilo/free", "name": "Kilo Free", "provider": "kilo", "mechanism": "zero_price", "tools_reported": True, "agent_ready": False, "may_train": False}]},
+        ],
+        "updated_at": 1790000000,
+        "stale": False,
+    },
     # Settings → Models → Providers and Settings → Tools → Search keys read what the key proxy holds.
     # check_keyproxy.py keeps a proxy of its own that stores what is written.
     "/api/keyproxy": KEYPROXY_VIEW,
@@ -675,9 +707,9 @@ GATES: dict[str, object] = {
     "/api/keyproxy/clients": KEYPROXY_CLIENTS,
     # The subscriptions' accounts on the same tab; check_accounts.py adds and removes one of its own.
     "/api/subscription-accounts": SUBSCRIPTION_ACCOUNTS,
-    # Where the rail, its More launcher and the phone drawer put each destination: nothing configured, the
+    # Where the sidebar's pinned rows and its More launcher put each destination: nothing configured, the
     # layout the app ships with. check_navigation.py answers it itself to move things about.
-    "/api/navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "/api/navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # The pages the agent published: one, so the menus show where a page goes until it is placed.
     "/api/pages": {"pages": [SAMPLE_PAGE]},
     # Decides which screens the navigation has at all.
@@ -693,13 +725,13 @@ GATES: dict[str, object] = {
     "/api/prompt-change": {"models": [{"id": "default", "label": "Test model"}], "proposal": None},
     "/api/auth/me": {"user": "operator"},
     "/api/auth/config": {"telegram": None, "pairing": False, "second_factor": False},
-    # The rail's account item opens Settings' security section, whose first card is two-factor
+    # The sidebar's account row opens Settings' security section, whose first card is two-factor
     # sign-in: off here. check_two_factor.py keeps a host of its own that enrols.
     "/api/auth/totp": {"enabled": False, "enrolling": False, "recovery_left": 0, "enabled_at": None},
     "/api/status": {"ok": True},
-    # The desktop application beside the server, up to date: the rail has no update button.
+    # The desktop application beside the server, up to date: the sidebar has no update button.
     "/api/system/launcher": launcher_state(),
-    # The badge on the Inbox entry of the navigation and on the bell.
+    # The count on the Inbox row of the navigation.
     "/api/notifications/summary": {"unseen": 0, "needs_you": 0},
     # The centre itself, whichever view the bell's popover or the Inbox asks for: nothing yet.
     "/api/notifications": {"entries": [], "next_before": None, "summary": {"unseen": 0, "needs_you": 0}},
@@ -711,12 +743,12 @@ GATES: dict[str, object] = {
     "/api/terminals/load": terminal_load(),
     "/api/commands": [],
     # The model list outside the app's settings (the terminal's /model): no address, no key.
-    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
+    "/api/models": {"default": "default", "presets": [{"id": "default", "label": "Test model", "provider": "keyproxy", "model": "test-model", "thinking": True, "reasoning_effort": "medium", "images": False, "favourite": False, "context_window": 128000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""},
+                {"id": "starred", "label": "Starred model", "provider": "keyproxy", "model": "starred-model", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 200000, "max_output_tokens": 32000, "provider_kind": "openai", "billing": ""}],
                     "providers": [{"id": "keyproxy", "kind": "openai", "name": "Key proxy", "billing": ""}], "efforts": ["low", "medium", "high", "xhigh"]},
     # The composer's palette offers these next to the slash commands.
     "/api/skills": [{"id": "web-design-reviewer", "name": "web-design-reviewer", "description": "Review a page's layout and accessibility"}],
     "/api/asr": {"configured": False, "reason": "", "provider": "", "model": "", "max_seconds": 120, "autosend": False},
-    "/api/proposals": [],
     "/api/schedules": [],
     # The schedules the agent asks for that wait for the operator: none. The shell counts them on the
     # Inbox entry, so every screen reads this. Approval is off, the host's default, so an Accept lasts
@@ -725,6 +757,9 @@ GATES: dict[str, object] = {
     # No canvas anywhere: the chat header shows no canvas button. `canvas_stub.py` answers every
     # canvas route for a harness that opens one.
     "/api/canvases": {"scopes": [], "items": []},
+    # The board as a host with no task answers it: the chat panel's Overview reads one chat's tasks
+    # (`?session=`) under every conversation, and a harness without a board of its own lists none.
+    "/api/board": [],
     # A project's requests: none waits, so a phone's project draws no banner.
     "/api/asks": {"asks": []},
     "/api/sessions": {"sessions": [], "projects": []},
@@ -733,7 +768,7 @@ GATES: dict[str, object] = {
     "/api/main": {"session_id": "", "dispatches": [], "asks": [], "questions": 0, "setup": []},
     # The Questions tab of a project or of the main chat: nothing waits.
     "/api/questions": {"questions": []},
-    # The shell asks which projects there are before it draws the rail.
+    # The shell asks which projects there are before it draws the sidebar.
     "/api/projects": [],
     # The folder form asks where a folder may live before it offers the environment choice.
     "/api/project-environments": ENVIRONMENTS,
@@ -923,6 +958,8 @@ SHARED_WRITES: dict[tuple[str, str], tuple[int, str, str]] = {
     ("POST", "/api/presence"): (204, "application/json", ""),
     # "Mark all read" in the bell's popover and on the Inbox.
     ("POST", "/api/notifications/seen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
+    # "Mark unread" on an Inbox row: the host says how many went back to unread.
+    ("POST", "/api/notifications/unseen"): (200, "application/json", json.dumps({"marked": 0, "summary": {"unseen": 0, "needs_you": 0}})),
     ("POST", "/api/pet/react"): (200, "application/json", json.dumps({"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})),
     # The session cookie a custom page's frame needs; the stub's frames need none.
     ("POST", "/api/pages/_signin"): (200, "application/json", json.dumps({"ok": True})),
@@ -1281,6 +1318,7 @@ class FakeSecrets:
         self.chat = "sess-1"
         self.project: dict | None = None
         self.projects: list[dict] = []
+        self.logins: list[dict] = []
 
     def seed(self, name: str, *, scope: str = "session", scope_id: str = "", scope_title: str = "", note: str = "",
              value: str = FAKE_SECRET_VALUE, used: str | None = None, uses: int = 0, by: str = "") -> dict:
@@ -1302,7 +1340,7 @@ class FakeSecrets:
             if session_id:
                 return 200, {"secrets": [r for r in self.items if self._here(r)], "others": [r for r in self.items if not self._here(r)],
                              "project_id": self.project["id"] if self.project else None, "project_name": self.project["name"] if self.project else None}
-            return 200, {"secrets": self.items, "logins": [], "projects": self.projects}
+            return 200, {"secrets": self.items, "logins": self.logins, "projects": self.projects}
         if path == "/api/secrets" and method == "POST":
             scope = str(data.get("scope") or "session")
             scope_id = str(data.get("project_id") or (self.project["id"] if scope == "project" and self.project else data.get("session_id") or self.chat))
@@ -1970,6 +2008,9 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return 404, "application/json", json.dumps({"detail": "no picture"})
         return 200, "image/png", preview_png(address.split("?", 1)[0], 160, 160)
     parts = path.split("/")
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "attachments":
+        # What was attached in a chat; none here, and a harness that draws the list answers it itself.
+        return 200, "application/json", json.dumps({"attachments": []})
     if len(parts) == 4 and parts[2] == "link-files" and method.upper() == "GET":
         return link_file_bytes(parts[3])
     exported = link_export(method.upper(), parts)
@@ -2073,6 +2114,10 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         # Asking the sources again for a preset's window: the shared host finds what the settings
         # pictures already say, so the screen does not move under a check that presses it.
         return 200, "application/json", json.dumps({"window": 128000, "source": "default", "sources": {"provider": None, "catalog": None, "table": None, "error": None}})
+    if method.upper() == "PUT" and len(path.split("/")) == 4 and path.startswith("/api/presets/"):
+        # The model picker's star: the shared host takes it and the picker keeps what it drew; the
+        # settings pictures, which re-read the presets, answer this route with their own copy.
+        return 200, "application/json", json.dumps({"ok": True})
     if path.startswith("/api/recurring/card/"):
         # The card under an agent's ScheduleCreate; the shared host keeps none, and a harness that
         # draws one (check_schedule_card.py) answers it itself.
@@ -2102,6 +2147,17 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
             return answered[0], "application/json", json.dumps(answered[1])
     if "/notes" in path and (path.startswith("/api/notes/") or (parts[2:3] == ["sessions"] and parts[4:5] == ["notes"])):
         answered = NOTES.answer(method, path, query, body)
+        if answered is not None:
+            return answered
+    if parts[2:3] == ["sessions"] and parts[4:5] in (["changes"], ["commit"]):
+        # A chat's Changes tab: every chat has the same two changed files until it reverts or commits
+        # them; a check reads its writes back from CHANGES.writes.
+        answered = CHANGES.answer(method, path, query, body)
+        if answered is not None:
+            return answered
+    if path.startswith("/api/proposals"):
+        # The agent's own change proposals: a decision moves the row, and a check reads it back from PROPOSALS.decided.
+        answered = PROPOSALS.answer(method, path, body)
         if answered is not None:
             return answered
     if path == "/api/memory/export.zip":
@@ -2196,7 +2252,17 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"text": "", "skipped": "off"})
     if method.upper() == "GET" and len(parts) == 7 and parts[2] == "sessions" and parts[4:6] == ["policy", "similar"]:
         # The approval dock asks what "Allow similar" would grant; nothing a harness did not refuse has a family.
-        return 200, "application/json", json.dumps({"similar": None})
+        return 200, "application/json", json.dumps({"similar": None, "server": None, "project": {
+            "available": False, "reason": "this request has no narrower family of calls to allow; allow it once instead"}})
+    if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-project"]:
+        return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
+    if method.upper() == "GET" and len(parts) == 5 and parts[2] == "projects" and parts[4] == "approval-rules":
+        return 200, "application/json", json.dumps({"rules": PROJECT_APPROVAL_RULES})
+    if method.upper() == "DELETE" and len(parts) == 6 and parts[2] == "projects" and parts[4] == "approval-rules":
+        PROJECT_APPROVAL_RULES[:] = [rule for rule in PROJECT_APPROVAL_RULES if rule["id"] != parts[5]]
+        return 200, "application/json", json.dumps({"rules": PROJECT_APPROVAL_RULES})
+    if method.upper() == "POST" and len(parts) == 5 and parts[2] == "providers" and parts[4] == "test":
+        return 200, "application/json", json.dumps(provider_test_result(parts[3]))
     if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-similar"]:
         return 400, "application/json", json.dumps({"detail": "this request has no narrower family of calls to allow; allow it once instead"})
     if method.upper() == "POST" and len(parts) == 6 and parts[2] == "sessions" and parts[4:] == ["policy", "grant-server"]:
@@ -2204,7 +2270,7 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
         return 200, "application/json", json.dumps({"key": key, "server": "files", "resolved": [key] if key else [], "approves": [], "standing": standing_grants()})
     if len(parts) >= 6 and parts[2] == "sessions" and parts[4:6] == ["policy", "standing"]:
         # The session's standing grants: one server allowed for a span, one for good, so the list shows both kinds.
-        return 200, "application/json", json.dumps({"standing": [] if method.upper() == "DELETE" else standing_grants()})
+        return 200, "application/json", json.dumps({"standing": [] if method.upper() == "DELETE" else standing_grants(), "project": PROJECT_APPROVAL_RULES})
     if method.upper() == "GET" and len(parts) == 6 and parts[2] == "sessions" and parts[4] == "tool-results":
         return 200, "application/json", json.dumps({"id": parts[5], "content": LONG_RESULT, "is_error": False, "length": len(LONG_RESULT), "complete": True})
     if method.upper() == "POST" and len(parts) == 5 and parts[2] == "sessions" and parts[4] == "vision":
@@ -2466,38 +2532,62 @@ class Unhandled:
 
 
 def open_drawer(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the phone's drawer from whatever screen is showing: every top bar has the hamburger."""
+    """Open the phone's drawer from whatever screen is showing: every top bar has the hamburger. The
+    drawer is the desktop's sidebar, so what is in it is found by the sidebar's own selectors."""
     page.locator(".ph-menu:visible").first.click()
-    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=10000)
+    page.wait_for_selector(".ph-drawer-root.open .sidebar .sb-nav", timeout=10000)
     page.wait_for_timeout(300)
 
 
 def drawer_go(page, screen: str, mode: str = "") -> None:  # type: ignore[no-untyped-def]
-    """Go to a destination from the phone's drawer: a daily one is a row of it, the rest are in its
-    More sheet. `mode` switches the drawer to that mode's lists first ("agents", "orchestration")."""
+    """Go to a destination from the phone's drawer: a pinned one is a row of it, the rest are in its
+    More sheet. `mode` first chooses that mode ("agents", "orchestration") from the drawer's mode menu,
+    which goes to the mode's home, and opens the drawer again there."""
     open_drawer(page)
     if mode:
-        page.locator(".ph-drawer .ph-seg button").nth(0 if mode == "agents" else 1).click()
-        page.wait_for_timeout(200)
-    row = page.locator(f".ph-drawer-root.open [data-screen='{screen}']")
+        switch_mode(page, mode, scope=".ph-drawer-root.open")
+        page.wait_for_timeout(400)
+        open_drawer(page)
+    row = page.locator(f".ph-drawer-root.open [data-nav='{screen}']")
     if row.count():
         row.first.click()
     else:
-        page.locator(".ph-drawer-root.open [data-nav='more']").click()
+        page.locator(".ph-drawer-root.open [data-nav='menu']").click()
         page.locator(f".ph-more-sheet [data-screen='{screen}']").click()
     page.wait_for_timeout(400)
 
 
+def choose_option(page, trigger, value: str) -> None:  # type: ignore[no-untyped-def]
+    """Pick `value` in a `Select` primitive: press its button (`trigger`, a locator or a selector),
+    then the item whose data-value it is. The list is drawn over the page, not inside the form, and
+    only while it is open."""
+    button = page.locator(trigger) if isinstance(trigger, str) else trigger
+    button.click()
+    page.locator(f".dropdown-list .dropdown-item[data-value=\"{value}\"]").click()
+    page.wait_for_selector(".dropdown-list", state="detached", timeout=5000)
+
+
+def switch_mode(page, mode: str, scope: str = "") -> None:  # type: ignore[no-untyped-def]
+    """Choose Agents or Orchestration from the mode menu at the top of the sidebar, the desktop's
+    column or the phone's drawer (`scope`). The menu lists the two modes in that order in either
+    language; on a phone it is a sheet of the same items."""
+    page.locator(f"{scope} nav.sidebar .sidebar-head .sb-mode".strip()).click()
+    page.locator(".menu [role=menuitem], .menu-sheet [role=menuitem]").nth(0 if mode == "agents" else 1).click()
+
+
 def open_projects(page) -> None:  # type: ignore[no-untyped-def]
-    """Open the projects: the column's project chip on a desktop, which opens the projects page in the
-    conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
-    page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
-    if page.locator(".project-chip:visible").count():
-        page.locator(".project-chip:visible").first.click()
+    """Open the projects: the "Projects" label of the sidebar on a desktop, which opens the projects
+    page in the conversation's place, and the drawer's Projects entry on a phone, which opens the sheet."""
+    page.wait_for_selector("[data-action='all-projects']:visible, .ph-menu:visible")
+    if page.locator("[data-action='all-projects']:visible").count():
+        page.locator("[data-action='all-projects']:visible").first.click()
         page.wait_for_selector(".projects-page")
         return
     open_drawer(page)
-    page.locator(".ph-drawer-root.open [data-nav='projects']").click()
+    page.locator(".ph-drawer-root.open [data-action='all-projects']").click()
+    # The sheet opens once the drawer's history entry is gone, and slides in: wait until it stands.
+    page.wait_for_selector(":is(.project-row, .projects-row)", timeout=10000)
+    page.wait_for_timeout(400)
 
 
 FIELD_TEXT = "el => [...el.querySelectorAll('[data-line]')].map(line => line.textContent).join('\\n')"
@@ -2510,14 +2600,6 @@ def field_text(locator) -> str:  # type: ignore[no-untyped-def]
     return locator.evaluate(FIELD_TEXT)
 
 
-def reveal_composer(page) -> None:  # type: ignore[no-untyped-def]
-    """On a phone the composer rests as one row; the model, the mode and the context ring are in the
-    toolbar it opens onto when its field has the reader. A no-op where they already show."""
-    if not page.locator(".composer .model-select, .composer .composer-mode").first.is_visible():
-        page.locator(".composer .composer-field").first.click()
-        page.wait_for_timeout(150)
-
-
 def wait_until(page, ready, timeout: float = 5.0) -> bool:  # type: ignore[no-untyped-def]
     """Waits for what the stub has heard. The app says nothing when an action goes through, and a stub's
     lists only move while the page's events are being pumped, so a plain sleep would hear nothing."""
@@ -2527,6 +2609,31 @@ def wait_until(page, ready, timeout: float = 5.0) -> bool:  # type: ignore[no-un
             return False
         page.wait_for_timeout(50)
     return True
+
+
+def settings_model(page, name: str):  # type: ignore[no-untyped-def]
+    """A model in Settings → Models and providers, by its name: each model is drawn inside its provider,
+    so every provider still folded is opened first. Answers the model's block; its line's button is
+    ``.pmodel-open`` and its fields are under it once that is pressed."""
+    page.wait_for_selector(".prov-row", timeout=15000)
+    folded = page.locator(".prov-row[aria-expanded='false']")
+    # One at a time from the top: each one opened leaves the set, so a list taken first goes stale.
+    for _ in range(folded.count()):
+        folded.first.click()
+    return page.locator(".pmodel", has_text=name).first
+
+
+def settings_provider(page, provider_id: str):  # type: ignore[no-untyped-def]
+    """A provider in Settings → Models and providers, opened, with its Connection fields shown."""
+    block = page.locator(f".prov[data-provider='{provider_id}']")
+    block.wait_for(timeout=15000)
+    if block.locator(".prov-row").get_attribute("aria-expanded") != "true":
+        block.locator(".prov-row").click()
+    toggle = block.locator(".prov-foot button[aria-expanded]")
+    if toggle.get_attribute("aria-expanded") != "true":
+        toggle.click()
+    block.locator(".prov-connection").wait_for(timeout=5000)
+    return block
 
 
 def expect_app(base: str) -> None:
@@ -2824,21 +2931,53 @@ class BoardStub:
         """Open issues as the host's listing reads them: number, title, labels and an optional body_length."""
         self.issue_lists: list[dict] = []
         self.issue_imports: list[dict] = []
+        self.subagent_of: dict[str, str] = {}
+        """Subagent session id to its leader's: a chat's board is its family's, as the host's ``Board.family`` has it."""
+        self.history: dict[str, list[dict]] = {}
+        """A task's stored events as ``GET /api/board/{id}/events`` answers them; a task without any has its creation."""
+        self.refusals: dict[str, str] = {}
+        """A task's id to the host's reason for refusing a move of it, as the update command words a conflict."""
+        self.session_projects: dict[str, str] = {}
+        """A chat's id to the project it belongs to: a create that names a known chat on another board is refused with 403, as the host's is."""
 
     @staticmethod
     def task(id_: str, title: str, *, status: str = "todo", priority: int = 3, assignee: dict | None = None, **fields: object) -> dict:
         row = {
-            "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "notes": "",
+            "id": id_, "title": title, "status": status, "priority": priority, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": None, "notes": "",
             "created_at": "2026-09-24T09:00:00Z", "updated_at": "2026-09-24T09:30:00Z", "project_id": "", "assignee_staff_id": assignee["id"] if assignee else None,
             "brief": {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}, "branch": None, "merge_state": "", "assignee": assignee,
             "acceptance_state": "", "requirements": [], "entity_revision": 1,
+            "due_at": None, "overdue": False, "assignee_operator": False,
         }
         row.update(fields)
         return row
 
     @staticmethod
+    def due(value: str | None) -> str | None:
+        """What the host stores for a due date: UTC to the second, a bare date meaning the end of its day, nothing for empty."""
+        if not value or not value.strip():
+            return None
+        text = value.strip()
+        return f"{text}T23:59:59Z" if len(text) == 10 else text
+
+    @staticmethod
+    def fresh(row: dict) -> dict:
+        """The card as read now: ``overdue`` is derived from the date and the status, never stored."""
+        late = bool(row.get("due_at")) and row["status"] not in ("done", "dropped") and row["due_at"] < "2026-10-16T12:00:00Z"
+        return {**row, "overdue": late}
+
+    def _own(self, row: dict, operator: bool) -> None:
+        """A card the operator keeps for themselves: ``assignee`` is ``{kind: operator}`` and no member holds it."""
+        row["assignee_operator"] = operator
+        if operator:
+            row["assignee_staff_id"] = None
+            row["assignee"] = {"kind": "operator"}
+        elif row.get("assignee") == {"kind": "operator"}:
+            row["assignee"] = None
+
+    @staticmethod
     def assignee(id_: str, name: str, *, harness: str = "daedalus", color: str = "blue", status: str = "off", on_task: bool = False, **fields: object) -> dict:
-        row = {"id": id_, "name": name, "color": color, "harness": harness, "archived_at": None, "status": status, "on_task": on_task, "waiting_for": "", "status_at": "2026-09-24T09:40:00Z" if on_task else None, "session_id": f"sess-{id_}" if status != "off" else None}
+        row = {"kind": "staff", "id": id_, "name": name, "color": color, "harness": harness, "archived_at": None, "status": status, "on_task": on_task, "waiting_for": "", "status_at": "2026-09-24T09:40:00Z" if on_task else None, "session_id": f"sess-{id_}" if status != "off" else None}
         row.update(fields)
         return row
 
@@ -2872,16 +3011,33 @@ class BoardStub:
         return self.reviews.get(row["id"]) or self.review(row)
 
     def listing(self, include_done: bool) -> dict:
-        rows = [t for t in self.tasks if not t.get("removed_at") and (include_done or t["status"] not in ("done", "dropped"))]
+        rows = [self.fresh(t) for t in self.tasks if not t.get("removed_at") and (include_done or t["status"] not in ("done", "dropped"))]
         rows.sort(key=lambda t: (self.ORDER.get(t["status"], 9), t["priority"], t["created_at"]))
         counts = {s: sum(1 for t in self.tasks if t["status"] == s) for s in self.ORDER}
         counts["needs_you"] = len(self.needs_you)
         team = [{**{k: m[k] for k in ("id", "name", "color", "harness")}, "isolation": m.get("isolation", "worktree")} for m in self.staff]
         return {"project": self.project, "tasks": rows, "needs_you": self.needs_you, "counts": counts, "staff": team}
 
+    def initial(self, payload: dict) -> tuple[str, str]:
+        """The column a new card is made in, or the host's refusal: ``status`` when asked, else its
+        dependencies decide. To do and doing need every dependency done, doing a card the operator keeps,
+        blocked is always allowed; review, done and dropped are never where a card starts."""
+        waits = any(t["status"] != "done" for t in self.tasks if t["id"] in (payload.get("depends_on") or []))
+        asked = payload.get("status")
+        if asked is None:
+            return ("blocked" if waits else "todo"), ""
+        if asked == "dropped":
+            return "", "a new task starts open; drop it once it exists"
+        if asked not in ("todo", "blocked") and not (asked == "doing" and payload.get("assignee_operator")):
+            return "", "work, review and completion require their dedicated result or launch command"
+        if asked in ("todo", "doing") and waits:
+            return "", "this task still has unfinished dependencies"
+        return asked, ""
+
     def _assign(self, row: dict, staff_id: str | None) -> None:
         member = next((m for m in self.staff if m["id"] == staff_id), None)
         row["assignee_staff_id"] = member["id"] if member else None
+        row["assignee_operator"] = False
         row["assignee"] = self.assignee(member["id"], member["name"], harness=member["harness"], color=member["color"]) if member else None
 
     def _issues(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
@@ -2930,7 +3086,6 @@ class BoardStub:
             return self._issues(method, path, body)
         launches = f"/api/projects/{self.project['id']}/uncertain-launches"
         if path == launches and method == "GET":
-            from urllib.parse import parse_qs
             params = parse_qs(query)
             after = params.get("after", [""])[0]
             limit = int(params.get("limit", ["50"])[0])
@@ -2950,7 +3105,6 @@ class BoardStub:
         if path == stops and method == "GET":
             if self.unknown_stops_failed:
                 return 503, {"detail": "inspection unavailable"}
-            from urllib.parse import parse_qs
             params = parse_qs(query)
             after = params.get("after", [""])[0]
             limit = int(params.get("limit", ["50"])[0])
@@ -3086,33 +3240,64 @@ class BoardStub:
                              "receipt_id": "cancel-receipt", "entity_revision": entity_revision + 1}
         if path == base and method == "GET":
             return 200, self.listing("include_done=1" in query)
+        if path in (base, "/api/board") and method == "POST":
+            # The host puts a card on the board its source chat belongs to: the global board takes only a
+            # chat of no project, a project's board only that project's chats.
+            chat = (body or {}).get("session_id")
+            if chat in self.session_projects and self.session_projects[chat] != (self.project["id"] if path == base else ""):
+                return 403, {"detail": "the source session belongs to another board"}
         if path == base and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
             brief = {"objective": "", "deliverable": "", "boundaries": "", "done_when": ""}
             brief.update(payload.get("brief") or {})
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"])
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), brief=brief, depends_on=payload.get("depends_on") or [], project_id=self.project["id"],
+                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"), due_at=self.due(payload.get("due_at")))
             self._assign(row, payload.get("assignee_staff_id"))
+            if payload.get("assignee_operator"):
+                self._own(row, True)
             self.tasks.append(row)
-            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "POST":
             payload = dict(body or {})
+            status, refused = self.initial(payload)
+            if refused:
+                return 409, {"detail": refused}
             self.created.append(payload)
-            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], priority=int(payload.get("priority", 3)), project_id=None,
-                            acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []])
+            row = self.task(f"n{len(self.tasks) + 1}", payload["title"], status=status, priority=int(payload.get("priority", 3)), project_id=None,
+                            session_id=payload.get("session_id"), origin_session_id=payload.get("session_id"),
+                            acceptance=payload.get("acceptance") or "", checklist=[{"text": text, "done": False} for text in payload.get("checklist") or []],
+                            due_at=self.due(payload.get("due_at")))
+            if payload.get("assignee_operator"):
+                self._own(row, True)
             self.tasks.append(row)
-            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+            return 201, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
         if path == "/api/board" and method == "GET":
             # The host names a project's task's project on this listing, as the Board screen's card reads it.
             listed = [t for t in self.tasks if not t.get("removed_at") and ("include_done=1" in query or t["status"] not in ("done", "dropped"))]
+            # ``project=`` is one project's board and ``session=`` the tasks that chat or its subagents
+            # created, as the host answers them; an unknown value lists nothing.
+            asked = parse_qs(query)
+            if asked.get("project", [""])[0]:
+                listed = [t for t in listed if t.get("project_id") == asked["project"][0]]
+            if asked.get("session", [""])[0]:
+                leader = self.subagent_of.get(asked["session"][0], asked["session"][0])
+                family = {leader, *(sub for sub, lead in self.subagent_of.items() if lead == leader)}
+                listed = [t for t in listed if t.get("origin_session_id") in family]
             # And why a card waits on the operator, as the host marks it: an open request tied to the
             # task, a question before an approval, else review.
             waiting: dict[str, str] = {}
             for need in self.needs_you:
                 if need.get("task_id") and waiting.get(need["task_id"]) != "question":
                     waiting[need["task_id"]] = "question" if need.get("kind") == "question" else "approval"
-            return 200, [{**t, "project_name": self.project["name"] if t.get("project_id") else None,
-                          "needs_you": waiting.get(t["id"]) or ("review" if t["status"] == "review" else None)} for t in listed]
+            def why(t: dict) -> str | None:
+                mine = t.get("assignee_operator") and t["status"] in ("todo", "doing", "blocked")
+                return waiting.get(t["id"]) or ("review" if t["status"] == "review" else "assigned" if mine else None)
+
+            return 200, [{**self.fresh(t), "project_name": self.project["name"] if t.get("project_id") else None, "needs_you": why(t)} for t in listed]
         if path.startswith("/api/board/"):
             parts = path.split("/")
             row = next((t for t in self.tasks if t["id"] == parts[3]), None)
@@ -3155,8 +3340,6 @@ class BoardStub:
                                           "permission_mode": member.get("permission_mode", "default")}
                                          for member in self.staff if member["harness"] != source_harness and not member.get("archived_at")] if source_id else []}
             if path.endswith("/handoff-preview") and method == "GET":
-                from urllib.parse import parse_qs
-
                 args = parse_qs(query)
                 source_id = args.get("source_attempt_id", [""])[0]
                 target_id = args.get("target_staff_id", [""])[0]
@@ -3194,6 +3377,12 @@ class BoardStub:
             if path.endswith("/contract") and method == "GET":
                 return 200, {"task_id": row["id"], "contract_revision": 1, "entity_revision": row["entity_revision"],
                              "checklist": [{"id": f"C{index}", "text": item["text"]} for index, item in enumerate(row["checklist"], 1)]}
+            if path.endswith("/events") and method == "GET":
+                kept = self.history.get(row["id"])
+                if kept is None:
+                    kept = [{"seq": 1, "type": "task.created", "at": row["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None},
+                             "from": None, "to": row["status"], "text": f"Created in {row['status']}", "operation": "board.task.create", "backfilled": False}]
+                return 200, kept[-int(parse_qs(query).get("limit", ["200"])[0]):]
             if path.endswith("/results") and method == "GET":
                 if row["id"] in self.result_rows:
                     return 200, self.result_rows[row["id"]]
@@ -3298,8 +3487,14 @@ class BoardStub:
             if method == "PUT":
                 payload = dict(body or {})
                 self.updated.append((row["id"], payload))
+                if payload.get("status") and row["id"] in self.refusals:
+                    return 409, {"detail": self.refusals[row["id"]]}
                 if "assignee_staff_id" in payload:
                     self._assign(row, payload["assignee_staff_id"] or None)
+                if payload.get("assignee_operator") is not None:
+                    self._own(row, bool(payload["assignee_operator"]))
+                if payload.get("due_at") is not None:
+                    row["due_at"] = self.due(payload["due_at"])
                 if "brief" in payload:
                     row["brief"] = {**row["brief"], **payload["brief"]}
                 # The operator reopening a card its own chat finished, as the host records it: the
@@ -3316,7 +3511,7 @@ class BoardStub:
                 if payload.get("note"):
                     row["notes"] = (row["notes"] + "\n" if row["notes"] else "") + payload["note"]
                 row["entity_revision"] += 1
-                return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": row}
+                return 200, {"command": {"task_id": row["id"], "entity_revision": row["entity_revision"]}, "task": self.fresh(row)}
             if method == "DELETE":
                 row["status"] = "dropped"
                 row["removed_at"] = "2026-10-16T12:00:00Z"
@@ -3527,6 +3722,17 @@ def inbox_attachments(*names: str) -> list[dict]:
 def inbox_list(*names: str, root: str = "/home/you/work/inbox") -> str:
     """The list the host appends for the model, as a message written before the record carried it."""
     return "Attached files:\n" + "\n".join(f"- {root}/{name} ({INBOX_FILES[name][0]}, {len(INBOX_FILES[name][1])} bytes)" for name in names)
+
+
+def attachment_entry(session_id: str, name: str, *, source: str = "operator", seq: int = 1, size: int | None = None, mime: str = "", url: str = "", at: str = "2026-10-30T14:12:21Z") -> dict:
+    """One entry of ``GET /api/sessions/<id>/attachments``: the operator's inbox files serve from the
+    session's attachment route, and anything else is told its ``url`` by the caller."""
+    kept = INBOX_FILES.get(name)
+    return {
+        "id": f"{source}:{seq}:{name}", "source": source, "name": name,
+        "size": size if size is not None else (len(kept[1]) if kept else None), "mime": mime or (kept[0] if kept else "application/octet-stream"),
+        "message_seq": seq, "created_at": at, "url": url or f"/api/sessions/{session_id}/attachments/download?path={quote(name, safe='')}",
+    }
 
 
 def attachment_route(rel: str, params: dict[str, list[str]]) -> tuple[str, bytes] | None:
@@ -4288,7 +4494,9 @@ class FocusStub:
         readable = [{"id": f["id"], "path": f["path"], "label": f["label"], "env": f["env"], "readonly": f["readonly"], "writable": False}
                     for f in project["folders"]] if orchestrator_of else []
         return {
-            "id": sid, "title": title, "status": status, "run_id": None, "compacting": None, "housekeeping": False, "error": "",
+            # Every chat's folder is a repository here: the shared changes stub answers each one with its listing.
+            "id": sid, "title": title, "status": status, "run_id": None, "run_started_at": None, "branch": None, "repository": True,
+            "compacting": None, "housekeeping": False, "error": "",
             "workspace": root, "workspace_name": root.rsplit("/", 1)[-1], "workspace_own": False, "workspace_sessions": [],
             "project": {k: v for k, v in project.items() if k != "sessions"}, "folder_id": project["folders"][0]["id"], "folders": readable,
             "pending": None, "model": "Claude Opus 5", "provider": "claude", "thinking": True, "reasoning_effort": "high",

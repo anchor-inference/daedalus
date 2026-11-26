@@ -2,12 +2,12 @@ import type React from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Icon, IconName } from "../icons";
 import { navigate, pathFor } from "../router";
-import { PageHeader, go, screenTitle, useMedia } from "../ui/index";
-import { announceProviderKeys, api, telegram, ContextWindowSource, ContextWindowSources, HeartbeatStatus, ModelCheckResult, ModelHealth, Preset, PriceView, ProviderConf, SearchBackendInfo, SearchCheck, Settings } from "../api";
-import { confirmAsync, errorText, numInput } from "../ui";
+import { go, screenTitle, useMedia } from "../ui/index";
+import { api, telegram, HeartbeatStatus, SearchBackendInfo, SearchCheck, Settings } from "../api";
+import { errorText } from "../ui";
 import { TwoFactorCard } from "../twofactor";
 import { timeAgo } from "../ui/components";
-import { shortDateTime, tokens } from "../format";
+import { shortDateTime } from "../format";
 import { useMoreBelow } from "../edgefade";
 import { SpeechModels } from "./Speech";
 import { TtsVoices } from "./Voices";
@@ -16,18 +16,17 @@ import { ComponentsTab } from "./Components";
 import { DependenciesTab } from "./Dependencies";
 import { PromptChange } from "./PromptChange";
 import { AddModel } from "./AddModel";
-import { ModelPrice } from "../modelprice";
 import { QuickModelsPicker, SubagentModelsPicker } from "../subagentmodels";
-import { ModelPicker, healthAlert, modelItems } from "../modelitems";
+import { ModelPicker, modelItems } from "../modelitems";
 import { FreeModels } from "./FreeModels";
-import { OpenRouterProviders } from "./OpenRouterProviders";
-import { ON_DEMAND_CHOICES, REASONING_EFFORTS, RouteListing, onDemandGroups, orchestratorPreset } from "../models";
+import { orchestratorPreset } from "../models";
 import { mainPreset } from "../main/model";
 import { Sheet } from "../ui/dialogs";
 import { lang, plural, t } from "../i18n";
-import { describeIntegration, type IntegrationRow } from "../integrationHealth";
-import { Dropdown, Segmented, SelectionList, Switch } from "../ui/index";
-import { type Changed, NumInput, NumRow, Row, TextBlock } from "../settingsrow";
+import { Select, Segmented, SelectionList, Switch } from "../ui/index";
+import { Button, confirmDialog } from "../ui/primitives";
+import { type Changed, NumInput, NumRow, Row, SetBlock, SetFoot, SetGroup, TextBlock } from "../settingsrow";
+import { ModelChoice } from "../modelchoice";
 import { DesktopPanel } from "./DesktopSettings";
 import { DevicesPanel } from "./DevicesSettings";
 import { ADDRESS, PublicAddress, PublicAddressPanel } from "../publicaddress";
@@ -45,31 +44,19 @@ import { BrowserSettingsTab } from "./BrowserSettings";
 import { ToolGroupsSettings } from "../toolgroupsview";
 import { CompactionModelSelect } from "../compactionmodel";
 import { WithEffort } from "../taskeffort";
-import { ProviderMark, providerName as providerTitle } from "../ui/provider-mark";
 import { AsrSettingsCard } from "./AsrSettings";
 import { McpServers } from "./McpServers";
 import { AutopilotSettings, UserStyleCard } from "./AutopilotSettings";
 import { TranslationSettings } from "./TranslationSettings";
 import { DesktopAppCard } from "../updatedialog";
-import { ProviderLimit } from "./ProviderLimit";
-import { OPENCODE_KEY_URL, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
-import { SubscriptionAccountsCard, accountName, useSubscriptionAccounts, type SubscriptionUpstream } from "../accounts";
+import { SubscriptionAccountsCard, useSubscriptionAccounts, type SubscriptionAccounts } from "../accounts";
 import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
 import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, sectionOfAnchor, type SectionGroup } from "./settingsindex";
-import { HitBody, hitCount, moveInList, trapTab, useCovered, useDialogKeys } from "./settingsdialog";
-
-const DEFAULT_KINDS = ["deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"];
-/** The generic protocol also serves remote vendors, so temperature is available there too. */
-const TEMPERATURE_KINDS = new Set(["vllm", "llamacpp", "openai_compat"]);
-const KEY_LINKS: Record<string, string> = {
-  openrouter: "https://openrouter.ai/settings/keys",
-  opencode_zen: "https://opencode.ai/auth",
-  groq: "https://console.groq.com/keys",
-  cerebras: "https://cloud.cerebras.ai/platform",
-  gemini: "https://aistudio.google.com/apikey",
-};
+import { HitBody, hitCount, moveInList, usePageKeys } from "./settingssearch";
+import { AddProvider, ModelsSection } from "./ModelsSection";
+import { ProjectApprovals } from "./ProjectApprovals";
 
 function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: string; onSave: (rules: string) => void }) {
   const [text, setText] = useState(rules || fallback);
@@ -81,23 +68,23 @@ function RulesEditor({ rules, fallback, onSave }: { rules: string; fallback: str
     setDirty(false);
   }, [rules, fallback]);
   return (
-    <div className="card" data-setting="prompt.rules">
-      <div className="section-title">{t("settings.rules.title")}</div>
-      <div className="sub">{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</div>
+    <SetGroup title={t("settings.rules.title")} help={<>{t("settings.rules.sub")} {t(rules ? "settings.rules.custom" : "settings.rules.default")}</>} data-setting="prompt.rules">
       {/* The eleventh line shows through the field's bottom padding sliced in half; the fade over
           it (while more waits below) makes that read as "scroll for more" rather than broken text. */}
-      <div className="rules-editor">
-        <textarea ref={field} className="field rules-editor-field" rows={10} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} style={{ fontFamily: "var(--mono)", fontSize: 12.5 }} />
-      </div>
-      <div className="btnrow">
-        <button className="btn primary" disabled={!dirty} onClick={() => (onSave(text.trim() === fallback.trim() ? "" : text), setDirty(false))}>
+      <SetBlock>
+        <div className="rules-editor">
+          <textarea ref={field} className="field rules-editor-field" rows={10} aria-label={t("settings.rules.title")} value={text} onChange={(e) => (setText(e.target.value), setDirty(true))} />
+        </div>
+      </SetBlock>
+      <SetFoot>
+        <Button variant="primary" disabled={!dirty} onClick={() => (onSave(text.trim() === fallback.trim() ? "" : text), setDirty(false))}>
           {t("common.save")}
-        </button>
-        <button className="btn" onClick={() => (setText(fallback), setDirty(true))}>
+        </Button>
+        <Button onClick={() => (setText(fallback), setDirty(true))}>
           {t("settings.rules.reset")}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </SetFoot>
+    </SetGroup>
   );
 }
 
@@ -111,482 +98,6 @@ function shipped<T>(value: T, fallback: T, reset: () => void, shown = String(fal
 function presetName(s: Settings, id: string): string {
   const p = s.presets?.[id];
   return p ? p.label || `${p.provider}/${p.model}` : id;
-}
-
-type Patch = (id: string, patch: Record<string, unknown>) => Promise<Settings | undefined>;
-
-/** "⟳ /models" button with a floating list over the card instead of inflating it. */
-function ModelsMenu({ load, current, onPick }: { load: () => Promise<string[] | null>; current: string; onPick: (m: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [models, setModels] = useState<string[] | null>(null);
-  const [filter, setFilter] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest?.(".models-menu-wrap")) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  async function toggle() {
-    if (open) return setOpen(false);
-    setOpen(true);
-    setBusy(true);
-    setModels(await load());
-    setBusy(false);
-  }
-  const shown = (models ?? []).filter((m) => m.toLowerCase().includes(filter.toLowerCase()));
-  return (
-    <span className="models-menu-wrap">
-      <button className="btn small" onClick={toggle} disabled={busy}>
-        {busy ? "…" : "⟳ /models"}
-      </button>
-      {open && (
-        <div className="models-menu">
-          <input className="field" autoFocus placeholder={t("settings.models.menu")} value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <div className="models-menu-list">
-            {busy && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.loading")}</div>}
-            {!busy && models === null && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.unreachable")}</div>}
-            {!busy && models !== null && shown.length === 0 && <div className="sub" style={{ padding: 8 }}>{t("settings.models.menu.none")}</div>}
-            {shown.map((m) => (
-              <button key={m} className={`models-menu-item ${m === current ? "on" : ""}`} onClick={() => (setOpen(false), onPick(m))}>
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </span>
-  );
-}
-
-/** Where a preset's window came from, what every source says, and the way back to automatic. */
-function WindowSource({ source, sources, onAuto, onRefresh }: { source: ContextWindowSource; sources?: ContextWindowSources; onAuto: () => void; onRefresh: () => void }) {
-  const said = (n: number | null | undefined) => (n ? tokens(n) : t("window.unknown"));
-  const detail = sources ? t("window.sources", { provider: said(sources.provider), catalog: said(sources.catalog), table: said(sources.table), error: said(sources.error) }) : undefined;
-  const text = source === "manual" ? t("window.manual") : source === "default" ? t("window.default") : t("window.found", { source: t(`window.by.${source}`) });
-  return (
-    <span className="sub faint window-source" title={detail} data-testid="window-source">
-      {text}{" "}
-      {source === "manual"
-        ? <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onAuto(); }}>{t("window.auto")}</button>
-        : <button type="button" className="linkbtn" onClick={(e) => { e.preventDefault(); onRefresh(); }}>{t("window.refresh")}</button>}
-    </span>
-  );
-}
-
-/** Which OpenRouter providers a model is limited to, and the table to change it, read when opened. */
-function PresetRoutes({ p, onPatch }: { p: Preset; onPatch: (patch: Partial<Preset>) => void }) {
-  const [open, setOpen] = useState(false);
-  const [listing, setListing] = useState<RouteListing | null>(null);
-  const [failed, setFailed] = useState(false);
-  const saved = p.openrouter_providers ?? [];
-  const [chosen, setChosen] = useState(saved);
-  const gone = p.openrouter_providers_gone ?? [];
-  useEffect(() => setChosen(p.openrouter_providers ?? []), [p.openrouter_providers]);
-  useEffect(() => {
-    if (!open) return;
-    let current = true;
-    setListing(null);
-    setFailed(false);
-    api.get<RouteListing>(`/api/providers/${encodeURIComponent(p.provider)}/model-providers?model=${encodeURIComponent(p.model)}`)
-      .then((found) => { if (!current) return; if (found.rows.length) setListing(found); else setFailed(true); })
-      .catch(() => { if (current) setFailed(true); });
-    return () => { current = false; };
-  }, [open, p.provider, p.model]);
-  const changed = chosen.join("\n") !== saved.join("\n");
-  return (
-    <>
-      <Row title={t("settings.preset.routes")} desc={saved.length ? t("settings.preset.routes.only", { slugs: saved.join(", ") }) : t("settings.preset.routes.auto")}>
-        <button className="btn small" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{t(open ? "common.close" : "settings.preset.routes.choose")}</button>
-      </Row>
-      {gone.length > 0 && <p className="result-warning" role="alert">{t("settings.preset.routes.gone", { slugs: gone.join(", ") })}</p>}
-      {open && !listing && !failed && <div className="sub faint">{t("settings.preset.routes.asking")}</div>}
-      {open && failed && <p className="sub">{t("settings.preset.routes.unavailable")}</p>}
-      {open && listing && <OpenRouterProviders listing={listing} chosen={chosen} saved={saved} onChange={setChosen} />}
-      {open && (listing ? changed : failed && saved.length > 0) && (
-        <div className="btnrow">
-          {listing ? <button className="btn small primary" onClick={() => onPatch({ openrouter_providers: chosen })}>{t("common.save")}</button>
-            : <button className="btn small" onClick={() => onPatch({ openrouter_providers: [] })}>{t("settings.preset.routes.clear")}</button>}
-        </div>
-      )}
-    </>
-  );
-}
-
-/** One model: a compact line to scan, an expanded panel to edit. */
-/** A preset's health in its row: the broken or slow mark, else how fast the last check answered. */
-function HealthPill({ health }: { health?: ModelHealth }) {
-  const alert = healthAlert(health);
-  if (alert) return <span className={`pill ${alert.tone === "bad" ? "failed" : "warn"}`} data-health={health?.state} title={alert.why}>{alert.word}</span>;
-  const check = health?.check;
-  if (check?.state === "failed") return <span className="pill warn" data-health="failed" title={check.detail}>{t("modelhealth.failed")}</span>;
-  if (check?.state === "ok" && check.ms != null) return <span className="pill" data-health="ok">{t("modelhealth.ok", { s: (check.ms / 1000).toFixed(1) })}</span>;
-  return null;
-}
-
-function PresetRow({ id, p, health, routed, accounts, onDemandByModel, windowSources, price, onPriceSaved, toast, isDefault, inChain, providers, onDefault, onPatch, onDelete, onLookup, onRefreshWindow }: {
-  id: string;
-  p: Preset;
-  health?: ModelHealth;
-  /** The subscription behind this model's client, when it has more than one account to choose from. */
-  accounts?: SubscriptionUpstream;
-  price?: PriceView;
-  onPriceSaved: (next: Settings) => void;
-  toast: (text: string) => void;
-  /** Its endpoint is OpenRouter, which alone routes between providers. */
-  routed: boolean;
-  onDemandByModel?: boolean;
-  windowSources?: ContextWindowSources;
-  isDefault: boolean;
-  inChain: boolean;
-  providers: string[];
-  onDefault: () => void;
-  onPatch: (patch: Partial<Preset>) => void;
-  onDelete: () => void;
-  onLookup: (provider: string) => Promise<string[] | null>;
-  onRefreshWindow: () => void;
-}) {
-  const [label, setLabel] = useState(p.label);
-  const [model, setModel] = useState(p.model);
-  // Opened when a link to its Images switch brought the operator here (a vision refusal names the
-  // session model's switch): the switch is inside the fold.
-  const [open, setOpen] = useState(() => settingTarget() === `presets.${id}.images`);
-  useEffect(() => setLabel(p.label), [p.label]);
-  useEffect(() => setModel(p.model), [p.model]);
-  const title = p.label || `${p.provider}/${p.model}`;
-  return (
-    <div className={`mrow ${isDefault ? "default" : ""} ${open ? "open" : ""}`}>
-      <div className="mline noradio">
-        <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          {/* The provider's mark leads the title on a phone, where these cards are the list of models;
-              the desktop row keeps its own layout, so the mark is phone-only there. */}
-          <span className="mtitle"><ProviderMark id={p.provider} name={providerTitle(p.provider)} className="phone-only" />{title}</span>
-          <span className="mmeta">{p.provider} · {p.model}</span>
-        </button>
-        <div className="mtags">
-          <HealthPill health={health} />
-          {isDefault && <span className="chip accent">{t("settings.preset.default")}</span>}
-          {!isDefault && inChain && <span className="pill">{t("settings.preset.fallback")}</span>}
-          <span className="pill">{p.thinking ? t("settings.preset.think", { effort: t(`add.effort.${p.reasoning_effort}`) }) : t("settings.preset.nothink")}</span>
-          {p.images && <span className="pill">{t("settings.preset.images")}</span>}
-          {(p.openrouter_providers_gone?.length ?? 0) > 0 && <span className="pill failed">{t("settings.preset.routes.gone.pill")}</span>}
-          {!onDemandGroups(p, onDemandByModel) && <span className="pill" title={t("settings.preset.ondemand.title")}>{t("settings.preset.ondemand.offpill")}</span>}
-          <span className="pill">{Math.round(p.context_window / 1000)}k</span>
-        </div>
-        <div className="mactions">
-          <button className={`iconbtn small ${open ? "on" : ""}`} onClick={() => setOpen((o) => !o)} title={t(open ? "common.close" : "common.edit")} aria-label={t(open ? "common.close" : "common.edit")}><span className={`chev ${open ? "down" : ""}`}>›</span></button>
-        </div>
-      </div>
-      {(health?.state === "broken" || health?.check?.state === "failed") && (
-        <div className="sub mhealth" data-health-detail={id}>{health.state === "broken" ? health.detail : health.check?.detail}</div>
-      )}
-      {open && (
-        <div className="mpanel">
-          <div className="mfields">
-            <label className="mfield">
-              <span>{t("settings.preset.label")}</span>
-              <input className="field" value={label} placeholder={`${p.provider}/${p.model}`} onChange={(e) => setLabel(e.target.value)} onBlur={() => label.trim() !== p.label && onPatch({ label: label.trim() })} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.client")}</span>
-              <select className="field" value={p.provider} onChange={(e) => onPatch({ provider: e.target.value })}>
-                {providers.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-                {!providers.includes(p.provider) && <option>{p.provider}</option>}
-              </select>
-            </label>
-            <label className="mfield wide">
-              <span>{t("settings.preset.model")}</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input className="field" style={{ flex: 1, minWidth: 0 }} value={model} placeholder={t("settings.preset.model.placeholder")} onChange={(e) => setModel(e.target.value)} onBlur={() => model.trim() && model.trim() !== p.model && onPatch({ model: model.trim() })} />
-                <ModelsMenu load={() => onLookup(p.provider)} current={p.model} onPick={(m) => onPatch({ model: m })} />
-              </div>
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.window")}</span>
-              {/* Keyed by the number so a window the host found replaces what the uncontrolled field shows. */}
-              <input key={p.context_window} className="field" type="number" min={8000} step={1000} defaultValue={p.context_window} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.context_window) onPatch({ context_window: v }); }} />
-              <WindowSource source={p.context_window_source ?? "default"} sources={windowSources} onAuto={() => onPatch({ context_window_source: "auto" } as unknown as Partial<Preset>)} onRefresh={onRefreshWindow} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.preset.output")}</span>
-              <input className="field" type="number" min={1024} step={1000} defaultValue={p.max_output_tokens} onBlur={(e) => { const v = numInput(e.target.value); if (v !== null && v !== p.max_output_tokens) onPatch({ max_output_tokens: v }); }} />
-            </label>
-          </div>
-          {/* The model's switches as rows like every other setting: "thinking on" and "images on"
-              were buttons whose label was their own state, and nobody could tell the state from
-              the action. */}
-          <div className="mpanel-rows">
-            <Row title={t("settings.preset.thinking")}>
-              <Switch checked={p.thinking} onChange={(thinking) => onPatch({ thinking })} label={t("settings.preset.thinking")} />
-            </Row>
-            <Row title={t("settings.preset.effort")} desc={p.thinking ? undefined : t("settings.preset.effort.off")}>
-              <div className="segmented inline" role="group" aria-label={t("settings.preset.effort")}>
-                {REASONING_EFFORTS.map((e) => (
-                  <button key={e} className={p.reasoning_effort === e ? "on" : ""} disabled={!p.thinking} onClick={() => onPatch({ reasoning_effort: e })}>{t(`add.effort.${e}`)}</button>
-                ))}
-              </div>
-            </Row>
-            <Row title={t("settings.preset.imagestoggle")} desc={t("settings.preset.images.title")} data-setting={`presets.${id}.images`}>
-              <Switch checked={p.images} onChange={(images) => onPatch({ images })} label={t("settings.preset.imagestoggle")} />
-            </Row>
-            <Row title={t("settings.preset.ondemand")} desc={t("settings.preset.ondemand.title")} stack>
-              <span className="segmented inline" role="group" aria-label={t("settings.preset.ondemand")}>
-                {ON_DEMAND_CHOICES.map((choice) => (
-                  <button
-                    key={String(choice)}
-                    className={(p.on_demand_tool_groups ?? null) === choice ? "on" : ""}
-                    title={choice === null ? t("settings.preset.ondemand.bymodel.title", { state: t(onDemandByModel ?? true ? "common.on" : "common.off") }) : undefined}
-                    onClick={() => onPatch({ on_demand_tool_groups: choice })}
-                  >
-                    {/* The model's own value goes in the title: written into the label it made the
-                        row read "as the model: on · on · off", a second "on" that looked like a typo. */}
-                    {choice === null ? t("settings.preset.ondemand.bymodel") : t(choice ? "common.on" : "common.off")}
-                  </button>
-                ))}
-              </span>
-            </Row>
-            {routed && <PresetRoutes p={p} onPatch={onPatch} />}
-            {accounts && accounts.accounts.length > 1 && (
-              <Row title={t("settings.preset.account")} desc={t("settings.preset.account.sub")} stack data-setting={`presets.${id}.account`}>
-                <Dropdown
-                  id={`preset-account-${id}`}
-                  label={t("settings.preset.account")}
-                  value={accounts.accounts.some((a) => a.id === p.account) ? (p.account as string) : ""}
-                  onChange={(account) => onPatch({ account })}
-                  options={[
-                    { id: "", label: t("settings.preset.account.default", { name: accountName(accounts.accounts.find((a) => a.id === accounts.default_account) ?? { id: accounts.default_account, label: "" }) }) },
-                    ...accounts.accounts.map((a) => ({ id: a.id, label: accountName(a) })),
-                  ]}
-                />
-              </Row>
-            )}
-          </div>
-          <ModelPrice id={id} view={price} onSaved={onPriceSaved} toast={toast} />
-          <div className="btnrow mrow-foot">
-            <span className="sub mono">{id}</span>
-            {isDefault ? <span className="sub">{t("settings.preset.opens")}</span> : <button className="btn small primary" onClick={onDefault}>{t("settings.preset.makedefault")}</button>}
-            <span className="grow" />
-            <button className="btn small danger" disabled={isDefault} title={t(isDefault ? "settings.preset.cannotdelete" : "settings.preset.remove.title")} onClick={async () => { if (await confirmAsync(t("settings.preset.delete.title", { title }), { body: t("settings.preset.delete.body"), action: t("settings.preset.delete.action") })) onDelete(); }}>
-              <Icon name="trash" size={14} /> {t("common.delete")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Whether a client can answer: the key state the host reports, the same one Add a model shows.
- * Whether an adapter could be built said nothing about a key behind the key proxy, and read as
- * "ready" for an endpoint whose every call the proxy refused for want of one.
- */
-export function providerReady(s: Pick<Settings, "provider_keys">, id: string): boolean {
-  return s.provider_keys?.[id]?.ready ?? false;
-}
-
-/** One client: id, kind and readiness on a line; the address and the key behind it. */
-function ProviderBlock({ id, p, kinds, available, viaProxy, onPatch, onRemove }: {
-  id: string;
-  p: ProviderConf;
-  kinds: string[];
-  available: boolean;
-  /** Reached through the key proxy: a key typed here is handed to the proxy, which alone signs its calls. */
-  viaProxy: boolean;
-  onPatch: Patch;
-  onRemove: (id: string) => void;
-}) {
-  // Opened when a link to its key brought the operator here: the key field is inside the fold.
-  const [open, setOpen] = useState(() => settingTarget() === `providers.${id}.api_key`);
-  const [name, setName] = useState(p.name ?? "");
-  const [baseUrl, setBaseUrl] = useState(p.base_url);
-  const [keyDraft, setKeyDraft] = useState("");
-  const plan = opencodePlanOf(p.kind, p.billing);
-  const keyLink = KEY_LINKS[id] ?? (plan ? OPENCODE_KEY_URL : undefined);
-  useEffect(() => setBaseUrl(p.base_url), [p.base_url]);
-  useEffect(() => setName(p.name ?? ""), [p.name]);
-  useEffect(() => setKeyDraft(""), [p.api_key_set]);
-  return (
-    <div className={`mrow ${open ? "open" : ""}`} data-setting={`providers.${id}.api_key`}>
-      <div className="mline noradio">
-        <button className="mmain" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className="mtitle"><ProviderMark id={id} kind={p.kind} name={providerTitle(id, p)} className="phone-only" />{p.name || id}</span>
-          <span className="mmeta">{p.kind} · {p.base_url || t("settings.provider.noaddress")}</span>
-          {plan && <span className="mmeta opencode-hint">{t(plan.hint)}</span>}
-        </button>
-        <div className="mtags">
-          <span className={`pill ${available ? "idle" : "waiting"}`}>{t(available ? "settings.provider.ready" : "settings.provider.needs")}</span>
-          {p.api_key_set && <span className="pill">{t("settings.provider.keystored")}</span>}
-        </div>
-        <div className="mactions">
-          <button className={`iconbtn small ${open ? "on" : ""}`} onClick={() => setOpen((o) => !o)} title={t(open ? "common.close" : "common.edit")} aria-label={t(open ? "common.close" : "common.edit")}><span className={`chev ${open ? "down" : ""}`}>›</span></button>
-        </div>
-      </div>
-      {open && (
-        <div className="mpanel">
-          <div className="mfields">
-            <label className="mfield">
-              <span>{t("settings.provider.name")}</span>
-              <input className="field" value={name} placeholder={id} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() !== (p.name ?? "") && onPatch(id, { name: name.trim() })} />
-            </label>
-            <label className="mfield">
-              <span>{t("settings.provider.kind")}</span>
-              <select className="field" value={p.kind} onChange={(e) => onPatch(id, { kind: e.target.value })}>
-                {kinds.map((k) => (
-                  <option key={k}>{k}</option>
-                ))}
-              </select>
-            </label>
-            <label className="mfield wide">
-              <span>{t("settings.provider.baseurl")}</span>
-              <input
-                className="field"
-                value={baseUrl}
-                placeholder="http://<host>:<port>/v1"
-                onChange={(e) => setBaseUrl(e.target.value)}
-                onBlur={() => baseUrl.trim() !== p.base_url && baseUrl.trim() && onPatch(id, { base_url: baseUrl.trim() })}
-              />
-            </label>
-            {TEMPERATURE_KINDS.has(p.kind) && (
-              <label className="mfield">
-                <span>{t("settings.provider.temperature")}</span>
-                <input
-                  className="field num"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  defaultValue={p.temperature ?? ""}
-                  placeholder={t("settings.provider.temperature.default")}
-                  title={t("settings.provider.temperature.hint")}
-                  onBlur={(e) => {
-                    const raw = e.target.value.trim();
-                    if (!raw) {
-                      if (p.temperature != null) onPatch(id, { temperature: null });
-                      return;
-                    }
-                    const v = Number(raw);
-                    if (!Number.isFinite(v) || v < 0 || v > 2) return;
-                    if (v !== p.temperature) onPatch(id, { temperature: v });
-                  }}
-                />
-              </label>
-            )}
-            <label className="mfield wide">
-              <span>{t(p.api_key_set ? "settings.provider.apikey.stored" : viaProxy ? "settings.provider.apikey.proxy" : "settings.provider.apikey")}</span>
-              <div className="row" style={{ gap: 8 }}>
-                <input
-                  className="field"
-                  style={{ flex: 1, minWidth: 0 }}
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={t(p.api_key_set ? "settings.provider.apikey.placeholder" : "settings.provider.apikey.none")}
-                  value={keyDraft}
-                  onChange={(e) => setKeyDraft(e.target.value)}
-                  onBlur={() => {
-                    const v = keyDraft.trim();
-                    if (v) {
-                      onPatch(id, { api_key: v });
-                      setKeyDraft("");
-                    }
-                  }}
-                />
-                {p.api_key_set && (
-                  <button className="btn small danger" title={t("settings.provider.forget.title")} onClick={() => onPatch(id, { api_key: "" })}>
-                    {t("settings.provider.forget")}
-                  </button>
-                )}
-              </div>
-              {keyLink && <span className="sub">{t("free.key.get")} <a href={keyLink} target="_blank" rel="noopener noreferrer">{p.name || id} ↗</a></span>}
-            </label>
-          </div>
-          <ProviderLimit providerId={id} />
-          <div className="btnrow mrow-foot">
-            <span className="grow" />
-            <button className="btn small danger" onClick={async () => { if (await confirmAsync(t("settings.provider.remove.title", { id }), { body: t("settings.provider.remove.body"), action: t("settings.provider.remove.action") })) onRemove(id); }}>
-              <Icon name="trash" size={14} /> {t("common.remove")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The OpenCode plans no endpoint is yet, each one click away with its route already wired. */
-function AddOpencodeRow({ providers, keyproxyBase, onAdd }: { providers: Record<string, ProviderConf>; keyproxyBase: string; onAdd: (id: string, patch: Record<string, unknown>) => void }) {
-  const absent = missingPlans(Object.values(providers)).filter((plan) => !providers[plan.id]);
-  if (!absent.length) return null;
-  return (
-    <div className="opencode-add">
-      <span className="sub">{t("settings.provider.opencode")}</span>
-      {absent.map((plan) => (
-        // The hint opens with the plan's name, so it is the whole label: the name twice read as a stutter.
-        <button key={plan.id} className="btn small" onClick={() => onAdd(plan.id, opencodeProvider(plan, keyproxyBase))}>
-          ＋ {t(plan.hint)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function AddProviderRow({ kinds, onAdd, toast }: { kinds: string[]; onAdd: (id: string, baseUrl: string, kind: string) => void; toast: (t: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [id, setId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [kind, setKind] = useState("vllm");
-  function add() {
-    const pid = id.trim();
-    const base = baseUrl.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(pid)) {
-      toast(t("settings.provider.id.bad"));
-      return;
-    }
-    if (!base.startsWith("http")) {
-      toast(t("settings.provider.url.bad"));
-      return;
-    }
-    onAdd(pid, base, kind);
-    setId("");
-    setBaseUrl("");
-    setOpen(false);
-  }
-  if (!open)
-    return (
-      <button className="btn small" onClick={() => setOpen(true)}>
-        ＋ {t("settings.provider.add")}
-      </button>
-    );
-  return (
-    <div className="mpanel add">
-      <div className="mfields">
-        <label className="mfield">
-          <span>{t("settings.provider.id")}</span>
-          <input className="field" value={id} placeholder="my-provider" onChange={(e) => setId(e.target.value)} />
-        </label>
-        <label className="mfield">
-          <span>{t("settings.provider.kind")}</span>
-          <select className="field" value={kind} onChange={(e) => setKind(e.target.value)}>
-            {kinds.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-        </label>
-        <label className="mfield wide">
-          <span>{t("settings.provider.baseurl.short")}</span>
-          <input className="field" value={baseUrl} placeholder="http://<host>:<port>/v1" onChange={(e) => setBaseUrl(e.target.value)} />
-        </label>
-      </div>
-      <div className="btnrow">
-        <button className="btn small primary" onClick={add}>{t("common.add")}</button>
-        <button className="btn small" onClick={() => setOpen(false)}>{t("common.cancel")}</button>
-      </div>
-    </div>
-  );
 }
 
 type SpendBalance = { spent_usd: number; unmetered: number; cap_usd: number; reserved_usd: number; uncertain_usd: number; reserved_count: number; uncertain_count: number };
@@ -627,26 +138,33 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
   const held = spend?.total.reserved_usd ?? 0;
   const engaged = spent + held;
   const cap = s.limits.usd_total;
+  async function reset() {
+    if (!(await confirmDialog({ title: t("settings.limits.reset.title"), body: t("settings.limits.reset.body"), action: t("settings.limits.reset"), danger: true }))) return;
+    await api.post("/api/limits/reset-total");
+    load();
+  }
   return (
     <>
-      {spendState === "failed" && <div className="result-warning" role="status">{t("settings.limits.balance.failed")} <button type="button" className="linkbtn" onClick={load}>{t("common.retry")}</button></div>}
+      {spendState === "failed" && <SetBlock><div className="result-warning" role="status">{t("settings.limits.balance.failed")} <Button size="sm" variant="quiet" onClick={load}>{t("common.retry")}</Button></div></SetBlock>}
       {/* Only with a cap: "of $0, no cap" has no bar to draw and no share to read. */}
       {cap > 0 && spend && (
-        <div className="spend-meter" data-level={engaged >= cap ? "bad" : engaged >= cap * 0.8 ? "warn" : "ok"}>
-          <div className="spend-meter-line">
-            <b>{held > 0 ? t("settings.limits.meter.held", { spent: usd(spent), held: usd(held), cap: usd(cap) })
-              : t("settings.limits.meter", { spent: usd(spent), cap: usd(cap) })}</b>
-            <span className="sub">{t("settings.limits.since", { when: since })}</span>
+        <SetBlock>
+          <div className="spend-meter" data-level={engaged >= cap ? "bad" : engaged >= cap * 0.8 ? "warn" : "ok"}>
+            <div className="spend-meter-line">
+              <b>{held > 0 ? t("settings.limits.meter.held", { spent: usd(spent), held: usd(held), cap: usd(cap) })
+                : t("settings.limits.meter", { spent: usd(spent), cap: usd(cap) })}</b>
+              <span className="sub">{t("settings.limits.since", { when: since })}</span>
+            </div>
+            <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (engaged / cap) * 100)}%` }} /></span>
           </div>
-          <span className="spend-meter-track" aria-hidden><span style={{ width: `${Math.min(100, (engaged / cap) * 100)}%` }} /></span>
-        </div>
+        </SetBlock>
       )}
-      {spend && (held > 0 || spend.total.unmetered > 0) && <details className="sheet-section"><summary>{t("settings.limits.balance.details")}</summary>
+      {spend && (held > 0 || spend.total.unmetered > 0) && <SetBlock><details className="sheet-section"><summary>{t("settings.limits.balance.details")}</summary>
         {held > 0 && <p className="sub">{t("settings.limits.balance.held", { amount: usd(held), n: spend.total.reserved_count })}</p>}
         {spend.total.uncertain_usd > 0 && <p className="sub">{t("settings.limits.balance.uncertain", { amount: usd(spend.total.uncertain_usd), n: spend.total.uncertain_count })}</p>}
         {spend.total.unmetered > 0 && <p className="sub">{t("settings.limits.balance.unpriced", { n: spend.total.unmetered })}</p>}
         {held > 0 && <p className="sub">{t("settings.limits.balance.reset")}</p>}
-      </details>}
+      </details></SetBlock>}
       <Row data-setting="limits.usd_total" title={t("settings.limits.total")} htmlFor="limits-total" desc={spend ? t("settings.limits.total.sub", { sum: usd(spent) }) : t(spendState === "loading" ? "settings.limits.balance.loading" : "settings.limits.balance.unknown")} stack>
         <NumInput id="limits-total" label={t("settings.limits.total")} value={cap} min={0} step={1} unit="USD" onSave={(v) => save({ limits: { usd_total: v } })} />
       </Row>
@@ -661,11 +179,10 @@ function TotalCaps({ s, save }: { s: Settings; save: (patch: any) => Promise<voi
       {/* Said, not left blank: an empty space where the providers go read as a list that failed to load. */}
       {providers.length === 0 && <Row title={t("settings.limits.perprovider")} desc={t("settings.limits.noproviders")} />}
       <Row title={t("settings.limits.counting")} data-setting="limits.total_since" desc={t("settings.limits.since", { when: since })}>
-        <button className="btn small" onClick={async () => { await api.post("/api/limits/reset-total"); load(); }}>{t("settings.limits.reset")}</button>
+        <Button size="sm" onClick={() => void reset()}>{t("settings.limits.reset")}</Button>
       </Row>
     </>
-  );
-}
+  );}
 
 function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: any) => Promise<void>; toast: (t: string) => void; reload: () => void }) {
   const search = s.tools.web.search;
@@ -691,112 +208,104 @@ function SearchBlock({ s, save, toast, reload }: { s: Settings; save: (patch: an
   };
   const fallbackIds = search.fallback ?? [];
   return (
-    <div className="search-card settings-groups">
-      {/* One card a group: the choice of backend, each engine in use, the keys, the check. As one card
-          the engines' fields ran on from the rows above them with only a heading between. */}
-      <div className="card">
-      <div className="section-title">{t("settings.search.title")}</div>
-      <div className="sub">{t("settings.search.sub")}</div>
-      <Row title={t("settings.search.backend")} stack data-setting="tools.web.search.backend">
-        <Dropdown
-          id="search-backend"
-          label={t("settings.search.backend")}
-          value={search.backend}
-          onChange={(backend) => saveSearch({ backend })}
-          options={[
-            ...backends.map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !usable(b) })),
-            ...(backends.some((b) => b.id === search.backend) ? [] : [{ id: search.backend, label: search.backend }]),
-          ]}
-        />
-      </Row>
-      <Row title={t("settings.search.fallbacks")} desc={t("settings.search.fallbacks.sub")} stack data-setting="tools.web.search.fallback">
-        <SelectionList
-          id="search-fallbacks"
-          label={t("settings.search.fallbacks")}
-          emptyChosen={t("settings.search.fallbacks.none")}
-          chosenLabel={t("settings.search.fallbacks.chosen")}
-          ordered
-          value={fallbackIds.filter((id) => id !== search.backend)}
-          onChange={(fallback) => saveSearch({ fallback })}
-          items={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, detail: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, facts: [t(b.needs_key ? "settings.search.keyed" : "settings.search.keyless")], disabled: !usable(b) }))}
-        />
-      </Row>
-      <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
-      <NumRow setting="tools.web.search.timeout_seconds" title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
-      </div>
+    <>
+      {/* One group a concern: the choice of backend, each engine in use, the keys, the check. As one
+          card the engines' fields ran on from the rows above them with only a heading between. */}
+      <SetGroup title={t("settings.search.title")} help={t("settings.search.sub")}>
+        <Row title={t("settings.search.backend")} htmlFor="search-backend" data-setting="tools.web.search.backend">
+          <Select
+            id="search-backend"
+            label={t("settings.search.backend")}
+            value={search.backend}
+            onChange={(backend) => saveSearch({ backend })}
+            options={[
+              ...backends.map((b) => ({ id: b.id, label: b.label, hint: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, disabled: !usable(b) })),
+              ...(backends.some((b) => b.id === search.backend) ? [] : [{ id: search.backend, label: search.backend }]),
+            ]}
+          />
+        </Row>
+        <SetBlock data-setting="tools.web.search.fallback">
+          <span className="field-label">{t("settings.search.fallbacks")}</span>
+          <span className="set-hint">{t("settings.search.fallbacks.sub")}</span>
+          <SelectionList
+            id="search-fallbacks"
+            label={t("settings.search.fallbacks")}
+            emptyChosen={t("settings.search.fallbacks.none")}
+            chosenLabel={t("settings.search.fallbacks.chosen")}
+            ordered
+            value={fallbackIds.filter((id) => id !== search.backend)}
+            onChange={(fallback) => saveSearch({ fallback })}
+            items={backends.filter((b) => b.id !== search.backend).map((b) => ({ id: b.id, label: b.label, detail: optionLabel(b).slice(b.label.length).replace(/^ — /, "") || undefined, facts: [t(b.needs_key ? "settings.search.keyed" : "settings.search.keyless")], disabled: !usable(b) }))}
+          />
+        </SetBlock>
+        <NumRow setting="tools.web.search.results" title={t("settings.search.results")} value={search.results} min={1} onSave={(v) => saveSearch({ results: v })} />
+        <NumRow setting="tools.web.search.timeout_seconds" title={t("settings.search.timeout")} unit={t("settings.unit.seconds")} value={search.timeout_seconds} min={1} onSave={(v) => saveSearch({ timeout_seconds: v })} />
+      </SetGroup>
       {search.backend === "searxng" || fallbackIds.includes("searxng") ? (
-        <div className="card">
-          <div className="section-title">SearXNG</div>
+        <SetGroup title="SearXNG">
           <TextBlock setting="tools.web.search.searxng.url" label={t("settings.search.url")} value={search.searxng.url} placeholder="http://127.0.0.1:8080" onSave={(v) => saveSearch({ searxng: { url: v } })} />
           <TextBlock setting="tools.web.search.searxng.engines" label={t("settings.search.engines")} value={search.searxng.engines} placeholder="google,duckduckgo,bing" onSave={(v) => saveSearch({ searxng: { engines: v } })} />
           <TextBlock setting="tools.web.search.searxng.categories" label={t("settings.search.categories")} value={search.searxng.categories} placeholder="general" onSave={(v) => saveSearch({ searxng: { categories: v } })} />
           <Row title={t("settings.search.safe")} data-setting="tools.web.search.searxng.safesearch">
             <Segmented label={t("settings.search.safe")} value={String(Math.min(2, Math.max(0, search.searxng.safesearch)))} onChange={(v) => saveSearch({ searxng: { safesearch: Number(v) } })} options={["0", "1", "2"].map((id) => ({ id, label: t(`settings.search.safe.${id}`) }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "duckduckgo" || fallbackIds.includes("duckduckgo") ? (
-        <div className="card">
-          <div className="section-title">DuckDuckGo</div>
+        <SetGroup title="DuckDuckGo">
           <TextBlock setting="tools.web.search.duckduckgo.url" label={t("settings.search.html")} value={search.duckduckgo.url} onSave={(v) => saveSearch({ duckduckgo: { url: v } })} />
           <TextBlock setting="tools.web.search.duckduckgo.region" label={t("settings.search.region")} value={search.duckduckgo.region} placeholder="wt-wt, ru-ru, us-en" onSave={(v) => saveSearch({ duckduckgo: { region: v } })} />
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "serper" || fallbackIds.includes("serper") ? (
-        <div className="card">
-          <div className="section-title">Serper (Google)</div>
-          <div className="grid2 settings-block">
-            <TextBlock setting="tools.web.search.serper.gl" label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
-            <TextBlock setting="tools.web.search.serper.hl" label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
-          </div>
-        </div>
+        <SetGroup title="Serper (Google)">
+          <TextBlock setting="tools.web.search.serper.gl" label={t("settings.search.country")} value={search.serper.gl} placeholder="ru, us" onSave={(v) => saveSearch({ serper: { gl: v } })} />
+          <TextBlock setting="tools.web.search.serper.hl" label={t("settings.search.language")} value={search.serper.hl} placeholder="ru, en" onSave={(v) => saveSearch({ serper: { hl: v } })} />
+        </SetGroup>
       ) : null}
       {search.backend === "keenable" || fallbackIds.includes("keenable") ? (
-        <div className="card">
-          <div className="section-title">Keenable</div>
+        <SetGroup title="Keenable">
           <NumRow setting="tools.web.search.keenable.snippet_max_length" title={t("settings.search.snippet")} unit={t("settings.unit.chars")} value={search.keenable.snippet_max_length} min={180} step={60} onSave={(v) => saveSearch({ keenable: { snippet_max_length: v } })} />
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "tavily" || fallbackIds.includes("tavily") ? (
-        <div className="card">
-          <div className="section-title">Tavily</div>
+        <SetGroup title="Tavily">
           <Row title={t("settings.search.depth")} data-setting="tools.web.search.tavily.depth">
-            <Dropdown label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
+            <Select label={t("settings.search.depth")} value={search.tavily.depth} onChange={(depth) => saveSearch({ tavily: { depth } })} options={["basic", "advanced", "fast", "ultra-fast"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
       {search.backend === "exa" || fallbackIds.includes("exa") ? (
-        <div className="card">
-          <div className="section-title">Exa</div>
+        <SetGroup title="Exa">
           <Row title={t("settings.search.type")} data-setting="tools.web.search.exa.type">
-            <Dropdown label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
+            <Select label={t("settings.search.type")} value={search.exa.type} onChange={(type) => saveSearch({ exa: { type } })} options={["auto", "instant", "fast", "deep"].map((d) => ({ id: d, label: d }))} />
           </Row>
-        </div>
+        </SetGroup>
       ) : null}
-      <div className="card"><SearchKeys toast={toast} onChanged={reload} /></div>
-      <div className="card">
-      <div className="btnrow search-check">
-        <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
-        <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
-      </div>
-      {checkError && <div className="sub" style={{ color: "var(--bad)" }}>{checkError}</div>}
-      {check && (
-        <div className="sub" style={{ marginTop: 8 }}>
-          {check.attempts.map((a) => (
-            <div key={a.backend}>
-              {a.error ? t("settings.search.attempt.error", { name: a.backend, error: a.error, ms: a.ms }) : t("settings.search.attempt.ok", { name: a.backend, n: a.hits, ms: a.ms })}
-            </div>
-          ))}
-          {check.hits.slice(0, 3).map((h) => (
-            <div key={h.url} style={{ marginTop: 4 }}>
-              <div>{h.title}{h.source ? ` · ${h.source}` : ""}</div>
-              <div style={{ wordBreak: "break-all" }}>{h.url}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      </div>
-    </div>
+      <SearchKeys toast={toast} onChanged={reload} />
+      <SetGroup>
+        <SetFoot className="search-check">
+          <button className="btn small primary" disabled={checking} onClick={() => runCheck("")}>{t(checking ? "settings.search.checking" : "settings.search.check")}</button>
+          <button className="btn small" disabled={checking || !info(search.backend)} onClick={() => runCheck(search.backend)}>{t("settings.search.checkone", { name: info(search.backend)?.label ?? search.backend })}</button>
+        </SetFoot>
+        {checkError && <SetBlock><span className="set-hint search-bad">{checkError}</span></SetBlock>}
+        {check && (
+          <SetBlock className="search-result">
+            {check.attempts.map((a) => (
+              <span key={a.backend} className="set-hint">
+                {a.error ? t("settings.search.attempt.error", { name: a.backend, error: a.error, ms: a.ms }) : t("settings.search.attempt.ok", { name: a.backend, n: a.hits, ms: a.ms })}
+              </span>
+            ))}
+            {check.hits.slice(0, 3).map((h) => (
+              <span key={h.url} className="search-hit">
+                <span>{h.title}{h.source ? ` · ${h.source}` : ""}</span>
+                <span className="set-hint search-hit-url">{h.url}</span>
+              </span>
+            ))}
+          </SetBlock>
+        )}
+      </SetGroup>
+    </>
   );
 }
 
@@ -809,130 +318,19 @@ function ToolsTab({ s, save, toast, onSettings }: { s: Settings; save: (patch: a
     <>
       <ToolGroupsSettings toast={toast} revision={s.revision} onSettings={onSettings} />
 
-      <div className="card">
-        <div className="section-title">{t("settings.web.title")}</div>
+      <SetGroup title={t("settings.web.title")}>
         <NumRow setting="tools.web.fetch_timeout_seconds" title={t("settings.web.timeout")} unit={t("settings.unit.seconds")} value={web.fetch_timeout_seconds} min={1} onSave={(v) => save({ tools: { web: { fetch_timeout_seconds: v } } })} />
         <NumRow setting="tools.web.fetch_max_chars" title={t("settings.web.maxchars")} unit={t("settings.unit.chars")} value={web.fetch_max_chars} min={1000} step={1000} onSave={(v) => save({ tools: { web: { fetch_max_chars: v } } })} />
         <TextBlock setting="tools.web.proxy" label={t("settings.web.proxy")} value={web.proxy} placeholder="socks5://127.0.0.1:1080" hint={t("settings.web.proxy.hint")} onSave={(v) => save({ tools: { web: { proxy: v } } })} />
         <TextBlock setting="tools.web.user_agent" label={t("settings.web.ua")} value={web.user_agent} onSave={(v) => save({ tools: { web: { user_agent: v } } })} />
-      </div>
+      </SetGroup>
 
-      <div className="card">
-        <div className="section-title">{t("settings.exec.title")}</div>
+      <SetGroup title={t("settings.exec.title")}>
         <NumRow setting="limits.tool_timeout_seconds" title={t("settings.exec.timeout")} desc={t("settings.exec.timeout.hint")} unit={t("settings.unit.seconds")} value={s.limits.tool_timeout_seconds} min={10} step={30} onSave={(v) => save({ limits: { tool_timeout_seconds: v } })} />
         <NumRow setting="tools.exec.background_after_seconds" title={t("settings.exec.background")} desc={t("settings.exec.background.hint")} unit={t("settings.unit.seconds")} value={s.tools.exec.background_after_seconds} min={1} step={30} onSave={(v) => save({ tools: { exec: { background_after_seconds: v } } })} />
         <NumRow setting="tools.exec.max_output_chars" title={t("settings.exec.maxchars")} desc={t("settings.exec.maxchars.hint")} unit={t("settings.unit.chars")} value={s.tools.exec.max_output_chars} min={2000} step={5000} onSave={(v) => save({ tools: { exec: { max_output_chars: v } } })} />
-      </div>
+      </SetGroup>
     </>
-  );
-}
-
-type Check = { name: string; ok: boolean; message: string; severity: string; fix_hint: string; fixable: boolean; fixed: boolean };
-
-function HealthTab({ toast }: { toast: (t: string) => void }) {
-  const [data, setData] = useState<{ checks: Check[]; summary: Record<string, number> } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [integrations, setIntegrations] = useState<IntegrationRow[] | null>(null);
-  const loadIntegrations = async () => {
-    // The quick answer draws the card at once; the probed one follows with GitHub's verdict. Either
-    // failing leaves the card as it was: the doctor's list below is the screen's real job.
-    try {
-      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health")).rows ?? []);
-      setIntegrations((await api.get<{ rows: IntegrationRow[] }>("/api/integrations/health?probe=true")).rows ?? []);
-    } catch {
-      /* the card stays as it was */
-    }
-  };
-  const load = async (fix = false) => {
-    setBusy(true);
-    void loadIntegrations();
-    try {
-      setData(fix ? await api.post("/api/doctor/fix") : await api.get("/api/doctor"));
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  if (!data) return <div className="empty">{t(busy ? "settings.health.checking" : "common.loading")}</div>;
-  // The app's own glyphs, coloured by the state, as the dependency cards draw a failure; emoji drew
-  // the same states in each platform's own colours and shapes.
-  const mark = (c: Check): [IconName, string] => (c.fixed ? ["wrench", "ok"] : c.ok ? ["check", "ok"] : c.severity === "fail" ? ["close", "bad"] : ["alert", "warn"]);
-  // An answer without `checks` is not a screen that should go down with "Cannot read properties of
-  // undefined": the doctor is one endpoint away and an installation that has not got it yet reads
-  // as no checks rather than as a broken page.
-  const checks = data.checks ?? [];
-  const summary = data.summary ?? {};
-  const fixable = checks.some((c) => !c.ok && c.fixable);
-  return (
-    <>
-      <div className="card">
-        <div className="row health-summary">
-          <div className="grow">
-            <b>{t("settings.health.ok", { n: summary.ok ?? 0 })}</b> · {plural("settings.health.warn", summary.warn ?? 0)} · {plural("settings.health.fail", summary.fail ?? 0)}
-          </div>
-          <button className="btn small" disabled={busy} onClick={() => load(false)}>
-            {t("settings.health.recheck")}
-          </button>
-          {fixable && (
-            <button className="btn small primary" disabled={busy} onClick={() => load(true)}>
-              {t("settings.health.fix")}
-            </button>
-          )}
-        </div>
-      </div>
-      {integrations && integrations.length > 0 && <IntegrationsCard rows={integrations} />}
-      <div className="card">
-        {checks.map((c, i) => (
-          <div key={i} className="row health-row">
-            <span className={`health-mark ${mark(c)[1]}`}><Icon name={mark(c)[0]} size={16} /></span>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>
-                <b>{c.name}</b> <span className="sub">{c.message}</span>
-              </div>
-              {!c.ok && c.fix_hint && <div className="sub">→ {c.fix_hint}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-/** GitHub, each MCP server and each model provider: one line each, the remedy under a failing one,
- * and the host's technical text folded away. */
-function IntegrationsCard({ rows }: { rows: IntegrationRow[] }) {
-  const mark: Record<IntegrationRow["severity"], [IconName, string]> = { ok: ["check", "ok"], info: ["dot", "info"], warn: ["alert", "warn"], fail: ["close", "bad"] };
-  return (
-    <div className="card integrations">
-      <div className="section-title">{t("health.int.title")}</div>
-      {rows.map((row) => {
-        const words = describeIntegration(row);
-        const [icon, tone] = mark[row.severity] ?? mark.info;
-        return (
-          <div key={`${row.kind}:${row.name}`} className="row integration health-row" data-kind={row.kind} data-state={row.state} data-severity={row.severity}>
-            <span className={`health-mark ${tone}`}><Icon name={icon} size={16} /></span>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>
-                <b>{row.name}</b> <span className="sub">{words.kind} · {words.state}</span>
-              </div>
-              {words.fix && <div className="sub integration-fix">→ {words.fix}</div>}
-              {/* A healthy row's detail (a tool count, where its key comes from) is not worth a fold of its own. */}
-              {row.detail && row.severity !== "ok" && (
-                <details className="integration-detail">
-                  <summary className="sub">{t("health.int.details")}</summary>
-                  <code>{row.detail}</code>
-                </details>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -978,14 +376,11 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
     }
   }
 
-  const presets = Object.keys(s.presets ?? {});
   return (
     <>
-      <div className="card">
-        <div className="section-title">{t("settings.heartbeat.title")}</div>
-        <div className="sub">{t("settings.heartbeat.sub")}</div>
-        {/* The switch and Run now share the row, and the state is the row's description: apart,
-            an "on" chip, a Run now and a status line made three rows that read as three actions. */}
+      <SetGroup title={t("settings.heartbeat.title")} help={t("settings.heartbeat.sub")}>
+        {/* The state is the row's description: apart, an "on" chip, a Run now and a status line made
+            three rows that read as three actions. Run now is under the card, with the other buttons. */}
         <Row
           data-setting="heartbeat.enabled"
           title={t("settings.heartbeat.enabled")}
@@ -997,9 +392,6 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
             </>
           }
         >
-          <button className="btn small" onClick={runNow} disabled={!text.trim() || hb.running}>
-            {t("common.runnow")}
-          </button>
           <Switch checked={hb.enabled} onChange={(enabled) => put({ enabled })} label={t("settings.heartbeat.enabled")} />
         </Row>
         <NumRow id="heartbeat-interval" setting="heartbeat.interval_minutes" title={t("settings.heartbeat.interval")} unit={t("settings.unit.minutes")} value={hb.interval_minutes} min={1} onSave={(v) => put({ interval_minutes: v })} />
@@ -1009,76 +401,50 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
         <NumRow id="heartbeat-max" setting="heartbeat.max_runs_per_day" title={t("settings.heartbeat.max")} value={hb.max_runs_per_day} min={0} onSave={(v) => put({ max_runs_per_day: v })} />
         <Row title={t("settings.heartbeat.preset")} stack data-setting="heartbeat.preset">
           <WithEffort id="heartbeat-effort" value={hb.effort} onChange={(effort) => put({ effort })} fallback="model">
-            <ModelPicker id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
+            <ModelChoice id="heartbeat-preset" label={t("settings.heartbeat.preset")} catalogue={s} value={hb.preset} onChange={(preset) => put({ preset })} defaultOption={{ label: t("settings.heartbeat.default") }} />
           </WithEffort>
         </Row>
-      </div>
-      <div className="card" data-setting="heartbeat.text">
-        <div className="section-title">
-          HEARTBEAT.md
-        </div>
-        <textarea
-          className="field"
-          rows={12}
-          value={text}
-          placeholder={hb.template}
-          onChange={(e) => {
-            setText(e.target.value);
-            setDirty(true);
-            dirtyRef.current = true;
-          }}
-        />
-        <div className="btnrow">
-          <button className="btn primary" disabled={!dirty} onClick={() => put({ text })}>
+        <SetFoot>
+          <Button onClick={runNow} disabled={!text.trim() || hb.running}>{t("common.runnow")}</Button>
+        </SetFoot>
+      </SetGroup>
+      <SetGroup title="HEARTBEAT.md" data-setting="heartbeat.text">
+        <SetBlock>
+          <textarea
+            className="field"
+            rows={12}
+            aria-label="HEARTBEAT.md"
+            value={text}
+            placeholder={hb.template}
+            onChange={(e) => {
+              setText(e.target.value);
+              setDirty(true);
+              dirtyRef.current = true;
+            }}
+          />
+        </SetBlock>
+        <SetFoot>
+          <Button variant="primary" disabled={!dirty} onClick={() => put({ text })}>
             {t("common.save")}
-          </button>
-          <button className="btn small" onClick={() => { setText(hb.template ?? ""); setDirty(true); }}>
+          </Button>
+          <Button size="sm" onClick={() => { setText(hb.template ?? ""); setDirty(true); }}>
             {t("settings.heartbeat.template")}
-          </button>
-          <button className="btn small" onClick={() => { setText(""); setDirty(true); }}>
+          </Button>
+          <Button size="sm" onClick={() => { setText(""); setDirty(true); }}>
             {t("settings.heartbeat.clear")}
-          </button>
-        </div>
-      </div>
+          </Button>
+        </SetFoot>
+      </SetGroup>
     </>
   );
 }
 
-/** The doctor's checks as a screen of their own. */
-export function HealthScreen({ toast }: { toast: (t: string) => void }) {
-  return (
-    <>
-      <PageHeader title={screenTitle("health")} />
-      <div className="screen narrow">
-        <HealthTab toast={toast} />
-        {!telegram()?.initData && (
-          <div className="btnrow">
-            <button
-              className="btn small"
-              onClick={async () => {
-                try {
-                  await api.post("/api/auth/logout");
-                  sessionStorage.removeItem("daedalus_token");
-                } finally {
-                  window.location.reload();
-                }
-              }}
-            >
-              {t("settings.logout")}
-            </button>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-/** Security: each concern its own card — two-factor sign-in, the operator's secrets, signing out everywhere. */
+/** Security: each concern its own group — two-factor sign-in, the operator's secrets, signing out everywhere. */
 function SecurityTab({ toast }: { toast: (t: string) => void }) {
   // Nothing on this screen changes when the other sessions end, so the button keeps the answer.
   const [signedOut, setSignedOut] = useState(false);
   const signOutEverywhere = async () => {
-    if (!(await confirmAsync(t("settings.security.signoutall.title"), { body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall") }))) return;
+    if (!(await confirmDialog({ title: t("settings.security.signoutall.title"), body: t("settings.security.signoutall.body"), action: t("settings.security.signoutall"), danger: true }))) return;
     try {
       await api.post("/api/auth/sessions/revoke");
       setSignedOut(true);
@@ -1090,23 +456,24 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   return (
     <>
       <TwoFactorCard toast={toast} />
-      <SecretsCard toast={toast} ago={timeAgo} confirm={(title, body) => confirmAsync(title, { body, action: t("common.remove") })} />
-      <div className="card">
+      <SecretsCard toast={toast} />
+      <SetGroup title={t("settings.security.sessions")}>
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")} data-setting="security.signout">
-          <button className="btn small" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</button>
+          <Button size="sm" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</Button>
         </Row>
-      </div>
+      </SetGroup>
     </>
   );
 }
 
 type Section =
-  | "appearance" | "text" | "notifications" | "voice" | "dictation" | "speech-models" | "navigation" | "desktop" | "security"
-  | "models" | "tasks" | "providers" | "accounts" | "keyproxy" | "free-models"
-  | "chat" | "rules" | "approvals" | "memory" | "memory-upkeep" | "translation" | "budget" | "limits" | "context" | "schedules"
+  | "appearance" | "text" | "notifications" | "navigation" | "desktop"
+  | "voice" | "dictation" | "speech-models"
+  | "models" | "tasks" | "accounts" | "keyproxy" | "free-models" | "budget"
+  | "chat" | "rules" | "approvals" | "limits" | "context" | "memory" | "memory-upkeep" | "translation" | "schedules"
   | "tools" | "search" | "browser" | "browser-safety" | "environments"
   | "telegram" | "mcp" | "devices" | "address"
-  | "components" | "dependencies" | "about";
+  | "security" | "components" | "dependencies" | "about";
 /** The sections, grouped the way the page lists them. Their ids, groups and icons are read from the
  *  settings index beside this file — the same table the agent's documentation search answers from —
  *  so a section renamed there is renamed in the links the agent gives out as well. The words on the
@@ -1118,12 +485,14 @@ const sectionLabel = (id: Section) => t(`settings.sec.${id}`);
 
 /** Sections that were pages of their own and are now part of another: an address written down, sent
  *  in a notification or bookmarked still lands on the setting, scrolled to the part it named. The
- *  models page's tabs are sections of their own now, so its old `?tab=` addresses are here too. A row
+ *  models page's tabs are sections of their own now, so its old `?tab=` addresses are here too; the
+ *  providers became part of the models' section, which draws each model inside its provider. A row
  *  that moved needs no entry: an address naming it goes to the section the index says holds it. */
 const MOVED: Record<string, { to: Section; anchor?: string }> = {
   terminals: { to: "environments", anchor: "terminal-sessions" },
   heartbeat: { to: "schedules" },
-  "models?tab=providers": { to: "providers" },
+  providers: { to: "models" },
+  "models?tab=providers": { to: "models" },
   "models?tab=free": { to: "free-models" },
 };
 
@@ -1136,31 +505,32 @@ function movedTo(section: string | null | undefined, search: string, row: string
   return (tab ? MOVED[`${section}?tab=${tab}`] : undefined) ?? MOVED[section];
 }
 
-/** Settings: a dialog over the screen it was opened from on a desktop, a full-screen stack of two
- *  levels on a phone. `onClose` is the shell's way back to that screen. */
+/** How many subscriptions hold an account added but not signed in yet: the one number worth a badge in
+ *  the list of sections, since that account is skipped until it is. */
+function signInsWaiting(accounts: SubscriptionAccounts | null | undefined): number {
+  return (accounts?.upstreams ?? []).filter((u) => u.sign_in === "terminal" && u.accounts.some((a) => !a.configured)).length;
+}
+
+/** Settings: a page of its own on a desktop — the list of sections where the sidebar was, the open
+ *  section in a centred column — and a full-screen stack of two levels on a phone. `onClose` is the
+ *  shell's way back to where the operator was. */
 export function SettingsScreen({ toast, section, onClose }: { toast: (t: string) => void; section?: string | null; onClose?: () => void }) {
   const caps = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
   const [s, setS] = useState<Settings | null>(null);
   // `?add=1` on the models section opens the add sheet straight away: the composer's model picker
   // sends the operator here to add a model, and landing on the list would leave one more click to find.
-  const [adding, setAdding] = useState(() => section === "models" && new URLSearchParams(window.location.search).get("add") === "1");
+  const [adding, setAdding] = useState(() => (section === "models" || section === "providers") && new URLSearchParams(window.location.search).get("add") === "1");
+  const [addingProvider, setAddingProvider] = useState(false);
   const [status, setStatus] = useState<any>(null);
-  const [checking, setChecking] = useState(false);
-  const [checked, setChecked] = useState<{ ok: number; n: number } | null>(null);
-  // Names only, for a model's account choice: the quota reading is the accounts card's, in its own section.
+  // Names and sign-in state: a model's account choice, a provider's status, the badge on Accounts.
   const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
   const wide = useMedia("(min-width: 1024px)");
   const [query, setQuery] = useState("");
-  const dialog = useRef<HTMLDivElement>(null);
+  const page = useRef<HTMLDivElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLElement>(null);
-  // Between 1024 and 1180 px the list of sections is a column of icons, so the section keeps the width
-  // it needs; it opens out to its full width while the search is in use.
-  const narrow = useMedia("(max-width: 1180px)");
-  const [opened, setOpened] = useState(false);
   const close = onClose ?? (() => navigate(modeHome(storedMode(), wide)));
-  useDialogKeys({ dialog, search: searchField, query, clear: () => setQuery(""), onClose: close });
-  const covered = useCovered();
+  usePageKeys({ page, search: searchField, query, clear: () => setQuery(""), onClose: close });
   const target = settingTarget();
   const moved = movedTo(section, window.location.search, target);
   const movedTarget = moved?.to;
@@ -1197,10 +567,16 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     return () => window.clearInterval(timer);
   }, [anchor]);
   const shown: Section | null = current ?? (wide ? "models" : null);
-  // The list of sections is taller than the dialog: the open one is brought into it, or a link to
+  // The list of sections is taller than the window: the open one is brought into it, or a link to
   // About opened a page whose own entry sat below the fold of the list beside it.
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(".settings-link.active")?.scrollIntoView({ block: "nearest" });
+  }, [shown]);
+  // A section's column starts at its top: the page keeps one scroller, and the next section opened
+  // in it began where the last one had been read to.
+  const main = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    main.current?.scrollTo({ top: 0 });
   }, [shown]);
   // A link to one setting (`#<key>`, from an error's button or a link in the agent's answer): the tab
   // that holds it is opened, the row is scrolled to once it has drawn and blinks, and the name leaves
@@ -1210,7 +586,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     // Not while the address is on its way to the section that holds the row: it is not on this one.
     if (!target || !shown || movedTarget) return;
     let cancelled = false;
-    void revealSetting(target, { root: dialog.current ?? document }).then(() => {
+    void revealSetting(target, { root: page.current ?? document }).then(() => {
       if (!cancelled) clearSettingTarget();
     });
     return () => {
@@ -1222,9 +598,12 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     api.get("/api/status").then(setStatus).catch(() => setStatus(null));
   }, [toast]);
 
+  /** A settings body the host answered with, keeping the list of reachable providers when it left it out. */
+  const take = (next: Settings) => setS((now) => ({ ...next, providers_available: next.providers_available ?? (now?.providers_available ?? []) }));
+
   // After a key proxy value changes, provider readiness and the search backends are read again.
   function rereadSettings() {
-    api.get<Settings>("/api/settings").then((next) => setS((current) => ({ ...next, providers_available: next.providers_available ?? (current?.providers_available ?? []) }))).catch(() => undefined);
+    api.get<Settings>("/api/settings").then(take).catch(() => undefined);
   }
 
   async function save(patch: Partial<Settings>) {
@@ -1239,77 +618,19 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       // An answer without its list of problems still ends in a sentence the operator can read; indexing
       // the missing list put "Cannot read properties of undefined (reading '0')" in a toast.
       if (!validation.valid) throw new Error(validation.problems?.[0]?.message || t("settings.validation.invalid"));
-      const next = await api.put<Settings>("/api/settings", { ...patch, base_revision: s.revision });
-      setS({ ...next, providers_available: next.providers_available ?? s?.providers_available ?? [] });
+      take(await api.put<Settings>("/api/settings", { ...patch, base_revision: s.revision }));
     } catch (e) {
       toast((e as Error).message);
     }
   }
-  async function patchProvider(id: string, patch: Record<string, unknown>): Promise<Settings | undefined> {
+  async function addProvider(id: string, patch: Record<string, unknown>): Promise<Settings | undefined> {
     try {
       const next = await api.put<Settings>(`/api/providers/${encodeURIComponent(id)}`, patch);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-      if ("api_key" in patch) announceProviderKeys();
+      take(next);
       return next;
     } catch (e) {
       toast((e as Error).message);
       return undefined;
-    }
-  }
-  async function patchPreset(id: string, patch: Partial<Preset>) {
-    try {
-      const next = await api.put<Settings>(`/api/presets/${encodeURIComponent(id)}`, patch);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  async function refreshWindow(id: string) {
-    try {
-      await api.post(`/api/presets/${encodeURIComponent(id)}/context-window`, {});
-      const next = await api.get<Settings>("/api/settings");
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  // One tiny request to every model, only when pressed: each probe is spent from a plan.
-  async function checkModels() {
-    setChecking(true);
-    try {
-      const result = await api.post<ModelCheckResult>("/api/models/check", {});
-      setS((current) => current && { ...current, model_health: result.health });
-      // The rows show each result; the foot counts them, since a toast is for what went wrong.
-      const states = Object.values(result.results);
-      setChecked({ ok: states.filter((r) => r.state === "ok" || r.state === "slow").length, n: states.length });
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      setChecking(false);
-    }
-  }
-  async function removePreset(id: string) {
-    try {
-      const next = await api.delete<Settings>(`/api/presets/${encodeURIComponent(id)}`);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  }
-  async function lookupProviderModels(provider: string): Promise<string[] | null> {
-    try {
-      return (await api.post<{ models: string[] }>("/api/providers/lookup-models", { provider })).models;
-    } catch (e) {
-      toast((e as Error).message);
-      return null;
-    }
-  }
-  async function removeProvider(id: string) {
-    try {
-      const next = await api.delete<Settings>(`/api/providers/${encodeURIComponent(id)}`);
-      setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-    } catch (e) {
-      toast((e as Error).message);
     }
   }
 
@@ -1328,33 +649,34 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   const about = (id: Section) => INDEX_SECTIONS.find((item) => item.id === id)?.about[lang()] ?? t(`settings.sec.${id}.hint`);
   const leave = (e: React.MouseEvent, href: string) => {
     setQuery("");
-    setOpened(false);
     go(e, href);
   };
   // Enter in the search goes where the first result does: the first row found, else the first section.
   const first = fields[0] ? fieldPath(fields[0]) : hits[0] ? pathFor("settings", hits[0].id) : null;
+  const waiting = signInsWaiting(subscriptionAccounts);
 
   const link = (sec: { id: Section; icon: IconName }) => {
     const href = pathFor("settings", sec.id);
     const here = !needle && shown === sec.id;
     return (
-      <a key={sec.id} href={href} className={`settings-link ${here ? "active" : ""}`} aria-current={here ? "page" : undefined} title={narrow && wide ? sectionLabel(sec.id) : undefined} data-section={sec.id} onClick={(e) => leave(e, href)}>
+      <a key={sec.id} href={href} className={`settings-link ${here ? "active" : ""}`} aria-current={here ? "page" : undefined} data-section={sec.id} onClick={(e) => leave(e, href)}>
         <Icon name={sec.icon} size={wide ? 16 : 18} />
         <span className="settings-link-text">
           <b>{sectionLabel(sec.id)}</b>
           <span className="sub">{t(`settings.sec.${sec.id}.hint`)}</span>
         </span>
         {/* A mark, not a count: the one thing worth interrupting a reader for is a feature they have
-            already configured whose runtime is not installed. Beside the words rather than in them, so
-            it stays on the icon when the list is folded to icons. */}
+            already configured whose runtime is not installed. */}
         {sec.id === "components" && componentsNeedAttention(caps.data) && <span className="tab-badge dot settings-mark" role="img" aria-label={t("comp.state.missing")} />}
+        {/* Subscriptions that wait for a sign-in: every model behind them is skipped until then. */}
+        {sec.id === "accounts" && waiting > 0 && <span className="settings-count-badge" role="img" aria-label={plural("settings.accounts.waiting", waiting)}>{waiting}</span>}
         <span className="chev" aria-hidden><Icon name="chevron" size={14} /></span>
       </a>
     );
   };
   const search = (
     <div className="settings-search-box">
-      <Icon name="search" size={15} />
+      <Icon name="search" size={16} />
       <input
         ref={searchField}
         className="field settings-search"
@@ -1362,12 +684,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         placeholder={t("settings.find.placeholder")}
         aria-label={t("settings.find.placeholder")}
         onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => setOpened(true)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && first) {
             e.preventDefault();
             setQuery("");
-            setOpened(false);
             navigate(first);
           } else moveInList(e, list.current);
         }}
@@ -1380,7 +700,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     </div>
   );
   const index = (
-    <nav ref={list} className="settings-index" aria-label={screenTitle("settings")} onKeyDown={(e) => moveInList(e, list.current)}>
+    <nav ref={list} className="settings-index" aria-label={t("settings.index")} onKeyDown={(e) => moveInList(e, list.current)}>
       {needle ? (
         hits.length ? (
           <div className="settings-group-block">
@@ -1405,7 +725,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           const items = group.sections.filter((sec) => visible(sec.id));
           if (!items.length) return null;
           return (
-            <div key={group.id} className="settings-group-block">
+            <div key={group.id} className="settings-group-block" data-group={group.id}>
               <div className="settings-group">{t(`settings.group.${group.id}`)}</div>
               {items.map(link)}
             </div>
@@ -1422,93 +742,14 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
     if (sec === "devices") return <DevicesPanel toast={toast} />;
     if (sec === "address") return <PublicAddressPanel />;
     if (!s) return <div className="empty">{t("common.loading")}</div>;
-    const kinds = s.provider_kinds ?? DEFAULT_KINDS;
-    const providerIds = Object.keys(s.providers ?? {});
     switch (sec) {
       case "models":
-        return (
-          <>
-          <div className="card">
-            <div className="section-title">{t("settings.models.title")}</div>
-            <div className="sub">{t("settings.models.sub")}</div>
-            <div className="mlist" data-setting="model.preset">
-              {Object.entries(s.presets ?? {}).map(([id, p]) => (
-                <PresetRow
-                  key={id}
-                  id={id}
-                  p={p}
-                  health={s.model_health?.[id]}
-                  routed={s.providers[p.provider]?.kind === "openrouter"}
-                  accounts={subscriptionAccounts?.upstreams.find((u) => u.providers.includes(p.provider))}
-                  onDemandByModel={s.on_demand_defaults?.[id]}
-                  windowSources={s.context_window_sources?.[id]}
-                  price={s.prices?.[id]}
-                  onPriceSaved={(next) => setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) })}
-                  toast={toast}
-                  onRefreshWindow={() => void refreshWindow(id)}
-                  isDefault={s.model.preset === id}
-                  inChain={(s.model.chain ?? []).includes(id)}
-                  providers={providerIds}
-                  onDefault={() => save({ model: { preset: id } as any })}
-                  onPatch={(patch) => void patchPreset(id, patch)}
-                  onDelete={() => void removePreset(id)}
-                  onLookup={lookupProviderModels}
-                />
-              ))}
-            </div>
-            {Object.keys(s.presets ?? {}).length === 0 && (
-              <div className="empty">
-                <b>{t("settings.models.empty")}</b>
-                <div className="sub">{t("settings.models.empty.sub")}</div>
-              </div>
-            )}
-            <div className="card-foot" data-setting="models.add">
-              <button className="btn primary" onClick={() => setAdding(true)}>
-                <Icon name="plus" size={14} /> {t("settings.models.add")}
-              </button>
-              <span className="sub faint">{t("settings.models.add.hint")}</span>
-            </div>
-            {Object.keys(s.presets ?? {}).length > 0 && (
-              <div className="card-foot" data-setting="models.check">
-                <button className="btn" disabled={checking} onClick={() => void checkModels()}>
-                  {checking ? t("settings.models.check.running") : t("settings.models.check")}
-                </button>
-                <span className="sub faint" data-checked={checked ? "" : undefined}>{checked ? t("settings.models.check.answered", checked) : t("settings.models.check.hint")}</span>
-              </div>
-            )}
-          </div>
-          {/* What happens when a model fails is a group of its own: the switch that allows a stand-in
-              and the stand-ins in their order. Above the list of models and under its button, the two
-              read as part of the list, and the page was one card from top to bottom. */}
-          <div className="card">
-            <Row title={t("settings.models.auto_fallback")} desc={t("settings.models.auto_fallback.sub")} data-setting="model.auto_fallback">
-              <Switch checked={s.model.auto_fallback} onChange={(auto_fallback) => save({ model: { auto_fallback } as any })} label={t("settings.models.auto_fallback")} />
-            </Row>
-            {/* The whole chain in one place, in its order. It was a switch inside each model's
-                expanded row and a line of ids joined by arrows: nobody could see the set at once
-                or change the order without switching models off and on again. */}
-            {Object.keys(s.presets ?? {}).length > 1 && (
-              <Row title={t("settings.models.chain.title")} desc={t("settings.models.chain.sub")} stack data-setting="model.chain">
-                <SelectionList
-                  id="model-chain"
-                  label={t("settings.models.chain.title")}
-                  ordered
-                  chosenLabel={t("settings.models.chain.chosen")}
-                  emptyChosen={t("settings.models.chain.empty")}
-                  {...modelItems(s, (id) => id !== s.model.preset)}
-                  value={(s.model.chain ?? []).filter((id) => id !== s.model.preset)}
-                  onChange={(chain) => save({ model: { chain } as any })}
-                />
-              </Row>
-            )}
-          </div>
-          </>
-        );
+        return <ModelsSection s={s} take={take} save={save} toast={toast} accounts={subscriptionAccounts} />;
       case "tasks":
         return (
           <>
             {/* Which models subagents may run on: it sat under Limits, but it is a choice of model and belongs with the others. */}
-            <div className="card">
+            <SetGroup title={t("settings.tasks.helpers")}>
               <Row title={t("subm.title")} desc={t("subm.settings.sub")} stack data-setting="subagents.models">
                 <WithEffort id="subagents-effort" value={s.subagents?.models?.effort} fallback="model"
                   onChange={(effort) => save({ subagents: { ...s.subagents!, models: { ...(s.subagents?.models ?? { mode: "all", presets: [] }), effort } } })}>
@@ -1530,11 +771,9 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               </Row>
               {/* Beside the models it limits: how long a quick agent holds its leader waiting for the operator in the browser. */}
               <NumRow id="quick-operator-wait" setting="subagents.operator_wait_minutes" title={t("qagent.wait.setting")} desc={t("qagent.wait.setting.sub")} unit={t("settings.unit.minutes")} value={s.subagents?.operator_wait_minutes ?? 10} min={1} max={60} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, operator_wait_minutes: v } })} {...shipped(s.subagents?.operator_wait_minutes ?? 10, 10, () => save({ subagents: { ...s.subagents!, operator_wait_minutes: 10 } }))} />
-            </div>
+            </SetGroup>
             {Object.keys(s.presets ?? {}).length > 0 && (
-              <div className="card">
-                <div className="section-title">{t("settings.orchestrator.title")}</div>
-                <div className="sub">{t("settings.orchestrator.sub")}</div>
+              <SetGroup title={t("settings.orchestrator.title")} help={t("settings.orchestrator.sub")}>
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.orchestrator.hint")} stack data-setting="orchestrator.preset">
                   <WithEffort id="orchestrator-effort" value={s.orchestrator?.effort} onChange={(effort) => save({ orchestrator: { effort } as Settings["orchestrator"] })} fallback="model">
                     <ModelPicker
@@ -1547,12 +786,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     />
                   </WithEffort>
                 </Row>
-              </div>
+              </SetGroup>
             )}
             {Object.keys(s.presets ?? {}).length > 0 && (
-              <div className="card" data-card="main-orchestrator">
-                <div className="section-title">{t("settings.main.title")}</div>
-                <div className="sub">{t("settings.main.sub")}</div>
+              <SetGroup title={t("settings.main.title")} help={t("settings.main.sub")} data-card="main-orchestrator">
                 <Row title={t("settings.orchestrator.model")} desc={t("settings.main.hint")} stack data-setting="dispatcher.preset">
                   <WithEffort id="main-effort" value={s.dispatcher?.effort} onChange={(effort) => save({ dispatcher: { effort } as Settings["dispatcher"] })} fallback="model">
                     <ModelPicker
@@ -1565,13 +802,11 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                     />
                   </WithEffort>
                 </Row>
-              </div>
+              </SetGroup>
             )}
             {/* Here rather than under Tools: it is a choice of model, and this is where the operator
                 comes to choose one. */}
-            <div className="card vision-card">
-              <div className="section-title">{t("settings.vision.title")}</div>
-              <div className="sub">{t("settings.vision.sub")}</div>
+            <SetGroup title={t("settings.vision.title")} help={t("settings.vision.sub")}>
               <Row title={t("settings.vision.model")} stack data-setting="vision.preset">
                 {/* Only the models that see images are offered; the one in use stays listed even if
                     it does not, so the row names it rather than calling it missing. */}
@@ -1587,15 +822,13 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 </WithEffort>
               </Row>
               <NumRow id="vision-output" title={t("settings.vision.output")} desc={t("settings.vision.output.sub")} setting="vision.max_output_tokens" value={s.vision.max_output_tokens} min={100} step={100} onSave={(v) => save({ vision: { ...s.vision, max_output_tokens: v } })} />
-            </div>
+            </SetGroup>
             {/* The same setting as under Approvals, here too: the operator came to the models looking
                 for which model reviews a push, and it was only on a page about permissions. */}
-            <div className="card" data-card="action-review">
-              <div className="section-title">{t("settings.review.title")}</div>
-              <div className="sub">
-                {t("settings.review.sub")}{" "}
-                <a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a>
-              </div>
+            <SetGroup
+              title={t("settings.review.title")}
+              help={<>{t("settings.review.sub")}{" "}<a href={pathFor("settings", "approvals")} onClick={(e) => go(e, pathFor("settings", "approvals"))}>{t("settings.review.rules")}</a></>}
+            >
               <Row title={t("rules.review.model")} desc={t("rules.review.model.hint")} stack data-setting="action_rules.review_preset">
                 <WithEffort id="models-review-effort" value={s.action_rules?.review_effort} onChange={(review_effort) => save({ action_rules: { ...DEFAULT_RULES, ...(s.action_rules ?? {}), review_effort } })} fallback="off">
                   <ModelPicker
@@ -1608,39 +841,21 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   />
                 </WithEffort>
               </Row>
-            </div>
+            </SetGroup>
             {/* Beside the auxiliary models it governs: the summary model (Context) and the vision model above. */}
-            <div className="card" data-card="auxiliary-fallback">
-              <div className="section-title">{t("settings.auxiliary.title")}</div>
+            <SetGroup title={t("settings.auxiliary.title")}>
               <Row title={t("settings.auxiliary.fallback")} desc={t("settings.auxiliary.fallback.sub")} data-setting="model.fallback_to_session">
                 <Switch checked={s.model.fallback_to_session ?? true} onChange={(fallback_to_session) => save({ model: { fallback_to_session } as any })} label={t("settings.auxiliary.fallback")} />
               </Row>
-            </div>
+            </SetGroup>
           </>
-        );
-      case "providers":
-        return (
-          <div className="card">
-            <div className="section-title">{t("settings.providers.title")}</div>
-            <div className="sub">{t("settings.providers.sub")}</div>
-            <div className="mlist" data-setting="providers.list">
-              {providerIds.map((id) => (
-                <ProviderBlock key={id} id={id} p={s.providers[id]} kinds={kinds} available={providerReady(s, id)} viaProxy={s.provider_keys?.[id]?.via_proxy ?? false} onPatch={patchProvider} onRemove={(pid) => void removeProvider(pid)} />
-              ))}
-            </div>
-            {/* Every way to add an endpoint, in the card's foot under the ones there are. */}
-            <div className="card-foot provider-add">
-              <AddOpencodeRow providers={s.providers ?? {}} keyproxyBase={s.keyproxy_base ?? ""} onAdd={(pid, patch) => void patchProvider(pid, patch)} />
-              <AddProviderRow kinds={kinds} toast={toast} onAdd={(pid, base, kind) => void patchProvider(pid, { kind, base_url: base })} />
-            </div>
-          </div>
         );
       case "accounts":
         return <SubscriptionAccountsCard toast={toast} />;
       case "keyproxy":
         return <KeyproxyCard toast={toast} onChanged={rereadSettings} />;
       case "free-models":
-        return <div className="card" data-setting="models.free"><FreeModels onSaved={(_, next) => setS(next)} toast={toast} /></div>;
+        return <FreeModels onSaved={(_, next) => setS(next)} toast={toast} />;
       case "translation":
         return <TranslationSettings s={s} save={save} presetLabel={(id) => presetName(s, id)} />;
       case "rules":
@@ -1655,54 +870,48 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           <>
             {/* The two rules about the agent's own code first: the action grid's review log grows as it
                 loads, and a link to a row below it landed on a row the log had just pushed away. */}
-            <div className="card">
-              <div className="section-title">{t("settings.selfchange")}</div>
-              <div className="sub">{t("settings.selfchange.sub")}</div>
-              {/* Two separate rules, each a segmented pick like every other choice in Settings. They
-                  were three loose buttons once, the third a toggle that looked like a third mode. */}
+            {/* Two separate rules, each a segmented pick like every other choice in Settings. They
+                were three loose buttons once, the third a toggle that looked like a third mode. */}
+            <SetGroup title={t("settings.selfchange")} help={t("settings.selfchange.sub")}>
               <Row title={t("settings.selfchange.approval")} data-setting="self_change.approval">
                 <Segmented label={t("settings.selfchange.approval")} value={s.self_change.approval} onChange={(approval) => save({ self_change: { ...s.self_change, approval } })} options={["manual", "auto"].map((id) => ({ id, label: t(`settings.selfchange.${id}`) }))} />
               </Row>
               <Row title={t("settings.selfchange.rebuild")} data-setting="self_change.auto_rebuild">
                 <Segmented label={t("settings.selfchange.rebuild")} value={s.self_change.auto_rebuild ? "on" : "off"} onChange={(state) => save({ self_change: { ...s.self_change, auto_rebuild: state === "on" } })} options={(["off", "on"] as const).map((id) => ({ id, label: t(`settings.selfchange.rebuild.${id}`) }))} />
               </Row>
-            </div>
+            </SetGroup>
             <ActionRules s={s} save={save} />
+            <ProjectApprovals toast={toast} />
           </>
         );
       case "budget":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.budget.caps")}</div>
+            <SetGroup title={t("settings.budget.caps")}>
               <NumRow id="limits-daily" setting="limits.usd_per_day" title={t("settings.limits.daily")} desc={t("settings.limits.daily.sub")} unit="USD" step="1" value={s.limits.usd_per_day ?? 0} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_day: v } })} />
               <NumRow id="limits-perrun" setting="limits.usd_per_run" title={t("settings.limits.perrun")} desc={t("settings.limits.perrun.sub")} unit="USD" step="0.5" value={s.limits.usd_per_run} min={0} onSave={(v) => save({ limits: { ...s.limits, usd_per_run: v } })} />
               <TotalCaps s={s} save={save} />
-            </div>
-            <div className="card">
-              <div className="section-title">{t("settings.balance.title")}</div>
-              <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" stack data-setting="balance.thresholds_usd">
-                <input id="balance-thresholds" className="field settings-inline-field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
+            </SetGroup>
+            <SetGroup title={t("settings.balance.title")}>
+              <Row title={t("settings.balance.thresholds")} desc={t("settings.balance.thresholds.sub")} htmlFor="balance-thresholds" data-setting="balance.thresholds_usd">
+                <input id="balance-thresholds" className="field" defaultValue={s.balance.thresholds_usd.join(", ")} onBlur={(e) => save({ balance: { ...s.balance, thresholds_usd: e.target.value.split(",").map(Number).filter((n) => !Number.isNaN(n)) } })} />
               </Row>
               <NumRow id="balance-poll" setting="balance.poll_seconds" title={t("settings.balance.poll")} unit={t("settings.unit.seconds")} value={s.balance.poll_seconds} min={1} onSave={(v) => save({ balance: { ...s.balance, poll_seconds: v } })} />
-            </div>
+            </SetGroup>
           </>
         );
       case "limits":
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.limits.title")}</div>
+          <SetGroup title={t("settings.limits.title")}>
             <NumRow id="limits-iterations" setting="limits.max_iterations" title={t("settings.limits.iterations")} desc={t("settings.limits.iterations.sub")} value={s.limits.max_iterations} min={0} onSave={(v) => save({ limits: { ...s.limits, max_iterations: v } })} />
             <NumRow id="limits-subagents" setting="subagents.max_active" title={t("settings.limits.subagents")} desc={t("settings.limits.subagents.sub")} value={s.subagents?.max_active ?? 10} min={1} max={32} step={1} onSave={(v) => save({ subagents: { ...s.subagents!, max_active: v } })} {...shipped(s.subagents?.max_active ?? 10, 10, () => save({ subagents: { ...s.subagents!, max_active: 10 } }))} />
             <NumRow id="limits-disk" setting="disk.workspace_soft_limit_gb" title={t("settings.limits.disk")} desc={t("settings.limits.disk.sub")} unit={t("disk.limit.unit")} step="1" value={s.disk?.workspace_soft_limit_gb ?? 20} min={0} onSave={(v) => save({ disk: { workspace_soft_limit_gb: v } })} {...shipped(s.disk?.workspace_soft_limit_gb ?? 20, 20, () => save({ disk: { workspace_soft_limit_gb: 20 } }), `20 ${t("disk.limit.unit")}`)} />
             <HostMemoryRow s={s} save={save} />
-          </div>
+          </SetGroup>
         );
       case "context":
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.compaction")}</div>
-            <div className="sub">{t("settings.compaction.sub")}</div>
+          <SetGroup title={t("settings.compaction")} help={t("settings.compaction.sub")}>
             <NumRow id="compaction-ratio" setting="compaction.auto_ratio" title={t("settings.compaction.ratio")} desc={t("settings.compaction.ratio.sub")} value={s.compaction?.auto_ratio ?? 0.8} min={0} max={1} step={0.05} onSave={(v) => save({ compaction: { ...s.compaction, auto_ratio: v } })} {...shipped(s.compaction?.auto_ratio ?? 0.8, 0.8, () => save({ compaction: { ...s.compaction, auto_ratio: 0.8 } }))} />
             <NumRow id="compaction-keep" setting="compaction.keep_recent_messages" title={t("settings.compaction.keep")} value={s.compaction?.keep_recent_messages ?? 6} min={0} onSave={(v) => save({ compaction: { ...s.compaction, keep_recent_messages: v } })} {...shipped(s.compaction?.keep_recent_messages ?? 6, 6, () => save({ compaction: { ...s.compaction, keep_recent_messages: 6 } }))} />
             <NumRow id="compaction-words" setting="compaction.max_words" title={t("settings.compaction.words")} unit={t("settings.unit.words")} value={s.compaction?.max_words ?? 1200} min={200} step={100} onSave={(v) => save({ compaction: { ...s.compaction, max_words: v } })} {...shipped(s.compaction?.max_words ?? 1200, 1200, () => save({ compaction: { ...s.compaction, max_words: 1200 } }), `1200 ${t("settings.unit.words")}`)} />
@@ -1710,7 +919,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <CompactionModelSelect catalogue={s} value={s.compaction?.preset ?? ""} onSave={(preset) => save({ compaction: { ...s.compaction, preset } })}
               effort={s.compaction?.effort} onEffort={(effort) => save({ compaction: { ...s.compaction, effort } })} />
             <NumRow id="compaction-timeout" setting="compaction.call_timeout_seconds" title={t("settings.compaction.timeout")} desc={t("settings.compaction.timeout.hint")} unit={t("settings.unit.seconds")} value={s.compaction?.call_timeout_seconds ?? 90} min={10} step={10} onSave={(v) => save({ compaction: { ...s.compaction, call_timeout_seconds: v } })} {...shipped(s.compaction?.call_timeout_seconds ?? 90, 90, () => save({ compaction: { ...s.compaction, call_timeout_seconds: 90 } }), `90 ${t("settings.unit.seconds")}`)} />
-          </div>
+          </SetGroup>
         );
       case "memory":
         return <MemorySettings s={s} save={save} part="memory" />;
@@ -1749,8 +958,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "chat":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.chat.app")}</div>
+            <SetGroup title={t("settings.chat.app")}>
               <Row title={t("settings.chat.predict")} desc={t("settings.chat.predict.sub")} data-setting="assist.predict" {...shipped(s.assist?.predict ?? true, true, () => save({ assist: { ...s.assist, predict: true } }), t("common.on"))}>
                 <Switch checked={s.assist?.predict ?? true} onChange={(predict) => save({ assist: { ...s.assist, predict } })} label={t("settings.chat.predict")} />
               </Row>
@@ -1758,12 +966,12 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
               {(s.assist?.predict ?? true) && (
                 <Row title={t("settings.chat.predict.model")} stack data-setting="assist.predict_preset">
                   <WithEffort id="predict-effort" value={s.assist?.predict_effort} onChange={(predict_effort) => save({ assist: { predict: true, ...s.assist, predict_effort } })} fallback="off">
-                    <ModelPicker id="predict-preset" label={t("settings.chat.predict.model")} catalogue={s} value={s.assist?.predict_preset ?? ""}
+                    <ModelChoice id="predict-preset" label={t("settings.chat.predict.model")} catalogue={s} value={s.assist?.predict_preset ?? ""}
                       onChange={(predict_preset) => save({ assist: { predict: true, ...s.assist, predict_preset } })} defaultOption={{ label: t("rules.model.auto") }} />
                   </WithEffort>
                 </Row>
               )}
-            </div>
+            </SetGroup>
             <AutopilotSettings s={s} save={save} />
             <UserStyleCard toast={toast} />
           </>
@@ -1772,9 +980,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         const mode = s.telegram.mode ?? (s.telegram.forum_chat_id ? "topics" : "private");
         const tg = (patch: Partial<Settings["telegram"]>) => save({ telegram: { ...s.telegram, ...patch } });
         return (
-          <div className="card">
-            <div className="section-title">{t("settings.chat.telegram")}</div>
-            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")} stack>
+          <SetGroup title={t("settings.chat.telegram")}>
+            <Row title={t("settings.chat.where")} data-setting="telegram.mode" desc={mode === "private" ? t("settings.chat.private.sub") : t(s.telegram.forum_chat_id ? "settings.chat.topics.sub" : "settings.chat.topics.bind")}>
               <Segmented label={t("settings.chat.where")} value={mode} onChange={(m) => tg({ mode: m })} options={(["private", "topics"] as const).map((m) => ({ id: m, label: t(`settings.chat.${m}`) }))} />
             </Row>
             {/* The digits are the ones /verbosity takes in the chat, so they stay; the description is
@@ -1795,21 +1002,20 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
             <NumRow id="chat-maxfile" setting="telegram.max_inbound_file_mb" title={t("settings.chat.maxfile")} unit={t("settings.unit.mb")} value={s.telegram.max_inbound_file_mb} min={1} onSave={(v) => tg({ max_inbound_file_mb: v })} />
             <NumRow id="chat-caption" setting="telegram.photo_caption_wait_seconds" title={t("settings.chat.caption")} unit={t("settings.unit.seconds")} value={s.telegram.photo_caption_wait_seconds} min={0} onSave={(v) => tg({ photo_caption_wait_seconds: v })} />
             <NumRow id="chat-slowtool" setting="telegram.slow_tool_seconds" title={t("settings.chat.slowtool")} unit={t("settings.unit.seconds")} value={s.telegram.slow_tool_seconds} min={1} onSave={(v) => tg({ slow_tool_seconds: v })} />
-          </div>
+          </SetGroup>
         );
       }
       case "schedules":
         return (
           <>
-            <div className="card">
-              <div className="section-title">{t("settings.chat.scheduler")}</div>
+            <SetGroup title={t("settings.chat.scheduler")}>
               <Row title={t("settings.chat.scheduled")} desc={t("settings.chat.scheduled.sub")} stack data-setting="scheduler.topic_mode">
                 <Segmented label={t("settings.chat.scheduled")} value={s.scheduler.topic_mode} onChange={(topic_mode) => save({ scheduler: { ...s.scheduler, topic_mode } })} options={["per_task", "per_run"].map((m) => ({ id: m, label: t(m === "per_task" ? "settings.chat.pertask" : "settings.chat.perrun") }))} />
               </Row>
               <Row title={t("settings.chat.schedapproval")} desc={t("settings.chat.schedapproval.sub")} data-setting="scheduler.require_approval">
                 <Switch checked={!!s.scheduler.require_approval} onChange={(require_approval) => save({ scheduler: { ...s.scheduler, require_approval } })} label={t("settings.chat.schedapproval")} />
               </Row>
-            </div>
+            </SetGroup>
             <HeartbeatTab s={s} toast={toast} />
           </>
         );
@@ -1830,8 +1036,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         return (
           <>
             <DesktopAppCard toast={toast} />
-            <div className="card">
-              <div className="section-title">{t("settings.about.runtime")}</div>
+            <SetGroup title={t("settings.about.runtime")}>
               {status ? (
                 <>
                   <Row title={t("settings.about.providers")}>{value(status.providers?.length ? status.providers.join(", ") : "—")}</Row>
@@ -1844,29 +1049,27 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                   ) : (
                     <Row title={t("settings.about.supervisor")}>{value(t("settings.about.nosupervisor.short"))}</Row>
                   )}
-                  {status.budget_exceeded && <div className="sub" style={{ color: "var(--bad)" }}>{t("settings.about.budget", { what: String(status.budget_exceeded) })}</div>}
+                  {status.budget_exceeded && <SetBlock><span className="set-warn">{t("settings.about.budget", { what: String(status.budget_exceeded) })}</span></SetBlock>}
                 </>
               ) : (
-                <div className="sub">{t("settings.about.nostatus")}</div>
+                <SetBlock><span className="set-hint">{t("settings.about.nostatus")}</span></SetBlock>
               )}
-            </div>
+            </SetGroup>
             {!telegram()?.initData && (
-              <div className="card">
-                <div className="section-title">{t("settings.about.browser")}</div>
+              <SetGroup title={t("settings.about.browser")}>
                 <Row title={t("settings.sec.appearance")} desc={t("settings.about.appearance")}>
                   <a className="btn small" href={pathFor("settings", "appearance")} onClick={(e) => go(e, pathFor("settings", "appearance"))}>{t("settings.about.open")}</a>
                 </Row>
                 <Row title={t("settings.logout")} desc={t("settings.about.logout.sub")} data-setting="logout">
-                  <button className="btn small" onClick={() => void logout()}>{t("settings.about.logout.action")}</button>
+                  <Button size="sm" onClick={() => void logout()}>{t("settings.about.logout.action")}</Button>
                 </Row>
-              </div>
+              </SetGroup>
             )}
           </>
         );
       }
     }
   };
-
   // Closing the sheet takes `add` out of the address, so a reload or the back button does not open it again.
   const stopAdding = () => {
     setAdding(false);
@@ -1877,22 +1080,46 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       navigate(window.location.pathname + (rest ? `?${rest}` : ""), { replace: true });
     }
   };
-  const addSheet = adding && (
-    <Sheet title={t("settings.models.add")} size="wide" onClose={stopAdding}>
-      <AddModel
-        toast={toast}
-        onCancel={stopAdding}
-        onSaved={(_, next) => {
-          setS({ ...next, providers_available: next.providers_available ?? (s?.providers_available ?? []) });
-          stopAdding();
-        }}
-      />
-    </Sheet>
+  const sheets = (
+    <>
+      {adding && (
+        <Sheet title={t("settings.models.add")} size="xl" onClose={stopAdding}>
+          <AddModel
+            toast={toast}
+            onCancel={stopAdding}
+            onSaved={(_, next) => {
+              take(next);
+              stopAdding();
+            }}
+          />
+        </Sheet>
+      )}
+      {addingProvider && s && (
+        <Sheet title={t("settings.provider.add")} onClose={() => setAddingProvider(false)}>
+          <AddProvider s={s} toast={toast} onAdd={addProvider} onDone={() => setAddingProvider(false)} />
+        </Sheet>
+      )}
+    </>
   );
-  // Found rows as the controls they are, each section's body cut down to them (settingsdialog.tsx);
+  /** What a section puts in the page's header beside its title: the models' two ways to add. */
+  const actions = (sec: Section) =>
+    sec === "models" && s ? (
+      <>
+        <button type="button" className="btn" data-setting="models.add" onClick={() => setAdding(true)}>
+          <Icon name="plus" size={16} /> {t("settings.models.add")}
+        </button>
+        <button type="button" className="btn primary" onClick={() => setAddingProvider(true)}>
+          <Icon name="plus" size={16} /> {t("settings.provider.add")}
+        </button>
+      </>
+    ) : null;
+  // Found rows as the controls they are, each section's body cut down to them (settingssearch.tsx);
   // a section found by its own name, not by a row, is a way into it.
   const results = hits.length === 0 ? (
-    <div className="empty">{t("settings.search.empty")}</div>
+    <div className="empty settings-none" role="status">
+      <b>{t("settings.search.empty")}</b>
+      <span className="sub">{t("settings.search.empty.sub")}</span>
+    </div>
   ) : (
     hits.map((sec) => {
       const own = fieldsOf(sec.id);
@@ -1918,47 +1145,32 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   );
 
   if (wide) {
-    const open = needle !== "" || opened;
     return (
-      <div className="settings-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-        <div ref={dialog} className="settings-dialog" role="dialog" aria-modal={covered ? undefined : true} aria-labelledby="settings-dialog-title" tabIndex={-1} onKeyDown={trapTab}>
-          <div className={`settings-stage ${narrow ? "icons" : ""} ${narrow && open ? "opened" : ""}`.trim()}>
-            <aside
-              className="settings-nav"
-              onBlur={(e) => {
-                if (!needle && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpened(false);
-              }}
-            >
-              <h2 id="settings-dialog-title" className="settings-dialog-title">{screenTitle("settings")}</h2>
-              {narrow && !open && (
-                <button type="button" className="iconbtn settings-search-open" aria-label={t("settings.find.placeholder")} title={t("settings.find.placeholder")} onClick={() => (setOpened(true), window.setTimeout(() => searchField.current?.focus()))}>
-                  <Icon name="search" size={16} />
-                </button>
-              )}
-              {search}
-              {index}
-              <div className="settings-foot">
-                <span>{status?.supervisor?.bot ? `Daedalus ${String(status.supervisor.bot).slice(0, 7)}` : "Daedalus"}</span>
-                <span>{t("settings.esc")}</span>
-              </div>
-            </aside>
-            <div className="settings-pane">
-              <header className="settings-head">
-                <div className="settings-head-text">
-                  <h1 className="settings-title">{needle ? t("settings.find.title", { q: needle }) : sectionLabel(shown!)}</h1>
-                  <p className="settings-about">{needle ? t("settings.find.lead") : about(shown!)}</p>
-                </div>
-                <button type="button" className="iconbtn settings-close" aria-label={t("common.close")} title={t("settings.esc")} onClick={close}>
-                  <Icon name="close" size={18} />
-                </button>
-              </header>
-              <div className="settings-main">
-                <div className="settings-col">{needle ? results : body(shown!)}</div>
-              </div>
+      <div ref={page} className="settings-page" tabIndex={-1} aria-labelledby="settings-page-title">
+        <aside className="settings-nav" aria-label={screenTitle("settings")}>
+          <div className="settings-nav-head">
+            <button type="button" className="settings-close" aria-label={t("settings.back.label")} onClick={close}>
+              <Icon name="back" size={16} />
+              <span className="settings-close-text">{t("settings.back")}</span>
+              <kbd className="settings-close-key" aria-hidden>Esc</kbd>
+            </button>
+          </div>
+          {search}
+          {index}
+        </aside>
+        <main className="settings-pane">
+          <header className="settings-head">
+            <h1 id="settings-page-title" className="settings-title">{needle ? t("settings.find.title", { q: needle }) : sectionLabel(shown!)}</h1>
+            {!needle && actions(shown!)}
+          </header>
+          <div ref={main} className="settings-main">
+            <div className="settings-col" data-section={needle ? undefined : shown!}>
+              {needle && hits.length > 0 && <p className="settings-about">{t("settings.find.lead")}</p>}
+              {needle ? results : body(shown!)}
             </div>
           </div>
-        </div>
-        {addSheet}
+        </main>
+        {sheets}
       </div>
     );
   }
@@ -1966,12 +1178,12 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   // opens the second level straight away; its back goes to the first, not out of Settings.
   const level = current && !needle ? current : null;
   return (
-    <div ref={dialog} className="settings-phone" tabIndex={-1} aria-labelledby="settings-dialog-title">
+    <div ref={page} className="settings-phone" tabIndex={-1} aria-labelledby="settings-page-title">
       <header className="pagehead settings-phone-head">
         <div className="pagehead-row">
           {level ? (
             <button type="button" className="settings-phone-back" onClick={() => navigate(pathFor("settings"), { replace: true })}>
-              <Icon name="back" /> <span id="settings-dialog-title">{screenTitle("settings")}</span>
+              <Icon name="back" /> <span id="settings-page-title">{screenTitle("settings")}</span>
             </button>
           ) : (
             <>
@@ -1979,16 +1191,17 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
                 <Icon name="close" />
               </button>
               <div className="pagehead-title">
-                <h1 id="settings-dialog-title">{screenTitle("settings")}</h1>
+                <h1 id="settings-page-title">{screenTitle("settings")}</h1>
               </div>
             </>
           )}
         </div>
       </header>
       {level ? (
-        <div className="screen narrow settings-col">
+        <div className="screen narrow settings-col" data-section={level}>
           <h1 className="settings-title">{sectionLabel(level)}</h1>
           <p className="settings-about">{about(level)}</p>
+          {level === "models" && s && <div className="btnrow settings-phone-actions">{actions(level)}</div>}
           {body(level)}
         </div>
       ) : (
@@ -1997,7 +1210,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           {index}
         </div>
       )}
-      {addSheet}
+      {sheets}
     </div>
   );
 }

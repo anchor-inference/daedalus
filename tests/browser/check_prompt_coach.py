@@ -180,29 +180,15 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
     field.fill(DRAFT)
     page.wait_for_timeout(150)
 
-    # The button: beside "+" on a desktop, a row of the "+" sheet on a phone (the phone's row has no room).
-    if phone:
-        if page.locator(".composer .coach-open").count():
-            say("a phone's composer row carries the coach button; it belongs in the + sheet")
-        page.locator(".composer .plus").first.click()
-        row = page.locator(".ph-plus-sheet [data-action='coach']")
-        row.wait_for(timeout=5000)
-        if words["open"] not in row.inner_text():
-            say(f"the + sheet's row does not say {words['open']!r} ({row.inner_text()!r})")
-        row.click()
-    else:
-        button = page.locator(".composer .coach-open")
-        if button.count() != 1:
-            say(f"the composer has {button.count()} coach buttons")
-            return
-        if button.get_attribute("aria-label") != words["helpers"]:
-            say(f"the button is not labelled {words['helpers']!r}")
-        button.click()
-        item = page.locator(".helpers-menu [data-action='coach']")
-        item.wait_for(timeout=5000)
-        if words["open"] not in item.inner_text():
-            say(f"the helpers' menu does not offer {words['open']!r} ({item.inner_text()!r})")
-        item.click()
+    # The way in: a row of the "+" menu, under Helpers, at every size (a sheet on a phone).
+    if page.locator(".composer .coach-open").count():
+        say("the composer's row still carries a coach button of its own; it belongs in the + menu")
+    page.locator(".composer .plus").first.click()
+    item = page.locator(".menu.attach-menu [data-action='coach']")
+    item.wait_for(timeout=5000)
+    if words["open"] not in item.inner_text():
+        say(f"the + menu does not offer {words['open']!r} ({item.inner_text()!r})")
+    item.click()
 
     root = ".coach-sheet" if phone else ".coach-window"
     try:
@@ -220,8 +206,8 @@ def run(browser, lang: str, phone: bool, scheme: str, problems: list[str]) -> No
     page.wait_for_selector(f"{root} .ask-card, {root} .ph-ask, {root} [class*='ask']", timeout=8000)
     if page.locator(f"{root} .chat-head, {root} .ph-topbar, {root} .terminal-dock").count():
         say("the embedded conversation draws a header or a terminal dock of its own")
-    if page.locator(f"{root} .composer .coach-open").count() or page.locator(f"{root} .composer .composer-mode, {root} .composer .mode-select").count() > 1:
-        say("the coach's own composer offers a coach or a mode")
+    if page.locator(f"{root} .composer .coach-open, {root} .composer .composer-access").count():
+        say("the coach's own composer offers a coach or the access switches")
     box = page.locator(root).bounding_box()
     if phone:
         if not box or box["height"] < viewport["height"] * 0.8:

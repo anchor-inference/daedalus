@@ -1,4 +1,24 @@
-// One icon set for the whole app: 24-unit stroked paths, drawn with the current text colour.
+// One icon set for the whole app. The names below are a contract with things outside the bundle (the
+// navigation config's icon map, a page manifest's `icon`, the calendar's types, the flow blocks of an
+// answer's Markdown, the settings index), so they stay; each is drawn by one glyph of the `lucide`
+// package, whose icons are plain node lists. The same nodes feed the React component and the string
+// renderer, so an answer's rendered Markdown and a screen never draw a name two ways.
+
+import { createElement } from "react";
+import {
+  Archive, ArrowDown, Brain, Coins, Gauge, Info, ArrowUp, Bell, Blocks, Book, Bot, Braces, CalendarDays, Camera, ChartNoAxesColumn, Check,
+  ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleQuestionMark, ClipboardPaste, Clock, Cloud, Code,
+  Columns2, Compass, Copy, Crop, Database, Diamond, Dot, Download, Dumbbell, Ellipsis, EllipsisVertical,
+  ExternalLink, Eye, EyeOff, FastForward, File, FileText, Flag, Folder, FolderPlus, Gift, GitBranch, GitBranchPlus,
+  GitFork, Globe, Grid2x2Plus, Hand, Headset, Heart, House, Image, Import, Inbox, Italic, Key, Languages,
+  Laptop, LayoutGrid, LetterB, LetterH, Lightbulb, Link, List, ListOrdered, ListTodo, Lock, LogIn, Mail,
+  MapPin, Maximize2, Menu, MessageCircle, Mic, Minus, Monitor, Network, NotebookText, PanelLeft, PanelRight,
+  Paperclip, Pause, Pencil, Pin, Plane, Play, Plug, Plus, QuestionMark, RefreshCw, Reply, RotateCw, ScanText,
+  Scissors, Search, Send, SeparatorHorizontal, Settings, Settings2, Share, Shield, ShoppingCart, Smartphone,
+  Square, SquareKanban, Star, SquarePen, SquareSplitHorizontal, SquareTerminal, Strikethrough, Table, TextAlignStart,
+  TextQuote, Trash, TriangleExclamationPoint, Undo2, Unlink, User, Utensils, Volume1, VolumeX, WandSparkles,
+  WifiOff, Wrench, X, Zap,
+} from "lucide";
 
 export type IconName =
   | "back" | "more" | "plus" | "minus" | "up" | "stop" | "model" | "terminal" | "file" | "pen" | "search" | "globe" | "attach" | "image"
@@ -6,190 +26,212 @@ export type IconName =
   | "folder" | "folderplus" | "settings" | "bots" | "inbox" | "board" | "changes" | "chart" | "loop" | "pause" | "play" | "trash" | "check" | "close" | "send"
   | "download" | "share" | "split" | "key" | "link" | "unlink" | "down" | "copy" | "paste" | "columns" | "eye" | "mic" | "fork" | "undo" | "phone" | "expand" | "external" | "reload" | "forward" | "panel" | "chevron" | "bolt" | "volume" | "mute" | "lock" | "bell" | "shield" | "conductor" | "journal" | "alert" | "compass" | "user" | "ask" | "archive" | "braces" | "sidebar" | "reply" | "flag" | "menu" | "pin" | "pushpin"
   | "compose" | "grid" | "vdots" | "camera" | "region" | "offline" | "logo" | "sliders" | "apps" | "import" | "eyeoff"
-  | "hand" | "ffwd" | "translate"
+  | "hand" | "ffwd" | "translate" | "star" | "gift"
   | "monitor" | "laptop"
   | "utensils" | "cart" | "dumbbell" | "plane" | "home" | "list" | "heart" | "book" | "wand"
   | "chat" | "headset" | "database" | "mail" | "cloud" | "checkcircle"
   | "note" | "bold" | "italic" | "strike" | "code" | "heading" | "quote" | "olist" | "tasks" | "table" | "hr"
-  | "open" | "cut" | "selectall";
+  | "open" | "cut" | "selectall"
+  | "info" | "gauge" | "coin" | "brain";
 
-const PATHS: Record<IconName, string> = {
-  // Open (an arrow into a door), so the plain one of a menu stands beside "Open beside" and "Open in a
-  // new tab" with a mark of its own; and the text commands of a right click: scissors for Cut and
-  // the corners of a selection round a few lines for Select all.
-  open: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3",
-  cut: "M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12",
-  selectall: "M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 9h8M8 12h8M8 15h5",
-  // The approval modes of a conversation in the operator's Chrome: a raised hand asks, a fast-forward
-  // goes on by itself (skipping is the alert sign).
-  hand: "M18 11V6a2 2 0 0 0-4 0v4M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L6 15",
-  ffwd: "M13 19l9-7-9-7zM2 19l9-7-9-7z",
-  // The calendar's type icons: an agent names one of these for a type it makes (or an emoji).
-  utensils: "M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 3c-1.7 1-3 3.3-3 6v4h3M17 3v18",
-  cart: "M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6M9 20h.01M17 20h.01",
-  dumbbell: "M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12",
-  plane: "M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z",
-  home: "M3 11l9-7 9 7M5 10v10h14V10M10 20v-6h4v6",
-  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
-  heart: "M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z",
-  book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5",
-  // The nodes of a flow in an answer (see flow.ts), named by the emoji a model puts before a node:
-  // a conversation, a person on a headset, a store of records, a letter, a hosted service, a step done.
-  chat: "M7.9 20A9 9 0 1 0 4 16.1L2.5 21.5z",
-  headset: "M3 13a9 9 0 0 1 18 0M3 13h3v5H4a1 1 0 0 1-1-1zM21 13h-3v5h2a1 1 0 0 0 1-1zM21 17v1a4 4 0 0 1-4 4h-4",
-  database: "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6",
-  mail: "M3 5h18v14H3zM3 7l9 6 9-6",
-  cloud: "M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z",
-  checkcircle: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12l3 3 5-6",
-  // The Notes tab and its editor's toolbar: a page with a folded corner, then the marks of Markdown.
-  note: "M5 4h10l4 4v12H5zM15 4v4h4M8.5 12h7M8.5 16h4.5",
-  bold: "M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z",
-  italic: "M10 5h8M6 19h8M14 5l-4 14",
-  strike: "M4 12h16M16 7c-.8-1.3-2.2-2-4-2-2.5 0-4.5 1.2-4.5 3.2 0 1.2.6 2 1.8 2.6M8 17c.8 1.3 2.3 2 4 2 2.6 0 4.5-1.2 4.5-3.3 0-.6-.1-1.1-.4-1.5",
-  code: "M8 7l-5 5 5 5M16 7l5 5-5 5",
-  heading: "M6 4v16M18 4v16M6 12h12",
-  quote: "M5 5v14M9.5 7H19M9.5 12H19M9.5 17H16",
-  olist: "M10 6h11M10 12h11M10 18h11M4 4.5h1.5V9M3.5 9h3.5M3.5 14.5c.3-.9 2.7-1 2.7.4 0 1.2-2.7 2-2.7 3.6h2.9",
-  tasks: "M3 4.5h5v5H3zM3 14.5h5v5H3zM4.3 17l1.2 1.2 2-2.4M11.5 7H21M11.5 17H21",
-  table: "M3 5h18v14H3zM3 10h18M3 15h18M9 10v9M15 10v9",
-  hr: "M3 12h18M7 7h10M7 17h10",
-  back: "M15 18l-6-6 6-6",
-  more: "M5 12h.01M12 12h.01M19 12h.01",
-  plus: "M12 5v14M5 12h14",
-  minus: "M5 12h14",
-  up: "M12 19V5M5 12l7-7 7 7",
-  stop: "M7 7h10v10H7z",
-  model: "M4 12l8-8 8 8-8 8-8-8z",
-  terminal: "M4 5h16v14H4zM7 9l3 3-3 3M12 15h5",
-  file: "M6 3h8l4 4v14H6zM14 3v4h4",
-  pen: "M4 20l4-1 11-11-3-3L5 16zM13 6l3 3",
-  search: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM20 20l-4-4",
-  globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
-  // A character over a letter: the agent's text in the operator's language, on request.
-  translate: "M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6",
-  attach: "M21 12l-8 8a5 5 0 0 1-7-7l9-9a3 3 0 0 1 4 4l-9 9a1 1 0 0 1-2-2l8-8",
-  image: "M4 5h16v14H4zM8 13l3-3 4 4 2-2 3 3",
-  question: "M9 9a3 3 0 1 1 4 3c-1 .5-1 1-1 2M12 17h.01",
+/** One glyph as Lucide ships it: the SVG elements of a 24-unit drawing, each a tag and its attributes. */
+type IconNode = readonly (readonly [tag: string, attrs: Readonly<Record<string, string | number | undefined>>])[];
+
+/** The product's own mark: a frame inside a frame around a point. Lucide has no brand marks, and this
+ *  one is not an icon but the logo, so it keeps its drawing. */
+const LOGO: IconNode = [["path", { d: "M10 3.5H3.5v17h17v-17H14M10 16.5H7.5v-9h9v9H14M12 11.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6z" }]];
+
+/** `spawn` has no true equivalent in Lucide: a branch that gains a new line is the nearest to "start
+ *  another agent". `stop` is the one glyph drawn solid, below, because an empty square reads as a
+ *  checkbox rather than as Stop. The keys keep the order the icon picker of Settings shows them in. */
+const NODES: Record<IconName, IconNode> = {
+  open: LogIn,
+  info: Info,
+  gauge: Gauge,
+  coin: Coins,
+  brain: Brain,
+  cut: Scissors,
+  selectall: ScanText,
+  hand: Hand,
+  star: Star,
+  gift: Gift,
+  ffwd: FastForward,
+  utensils: Utensils,
+  cart: ShoppingCart,
+  dumbbell: Dumbbell,
+  plane: Plane,
+  home: House,
+  list: List,
+  heart: Heart,
+  book: Book,
+  chat: MessageCircle,
+  headset: Headset,
+  database: Database,
+  mail: Mail,
+  cloud: Cloud,
+  checkcircle: CircleCheck,
+  note: FileText,
+  bold: LetterB,
+  italic: Italic,
+  strike: Strikethrough,
+  code: Code,
+  heading: LetterH,
+  quote: TextQuote,
+  olist: ListOrdered,
+  tasks: ListTodo,
+  table: Table,
+  hr: SeparatorHorizontal,
+  back: ChevronLeft,
+  more: Ellipsis,
+  plus: Plus,
+  minus: Minus,
+  up: ArrowUp,
+  stop: Square,
+  model: Diamond,
+  terminal: SquareTerminal,
+  file: File,
+  pen: Pencil,
+  search: Search,
+  globe: Globe,
+  translate: Languages,
+  attach: Paperclip,
+  image: Image,
+  question: QuestionMark,
   // The same question in a ring: what waits for the operator, where a bare "?" would read as help.
-  ask: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.3M12 16.8h.01",
-  skill: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
-  spawn: "M12 3v6M12 15v6M3 12h6M15 12h6",
-  bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3 11v1h6v-1a6 6 0 0 0-3-11z",
-  // The prompt coach: a wand and the sparks it leaves, for "make this better" rather than "write".
-  wand: "M4 20L15 9M13 7l4 4M18 3v3M16.5 4.5h3M20 9v2M19 10h2M10 3v2M9 4h2",
-  wrench: "M14 4a5 5 0 0 0 6 6l-9 9-3-3 9-9a5 5 0 0 0-3-3z",
-  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
-  calendar: "M4 5h16v16H4zM4 9h16M8 3v4M16 3v4M8 13h3M14 13h3M8 17h3",
-  plug: "M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3",
-  dot: "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
-  compact: "M4 7h16M4 12h10M4 17h6",
-  folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  folderplus: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10.5v6M9 13.5h6",
-  archive: "M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4",
-  braces: "M8 4c-2 0-2 1-2 3v2c0 1.5-.8 2.4-2 3 1.2.6 2 1.5 2 3v2c0 2 0 3 2 3M16 4c2 0 2 1 2 3v2c0 1.5.8 2.4 2 3-1.2.6-2 1.5-2 3v2c0 2 0 3-2 3",
-  settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
-  bots: "M5 8h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM12 4v4M9 13h.01M15 13h.01M9 17h6",
-  inbox: "M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z",
-  board: "M4 5h16M4 12h16M4 19h10",
-  changes: "M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4-4 4-8 6",
-  chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
-  loop: "M4 12a8 8 0 0 1 14-5.3L20 8M20 4v4h-4M20 12a8 8 0 0 1-14 5.3L4 16M4 20v-4h4",
-  pause: "M8 6h3v12H8zM13 6h3v12h-3z",
-  play: "M7 5l12 7-12 7z",
-  trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
-  check: "M5 12l5 5 9-11",
-  close: "M6 6l12 12M18 6L6 18",
-  send: "M4 12l16-8-6 16-2-6z",
-  download: "M12 4v12M6 10l6 6 6-6M4 20h16",
-  share: "M4 12v8h16v-8M12 3v12M7 8l5-5 5 5",
-  split: "M4 5h16v14H4zM12 5v14",
-  key: "M15 3a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM10 14l-7 7M6 18l2 2M9 15l2 2",
-  lock: "M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4",
-  // A terminal in the sandbox: it writes only to the project's folders.
-  shield: "M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z",
-  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
-  unlink: "M10 14a4 4 0 0 0 5.7 0l1.3-1.3M14 10a4 4 0 0 0-5.7 0l-1.3 1.3M4 4l16 16",
-  down: "M12 5v14M5 12l7 7 7-7",
-  copy: "M9 9h11v11H9zM15 9V4H4v11h5",
-  // A clipboard: what comes off it goes onto the page.
-  paste: "M9 3h6v4H9zM9 5H5v16h14V5h-4M9 13h6M9 17h4",
-  // A branch leaving the line it came from: what forking a session from a turn does.
-  fork: "M7 4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM12 15a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM7 9v1a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3V9M12 13v2",
-  // The undo arrow: the history goes back to this point.
-  undo: "M4 9h11a5 5 0 0 1 0 10H8M4 9l4-4M4 9l4 4",
-  reply: "M9 14l-5-5 5-5M4 9h10a6 6 0 0 1 6 6v4",
-  columns: "M3 5h18v14H3zM12 5v14",
-  eyeoff: "M3 3l18 18M10.6 6.1A10.7 10.7 0 0 1 12 6c6 0 10 6 10 6a17.6 17.6 0 0 1-3.2 3.8M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7c1.8 0 3.4-.6 4.8-1.4M9.9 9.9a3 3 0 0 0 4.2 4.2",
-  eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
-  mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6",
-  monitor: "M3 4h18v12H3zM8 20h8M12 16v4",
-  // A remote chat and a paired device: a laptop whose screen holds a prompt, apart from the monitor on
-  // its stand (the Computer control) and the bare window of a terminal in the dock.
-  laptop: "M5 5h14v10H5zM2 19h20M8.5 8.5l2 1.75-2 1.75M12.5 12h3",
-  phone: "M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2",
-  expand: "M15 4h5v5M20 4l-6 6M9 20H4v-5M4 20l6-6",
-  external: "M14 4h6v6M20 4l-9 9M18 13v6H5V6h6",
-  reload: "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5",
-  forward: "M9 18l6-6-6-6",
-  panel: "M3 5h18v14H3zM15 5v14",
-  // The panel's mirror, a column on the left: the file tree beside a previewed file.
-  sidebar: "M3 5h18v14H3zM9 5v14",
-  chevron: "M6 9l6 6 6-6",
-  bolt: "M13 3L6 13h6l-2 8 8-11h-6l1-7z",
-  volume: "M4 10v4h3l5 4V6L7 10H4zM16 9.5a3.5 3.5 0 0 1 0 5",
-  mute: "M4 10v4h3l5 4V6L7 10H4zM16 9l5 6M21 9l-5 6",
-  bell: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0",
-  // The orchestrator: one point that hands work down to three.
-  alert: "M12 3l10 18H2zM12 10v4M12 17.5h.01",
-  conductor: "M12 3a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM12 8v4M5 16v-2h14v2M5 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 12v4M12 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
-  journal: "M6 3h11a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6zM9 3v18M12 8h3M12 12h3",
-  compass: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z",
-  user: "M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4.5 20.5c.8-3.5 3.8-5.5 7.5-5.5s6.7 2 7.5 5.5",
-  // A task's priority, and the planner's drawer of calendars and tasks on a phone.
-  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
-  menu: "M4 7h16M4 12h16M4 17h16",
-  // An event's place.
-  pin: "M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
-  // A chat or a project held at the top of the sidebar: a drawing pin, not the map pin above.
-  pushpin: "M12 16v5M8 4h8M9.5 4v5.5L7 13v3h10v-3l-2.5-3.5V4",
-  // A spoken conversation, as opposed to the microphone of a voice note: the phone composer's white
-  // circle when the field is empty.
-  // A page and a pen: a new chat, the one creation action of the phone drawer.
-  compose: "M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M18.4 2.6a2 2 0 0 1 2.9 2.9L12 15l-4 1 1-4z",
-  grid: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
-  // Three tiles and a fourth still to come: "everything else". The three dots it replaced were thin
-  // enough to vanish on a dim monitor, and the plain grid already says "all projects".
-  apps: "M5.5 4h3A1.5 1.5 0 0 1 10 5.5v3A1.5 1.5 0 0 1 8.5 10h-3A1.5 1.5 0 0 1 4 8.5v-3A1.5 1.5 0 0 1 5.5 4zM15.5 4h3A1.5 1.5 0 0 1 20 5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 14 8.5v-3A1.5 1.5 0 0 1 15.5 4zM5.5 14h3a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 8.5 20h-3A1.5 1.5 0 0 1 4 18.5v-3A1.5 1.5 0 0 1 5.5 14zM17 14v6M14 17h6",
-  import: "M12 3v9M8.5 8.5 12 12l3.5-3.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5",
-  vdots: "M12 5h.01M12 12h.01M12 19h.01",
-  // A selection's corners, the way a crop tool draws them: the area appshot.
-  region: "M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14",
-  camera: "M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 9.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z",
-  offline: "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.3-1.6M2 8.8a15 15 0 0 1 4.2-2.7M22 8.8A15 15 0 0 0 11 5M12 20h.01",
-  // The brand's mark: a frame inside a frame around a point, drawn in the accent on the phone's home.
-  logo: "M10 3.5H3.5v17h17v-17H14M10 16.5H7.5v-9h9v9H14M12 11.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6z",
-  // A list's options: what it shows and how, behind one glyph on a phone's board.
-  sliders: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM9 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+  ask: CircleQuestionMark,
+  skill: Blocks,
+  spawn: GitBranchPlus,
+  bulb: Lightbulb,
+  wand: WandSparkles,
+  wrench: Wrench,
+  clock: Clock,
+  calendar: CalendarDays,
+  plug: Plug,
+  dot: Dot,
+  compact: TextAlignStart,
+  folder: Folder,
+  folderplus: FolderPlus,
+  archive: Archive,
+  braces: Braces,
+  settings: Settings,
+  bots: Bot,
+  inbox: Inbox,
+  board: SquareKanban,
+  changes: GitBranch,
+  chart: ChartNoAxesColumn,
+  loop: RefreshCw,
+  pause: Pause,
+  play: Play,
+  trash: Trash,
+  check: Check,
+  close: X,
+  send: Send,
+  download: Download,
+  share: Share,
+  split: SquareSplitHorizontal,
+  key: Key,
+  lock: Lock,
+  shield: Shield,
+  link: Link,
+  unlink: Unlink,
+  down: ArrowDown,
+  copy: Copy,
+  paste: ClipboardPaste,
+  fork: GitFork,
+  undo: Undo2,
+  reply: Reply,
+  columns: Columns2,
+  eyeoff: EyeOff,
+  eye: Eye,
+  mic: Mic,
+  monitor: Monitor,
+  laptop: Laptop,
+  phone: Smartphone,
+  expand: Maximize2,
+  external: ExternalLink,
+  reload: RotateCw,
+  forward: ChevronRight,
+  panel: PanelRight,
+  sidebar: PanelLeft,
+  chevron: ChevronDown,
+  bolt: Zap,
+  volume: Volume1,
+  mute: VolumeX,
+  bell: Bell,
+  alert: TriangleExclamationPoint,
+  conductor: Network,
+  journal: NotebookText,
+  compass: Compass,
+  user: User,
+  flag: Flag,
+  menu: Menu,
+  // An event's place; `pushpin` below is the drawing pin of a chat or project held at the top of the sidebar.
+  pin: MapPin,
+  pushpin: Pin,
+  compose: SquarePen,
+  grid: LayoutGrid,
+  // Three tiles and a fourth still to come: "everything else".
+  apps: Grid2x2Plus,
+  import: Import,
+  vdots: EllipsisVertical,
+  region: Crop,
+  camera: Camera,
+  offline: WifiOff,
+  logo: LOGO,
+  sliders: Settings2,
 };
 
+const FILLED: ReadonlySet<IconName> = new Set<IconName>(["stop"]);
+
 /** Every name of the set, in the order the table lists them: the icon picker of Settings → Navigation. */
-export const ICON_NAMES = Object.keys(PATHS) as IconName[];
+export const ICON_NAMES = Object.keys(NODES) as IconName[];
 
 export function isIconName(value: unknown): value is IconName {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(PATHS, value);
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(NODES, value);
+}
+
+/** The sizes the interface draws icons at. Every size a caller asks for lands on one of these, so a
+ *  screen that asks for 13 or 17 draws the same icon as its neighbour and none sits half a pixel off. */
+export const ICON_SIZES = [12, 14, 16, 20, 24] as const;
+export type IconSize = (typeof ICON_SIZES)[number];
+
+export const ICON_STROKE = 1.75;
+
+/** Up to 12 draws at 12, 13 and 14 at 14, 15 to 18 at 16, 19 to 22 at 20, anything larger at 24. */
+export function snapIconSize(size: number): IconSize {
+  if (size <= 12) return 12;
+  if (size <= 14) return 14;
+  if (size <= 18) return 16;
+  if (size <= 22) return 20;
+  return 24;
+}
+
+function nodeOf(name: IconName, path?: string | null): IconNode {
+  return path ? [["path", { d: path }]] : NODES[name];
+}
+
+function attributes(attrs: Readonly<Record<string, string | number | undefined>>): string {
+  return Object.entries(attrs)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => ` ${key}="${String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`)
+    .join("");
 }
 
 /** The same drawing as markup, for HTML the app writes as a string (an answer's rendered Markdown). */
-export function iconSvg(name: IconName, size = 18): string {
-  return `<svg class="ic ic-${name}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
+export function iconSvg(name: IconName, size = 16): string {
+  const px = snapIconSize(size);
+  const fill = FILLED.has(name) ? "currentColor" : "none";
+  const shapes = NODES[name].map(([tag, attrs]) => `<${tag}${attributes(attrs)}/>`).join("");
+  return `<svg class="ic ic-${name}" viewBox="0 0 24 24" width="${px}" height="${px}" fill="${fill}" stroke="currentColor" stroke-width="${ICON_STROKE}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shapes}</svg>`;
 }
 
 /** `path` is a page's own glyph, a `d` string already checked by `iconPath` in navconfig.ts: drawn
- *  in the same stroke as the set, so a page's icon on the rail does not look pasted in. */
-export function Icon({ name, size = 18, path }: { name: IconName; size?: number; path?: string | null }) {
+ *  in the same stroke as the set, so a page's icon in the sidebar does not look pasted in. */
+export function Icon({ name, size = 16, path }: { name: IconName; size?: number; path?: string | null }) {
+  const px = snapIconSize(size);
   return (
-    <svg className={`ic ${path ? "ic-custom" : `ic-${name}`}`} viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={path || PATHS[name]} />
+    <svg className={`ic ${path ? "ic-custom" : `ic-${name}`}`} viewBox="0 0 24 24" width={px} height={px} fill={!path && FILLED.has(name) ? "currentColor" : "none"} stroke="currentColor" strokeWidth={ICON_STROKE} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {nodeOf(name, path).map(([tag, attrs], index) => createElement(tag, { key: index, ...attrs }))}
     </svg>
   );
 }

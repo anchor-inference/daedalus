@@ -34,7 +34,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import EVENTS, GATES, Unhandled, event_stream_hello, folders, serve_shared_post  # noqa: E402
+from api_stub import EVENTS, Unhandled, answer_shared, event_stream_hello, folders, serve_shared_post  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST = ROOT / "miniapp" / "dist"
@@ -197,8 +197,12 @@ class Stub(BaseHTTPRequestHandler):
         if path == f"/api/sessions/{SESSION_ID}/checkpoints":
             # Which turns can still put the files back. The screen asks once, when it opens.
             return {"checkpoints": [], "total": 0, "pruned": False, "pruned_before": None, "removed": 0, "note": "", "keep_days": 14, "keep_last": 40}
-        if path in GATES:
-            return GATES[path]
+        # The routes every harness answers alike (the gates, and the chat's notes, links and helpers that
+        # the screen reads as it opens): a run that asked one of them used to end with exit 1 however the
+        # numbers came out.
+        shared = answer_shared("GET", path)
+        if shared is not None and shared[0] == 200 and "json" in shared[1]:
+            return json.loads(shared[2])
         # Answering {} here is how this harness came to measure the "Add a model" screen for two
         # minutes and then time out. An unrecognised path is reported and fails the run instead.
         Stub.unhandled.record(path)

@@ -70,14 +70,14 @@ def tall_enough(page: Page, selector: str, where: str) -> None:
 def tabs(page: Page, words: dict, active: str | None) -> None:
     bar = page.locator("nav.project-tabs")
     expect(bar).to_be_visible()
-    expect(page.locator("nav.tabbar:not(.project-tabs)")).to_have_count(0)
+    expect(page.locator("nav.tabbar")).to_have_count(0)
     # While the bar's code is still loading, App.tsx holds its place with an empty bar of the same
     # class, so the tabs are waited for rather than read at once from that placeholder.
-    items = bar.locator(":scope > a, :scope > button")
+    items = bar.locator(".tabs-list > .tab")
     expect(items).to_have_count(len(words["tabs"]))
     assert items.evaluate_all("els => els.map(e => e.dataset.tab)") == ["orchestrator", "board", "team", "terminals", "more"]
     labels = [x.strip() for x in items.all_inner_texts()]
-    assert [lbl.split("\n")[-1] for lbl in labels] == words["tabs"], labels
+    assert [lbl.split("\n")[0] for lbl in labels] == words["tabs"], labels
     # Five equal slots across the whole width: no item cut off, none left hanging with space beside it.
     boxes = [b for b in (it.bounding_box() for it in items.all()) if b]
     width = page.evaluate("innerWidth")
@@ -87,7 +87,7 @@ def tabs(page: Page, words: dict, active: str | None) -> None:
     # names do there; from the common phone widths up every name is read whole.
     for label in bar.locator(".tab-label").all() if width >= 360 else []:
         assert label.evaluate("e => e.scrollWidth <= e.clientWidth + 1"), f"{label.inner_text()} is cut at {width}px"
-    current = bar.locator(".active")
+    current = bar.locator(".tab.on")
     if active is None:
         expect(current).to_have_count(0)
     else:
@@ -96,18 +96,18 @@ def tabs(page: Page, words: dict, active: str | None) -> None:
 
 def more_sheet(page: Page, words: dict, badge: str | None) -> None:
     """Opens the More sheet and checks it lists the project's other pages, with the decisions' count."""
-    page.locator("nav.project-tabs button[data-tab='more']").tap()
+    page.locator("nav.project-tabs [data-tab='more']").tap()
     sheet = page.locator(".sheet.more-sheet")
     expect(sheet).to_be_visible()
-    items = sheet.locator(".ph-mrow")
+    items = sheet.locator(".menu-row")
     expect(items).to_have_count(len(words["more"]))
-    assert [x.strip() for x in items.locator(".ph-mrow-t").all_inner_texts()] == words["more"], items.all_inner_texts()
-    count = sheet.locator(".ph-mrow[data-more='attention'] .ph-badge")
+    assert [x.strip() for x in items.locator(".menu-row-t").all_inner_texts()] == words["more"], items.all_inner_texts()
+    count = sheet.locator(".menu-row[data-more='attention'] .badge")
     if badge is None:
         expect(count).to_have_count(0)
     else:
         expect(count).to_have_text(badge)
-    expect(page.locator("nav.project-tabs button[data-tab='more']")).to_have_attribute("aria-expanded", "true")
+    expect(page.locator("nav.project-tabs [data-tab='more']")).to_have_attribute("aria-expanded", "true")
 
 
 def run_one(page: Page, lang: str, width: int) -> None:
@@ -127,18 +127,18 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(banner).to_contain_text(words["needs"])
     expect(banner).to_contain_text(words["ira"])
     # The team's tab counts the requests waiting; More counts every decision, the requests among them.
-    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_text("2")
-    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_text("2")
+    expect(page.locator("nav.project-tabs [data-tab='team'] .tab-count")).to_have_text("2")
+    expect(page.locator("nav.project-tabs [data-tab='more'] .tab-count")).to_have_text("2")
     # The sheet repeats the count on the decisions' own item, so it is clear where the badge leads.
     more_sheet(page, words, "2")
     page.keyboard.press("Escape")
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     tabs(page, words, "team")
-    tall_enough(page, ".needs-card .needs-row .ph-btn, .needs-card .needs-pen", where)
+    tall_enough(page, ".needs-card .needs-row .btn, .needs-card .needs-pen", where)
     items = page.locator("[data-staff]")
     expect(items).to_have_count(6)
     expect(items.filter(has_text="Olga")).to_contain_text(invented["olga.role"])
-    tall_enough(page, "[data-staff] .ph-row", where)
+    tall_enough(page, "[data-staff] .list-row", where)
     fits(page, f"{where} team")
 
     # The board draws no card of its own: every request is a row of its Needs-you section, with an
@@ -153,7 +153,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     expect(banner).to_have_attribute("data-ask", "q9w2e1")
 
     # One tap answers Ira; the orchestrator's own question takes the banner, and is answered in words.
-    banner.locator(".needs-row .ph-btn", has_text=invented["ask.before"]).tap()
+    banner.locator(".needs-row .btn", has_text=invented["ask.before"]).tap()
     expect(banner).to_have_attribute("data-ask", "q4r8tz")
     assert focus.answers[-1] == ("ask-ira", {"selected": [invented["ask.before"]]}), focus.answers
     expect(banner).to_contain_text(words["orchestrator"])
@@ -163,14 +163,14 @@ def run_one(page: Page, lang: str, width: int) -> None:
     size = field.evaluate("(e) => parseFloat(getComputedStyle(e).fontSize)")
     assert size >= 16, f"{where}: the answer field is {size}px, and Safari would zoom into it"
     field.fill("after, like last spring")
-    banner.locator(".needs-own .ph-btn.primary").tap()
+    banner.locator(".needs-own .btn.primary").tap()
     expect(page.locator(".needs-card")).to_have_count(0)
     assert focus.answers[-1] == ("ask-spring", {"text": "after, like last spring"}), focus.answers
-    expect(page.locator("nav.project-tabs a[data-tab='team'] .tab-badge")).to_have_count(0)
-    expect(page.locator("nav.project-tabs button[data-tab='more'] .tab-badge")).to_have_count(0)
+    expect(page.locator("nav.project-tabs [data-tab='team'] .tab-count")).to_have_count(0)
+    expect(page.locator("nav.project-tabs [data-tab='more'] .tab-count")).to_have_count(0)
 
     # A member with a conversation opens it without the tabs, and its back returns to the team.
-    items.filter(has_text="Lev").locator(".ph-row").tap()
+    items.filter(has_text="Lev").locator(".list-row").tap()
     page.wait_for_url(f"**/project/{PID}/s/sess-lev**")
     expect(page.locator(".chat.in-project")).to_be_visible()
     expect(page.locator("nav.project-tabs")).to_have_count(0)
@@ -179,10 +179,10 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.wait_for_url(f"**/project/{PID}/team**")
 
     # The board is a tab of its own: the list under chips.
-    page.locator("nav.project-tabs a[data-tab='board']").tap()
+    page.locator("nav.project-tabs [data-tab='board']").tap()
     page.wait_for_url(f"**/project/{PID}/board**")
     tabs(page, words, "board")
-    expect(page.locator(".ph-board .ph-top-t")).to_have_text(words["board"])
+    expect(page.locator(".ph-board .pagehead-t")).to_have_text(words["board"])
     expect(page.locator(".pboard-cols")).to_have_count(0)
     page.locator(".ph-board .ph-chip", has_text=words["review"]).tap()
     # A branch result cannot be accepted or merged without the exact current receipt and verdict: the
@@ -195,7 +195,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # The terminals: rows that lead to the phone's terminal. The task's page is closed first.
     page.keyboard.press("Escape")
     expect(page.locator(".ph-taskpage")).to_have_count(0)
-    page.locator("nav.project-tabs a[data-tab='terminals']").tap()
+    page.locator("nav.project-tabs [data-tab='terminals']").tap()
     page.wait_for_url(f"**/project/{PID}/terminals**")
     tabs(page, words, "terminals")
     rows = page.locator(".ph-tcard")
@@ -205,7 +205,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     fits(page, f"{where} terminals")
 
     # The orchestrator: its chat, its composer above the tabs.
-    page.locator("nav.project-tabs a[data-tab='orchestrator']").tap()
+    page.locator("nav.project-tabs [data-tab='orchestrator']").tap()
     page.wait_for_selector(".chat.in-project .event-card", timeout=10000)
     tabs(page, words, "orchestrator")
     composer = page.locator(".composer").bounding_box()
@@ -216,7 +216,7 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # More opens its sheet over the page; the history opens from it, and the bar stays with More lit.
     more_sheet(page, words, None)
     fits(page, f"{where} more")
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='journal']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='journal']").tap()
     page.wait_for_url(f"**/project/{PID}/journal**")
     page.wait_for_selector(".journal-entry", timeout=10000)
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
@@ -224,21 +224,21 @@ def run_one(page: Page, lang: str, width: int) -> None:
     # Every other page of the sheet keeps the bar too, and its own item is the one marked.
     for key in ("attention", "brief", "wakeups", "folders"):
         more_sheet(page, words, None)
-        page.locator(f".sheet.more-sheet .ph-mrow[data-more='{key}']").tap()
+        page.locator(f".sheet.more-sheet .menu-row[data-more='{key}']").tap()
         page.wait_for_url(f"**/project/{PID}/{key}**")
         tabs(page, words, "more")
         fits(page, f"{where} {key}")
     more_sheet(page, words, None)
-    expect(page.locator(".sheet.more-sheet .ph-mrow.on")).to_have_attribute("data-more", "folders")
+    expect(page.locator(".sheet.more-sheet .menu-row.on")).to_have_attribute("data-more", "folders")
     # The project's settings open in place of the sheet.
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='settings']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='settings']").tap()
     expect(page.locator(".sheet.more-sheet")).to_have_count(0)
     expect(page.get_by_role("dialog").get_by_role("textbox", name="Name" if lang == "en" else "Название")).to_have_value("Bakery 2.0")
     page.keyboard.press("Escape")
     expect(page.get_by_role("dialog")).to_have_count(0)
     # And "All projects" leaves for orchestration's list.
     more_sheet(page, words, None)
-    page.locator(".sheet.more-sheet .ph-mrow[data-more='projects']").tap()
+    page.locator(".sheet.more-sheet .menu-row[data-more='projects']").tap()
     page.wait_for_url("**/app/orchestration/projects**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
 
@@ -248,17 +248,17 @@ def run_one(page: Page, lang: str, width: int) -> None:
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
     page.locator(".pagehead .ph-menu").first.tap()
     drawer = page.locator(".ph-drawer-root.open")
-    expect(drawer.locator(".ph-seg button").nth(1)).to_have_attribute("aria-checked", "true")
-    expect(drawer.locator("[data-screen='inbox']")).to_be_visible()
-    expect(drawer.locator("[data-screen='settings']")).to_be_visible()
-    drawer.locator("[data-screen='inbox']").tap()
+    expect(drawer.locator(".sb-mode")).to_have_attribute("data-mode", "orchestration")
+    expect(drawer.locator("[data-nav='inbox']")).to_be_visible()
+    expect(drawer.locator("[data-nav='settings']")).to_be_visible()
+    drawer.locator("[data-nav='inbox']").tap()
     page.wait_for_url("**/app/inbox**")
     expect(page.locator("nav.project-tabs")).to_have_count(0)
     expect(page.locator("nav.tabbar")).to_have_count(0)
-    # The project's bar is the redesign's: 52 px tall above the home indicator (56 until the phone
+    # The project's bar is 52 px tall above the home indicator (56 until the phone
     # came down a step).
     page.goto(f"{BASE}/project/{PID}/team?token=t&lang={lang}")
-    slot = page.locator("nav.project-tabs > a").first.bounding_box()
+    slot = page.locator("nav.project-tabs .tab").first.bounding_box()
     assert slot and round(slot["height"]) == 52, f"{where}: a project tab is {slot}"
 
 

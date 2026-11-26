@@ -32,7 +32,7 @@ from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from browser_stub import BrowserStub, render_scenes  # noqa: E402
 from check_settings_browser import BROWSER  # noqa: E402
 from event_feed import EventFeed  # noqa: E402
-from screenshots import S1, UNHANDLED, stub  # noqa: E402
+from screenshots import S1, UNHANDLED, open_tool, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -212,9 +212,9 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     page = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark").new_page()
     page.route("**/api/**", host.route)
     page.goto(f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}")
-    tab = page.locator(".panel-tab[data-tab='browser']")
-    tab.wait_for(timeout=15000)
-    tab.click()
+    # The browser is a tool the operator opens in the panel, not a tab that is always there.
+    page.wait_for_selector(".panel .panel-add", timeout=15000)
+    open_tool(page, "browser")
     page.wait_for_selector(".panel .bp-switch", timeout=10000)
     options = page.locator(".panel .bp-switch button").all_inner_texts()
     print(f"[{lang}] switch: {options}")

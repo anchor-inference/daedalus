@@ -235,7 +235,7 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     anyway, a reply cut off with no text is retried once at twice the budget.
     """
     if not vision:
-        raise VisionUnavailable("no vision model is configured: mark a model as taking images in Settings → Models and pick it under Image understanding")
+        raise VisionUnavailable("no vision model is configured: open a model in Settings → Models and providers and switch on its Images, then pick it under Settings → Models for tasks → Image understanding")
     # A route of the vision model carries its effort as a fifth part; the session's own model standing in
     # for it carries none and does not think, as the helper it is standing in for.
     provider, model, blobs, tenant, *rest = vision
@@ -243,7 +243,7 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     max_out = int(getattr(getattr(getattr(manager, "config", None), "vision", None), "max_output_tokens", 2000))
     accepts = getattr(provider, "accepts_images", None)
     if accepts is None or not accepts(model):
-        raise VisionUnavailable(f"the vision model {model} is not marked as taking images; enable 'images' on it in Settings → Models")
+        raise VisionUnavailable(f"the vision model {model} is not marked as taking images; enable 'images' on it in Settings → Models and providers")
     mime = image_mime(data, mime)
     try:
         meta = await blobs.put(tenant, data, content_type=mime)

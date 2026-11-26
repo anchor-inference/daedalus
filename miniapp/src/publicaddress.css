@@ -1,16 +1,14 @@
 /* Settings → Public address (publicaddress.tsx) and a service's QR for a phone (servicephone.tsx). What
    is not here comes from the sections beside it: rows, the choice list and the copy field are theirs. */
 
-.address-card > .sub, .address-problem, .address-detail { margin: var(--space-2) 0 0; }
 .address-status.ok { color: var(--ok); }
 .address-status.attn { color: var(--warn); }
 .address-status.bad { color: var(--bad); }
-/* The ways to open the address are rows of the card under a hairline. A row reaches a little past
-   the text on either side, so its fill has the room a list row's has. */
-.address-providers { margin: var(--space-3) 0 0; padding-top: var(--space-2); border-top: 1px solid var(--line); }
-.address-providers .access-option { margin: 0 calc(-1 * var(--space-2)); }
 .address-detail > summary { cursor: pointer; color: var(--fg-2); font-size: var(--fs-12); }
 .address-detail code { display: block; margin-top: 4px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); color: var(--fg-2); font-size: var(--fs-12); overflow-wrap: anywhere; }
+/* The address and its Copy are one line of the card, the field taking what the button leaves. */
+.address-card .share-field { display: flex; align-items: center; gap: 8px; margin: 0; }
+.address-card .share-field .field { flex: 1; min-width: 0; margin: 0; }
 
 .service-phone { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .service-phone-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

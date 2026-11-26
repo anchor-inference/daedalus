@@ -73,7 +73,7 @@ def run() -> int:
             problems.append(f"the first message was not sent: {posted[1:]}")
 
         page.goto(f"{BASE}/agents/{S1}?token=t&lang=en&scheme=dark&panel=details", wait_until="networkidle")
-        expect(page.locator(".sidebar .sb-new")).to_be_visible()
+        expect(page.locator(".sidebar .sb-pinned-nav [data-nav='new']")).to_be_visible()
         project = page.locator('.sidebar [data-project="9f3c2a1b7d40"]')
         # The project of the open chat opens itself: its three chats on the guide line.
         expect(project.locator("[data-session]")).to_have_count(3)
@@ -122,7 +122,11 @@ def run() -> int:
         # Working first, with its task and model under its name.
         expect(rows.first).to_contain_text("link-check")
         expect(rows.first).to_contain_text("Check every link")
-        expect(page.locator('.panel-tab[data-tab="jobs"]')).to_be_visible()
+        # The helpers are a tool of their own: the background jobs are still offered beside them.
+        page.locator(".panel .panel-add").click()
+        expect(page.locator(".panel-tools [data-tool='jobs']")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(page.locator(".menu.panel-tools")).to_have_count(0)
         rows.first.locator(".subagent-card-head").click()
         opened = page.locator(".panel .subagent-open")
         expect(opened.locator(".subagent-head")).to_contain_text("link-check")
@@ -180,10 +184,10 @@ def run() -> int:
             section = page_.locator(".ph-chats section[data-project]").first
             name = section.locator(".ph-sec-t").inner_text()
             section.locator(".ph-sec-act .ph-ib").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
+            expect(page_.locator(".menu-sheet .menu-row").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
-            section.locator(".ph-row-more").first.click()
-            expect(page_.locator(".ph-actions .ph-mrow").first).to_have_text(f"New agent in {name}")
+            section.locator(".list-row-more").first.click()
+            expect(page_.locator(".menu-sheet .menu-row").first).to_have_text(f"New agent in {name}")
             page_.keyboard.press("Escape")
             if width != 390:
                 page_.close()

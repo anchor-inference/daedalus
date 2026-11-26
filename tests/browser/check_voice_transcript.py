@@ -26,6 +26,7 @@ from playwright.sync_api import sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = shots.BASE
 
@@ -126,8 +127,10 @@ def check_through_the_switch(browser, check, visual: str) -> None:  # type: igno
     context, page = open_page(browser, wire, {"width": 1440, "height": 900}, visual)
     control = VISUALS[visual]
     print(f"-- through the switch, with the {visual}")
-    page.wait_for_selector(".voice-stage.phase-speaking", timeout=15000)
-    page.wait_for_function("window.__played.length > 0", timeout=15000)
+    # Conditions that are met at once on a quiet machine; the limit is for a loaded one, where the
+    # first audio of the answer was seen to start more than fifteen seconds after the page.
+    page.wait_for_selector(".voice-stage.phase-speaking", timeout=60000)
+    page.wait_for_function("window.__played.length > 0", timeout=60000)
     # The microphone is opened first: what is being asserted is that it survives the change, and a
     # microphone that was never opened survives nothing.
     page.locator(control).click()
@@ -211,7 +214,7 @@ def check_the_agent(browser, check) -> None:  # type: ignore[no-untyped-def]
     check(composer.count() == 1 and composer.is_visible(), "an agent's own composer is there, because typing to it is the point")
     composer.fill("redo the two with the wrong VAT line, please")
     composer.press("Control+Enter")
-    page.wait_for_timeout(700)
+    until(page, lambda: any(p.endswith("/messages") for p in wire.posted))
     sent = [p for p in wire.posted if p.endswith("/messages")]
     check(len(sent) == 1, f"what was typed went to that agent's session ({sent})")
 

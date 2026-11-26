@@ -2,7 +2,7 @@
    extension's own 32 px strip. The page is the column: a header, the conversation, what the agent is
    doing, the card that waits for the operator, and the composer at the bottom. */
 
-html:has(.sidepanel), body:has(.sidepanel) { height: 100%; background: var(--surface-1); overflow: hidden; }
+html:has(.sidepanel), body:has(.sidepanel) { height: 100%; background: var(--wash); overflow: hidden; }
 body:has(.sidepanel) #root { height: 100%; min-height: 0; }
 
 /* The panel's own type scale, one step under the app's. A side panel is a narrow column beside the
@@ -13,31 +13,39 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
    control heights come back with them, since this is not a touch screen. density.test.ts holds this
    block to the claim. */
 .sidepanel {
-  --fs-11: 11px; --fs-12: 12px; --fs-13: 12px; --fs-14: 13px; --fs-15: 13px; --fs-16: 14px; --fs-17: 15px;
-  --fs-18: 15px; --fs-20: 16px; --fs-22: 17px; --fs-mono: 12px; --fs-prose: 13px;
-  --row-h: 36px; --row-h-dense: 32px; --ctl-h: 32px; --ctl-h-sm: 28px;
+  --fs-12: 12px; --fs-13: 12px; --fs-14: 13px; --fs-15: 13px; --fs-16: 14px; --fs-17: 15px;
+  --fs-18: 15px; --fs-20: 16px; --fs-22: 17px; --fs-28: 17px; --fs-mono: 12px; --fs-prose: 13px;
+  --row-h: 32px; --row-h-dense: 28px; --ctl-h: 32px; --ctl-h-sm: 28px;
   position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--surface-1);
+  background: var(--wash);
   color: var(--fg);
   font-family: var(--font);
   font-size: var(--fs-14);
   line-height: var(--lh-ui);
 }
+/* A menu or a sheet opened from the panel is drawn outside it, at the end of the body: it takes the
+   panel's scale too, or its rows would read a step larger than the column that opened them. */
+body:has(.sidepanel) .layer-pos, body:has(.sidepanel) .overlay-root {
+  --fs-12: 12px; --fs-13: 12px; --fs-14: 13px; --fs-15: 13px; --fs-16: 14px; --fs-17: 15px;
+  --fs-18: 15px; --fs-20: 16px; --fs-22: 17px; --fs-28: 17px; --fs-mono: 12px; --fs-prose: 13px;
+  --row-h: 32px; --row-h-dense: 28px; --ctl-h: 32px; --ctl-h-sm: 28px;
+}
 
 .sp-outside, .sp-loading { align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-5); text-align: center; color: var(--fg-2); }
 
+/* The header is the conversation's: one 52 px line, no rule under it, the title 13/600 (the panel runs a step under the app) at 12 px from the
+   edge, the buttons small and quiet until the pointer is on one. */
 .sp-head {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  min-height: var(--ctl-h);
-  padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--line);
+  min-height: var(--head-h);
+  padding: 0 var(--space-2) 0 var(--space-3);
 }
 .sp-head .grow { flex: 1; }
 .sp-title {
@@ -46,134 +54,90 @@ body:has(.sidepanel) #root { height: 100%; min-height: 0; }
   gap: var(--space-2);
   min-width: 0;
   max-width: 70%;
-  height: var(--ctl-h-sm);
+  height: var(--ctl-h);
   padding: 0 var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   font: inherit;
+  font-size: var(--fs-14);
   font-weight: 600;
   cursor: pointer;
 }
-.sp-title:hover:not(:disabled) { background: var(--surface-2); }
+.sp-title:hover:not(:disabled), .sp-title[aria-expanded="true"] { background: var(--hover); }
+.sp-title:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .sp-title:disabled { cursor: default; }
-/* Ghost buttons, as the app's own heads draw them: no box until the pointer is on one. Pinned is the
-   pin filled in the accent colour; a filled box around it read as a warning. */
-.sp-head .iconbtn { background: transparent; color: var(--fg-2); }
-.sp-head .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
-.sp-head .iconbtn:active { background: var(--surface-3); }
-.sp-head .iconbtn.on { background: transparent; color: var(--fg); }
+.sp-title > .ic { flex: none; color: var(--fg-3); }
 .sp-head .iconbtn.on .ic { fill: currentColor; }
-.sp-head .iconbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .sp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
-.sp-dot.running { background: var(--accent); }
-.sp-dot.waiting { background: var(--warn); }
-.sp-dot.failed { background: var(--bad); }
+.sp-dot.running { background: var(--live); }
+.sp-dot.waiting { background: var(--attention); }
+.sp-dot.failed { background: var(--attention); }
+.menu-row-aside:has(.sp-dot) { display: inline-flex; align-items: center; gap: var(--space-2); }
+.sp-tick { flex: none; width: 14px; }
+.sp-badge { flex: none; font-size: var(--fs-12); color: var(--attention); }
 
-.sp-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(var(--ctl-h) + var(--space-1));
-  left: var(--space-2);
-  right: var(--space-2);
-  max-height: 60%;
-  overflow: auto;
-  padding: var(--space-1);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface-1);
-  box-shadow: var(--shadow-md);
-}
-.sp-menu-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--row-h);
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.sp-menu-row:hover, .sp-menu-row.on { background: var(--surface-3); }
-.sp-menu-row .grow { flex: 1; }
-.sp-badge { flex: none; font-size: var(--fs-11); color: var(--warn); }
-
-.sp-banner { flex: none; padding: var(--space-2) var(--space-3); font-size: var(--fs-12); border-bottom: 1px solid var(--line); }
-.sp-banner.warn { color: var(--warn); }
+.sp-banner { flex: none; padding: var(--space-2) var(--space-3); font-size: var(--fs-12); }
+.sp-banner.warn { color: var(--attention); }
 
 .sp-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-3); }
 .sp-body .timeline { max-width: none; }
 
-.sp-give, .sp-card, .sp-shot {
+.sp-give {
   flex: none;
-  margin: 0 var(--space-2) var(--space-2);
+  margin: 0 var(--space-3) var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--card);
-  box-shadow: var(--drop-xs);
 }
 /* What the agent is doing: one line at the top of the composer, never two. The step gives way to the
    buttons, which keep their size, so the line holds from 320 px up without wrapping. */
 .sp-live-wrap { display: grid; gap: 2px; padding-bottom: var(--space-1); }
 .sp-live { display: flex; align-items: center; gap: 2px; min-width: 0; height: var(--ctl-h-sm); }
 .sp-live .livebar, .sp-live-paused { flex: 1 1 auto; min-width: 0; max-width: none; height: var(--ctl-h-sm); padding: 0 var(--space-1); font-size: var(--fs-12); }
-.sp-live-paused { display: inline-flex; align-items: center; gap: 6px; color: var(--warn); white-space: nowrap; }
+.sp-live-paused { display: inline-flex; align-items: center; gap: 6px; color: var(--attention); white-space: nowrap; }
 .sp-live .iconbtn { background: transparent; color: var(--fg-2); }
-.sp-live .iconbtn:hover { background: var(--surface-2); color: var(--fg); }
-.sp-live .iconbtn.danger { color: var(--bad); }
-.sp-live-warn { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0 var(--space-1); font-size: var(--fs-12); color: var(--bad); white-space: nowrap; }
+.sp-live .iconbtn:hover { background: var(--hover); color: var(--fg); }
+.sp-live .iconbtn.danger { color: var(--attention); }
+.sp-live-warn { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0 var(--space-1); font-size: var(--fs-12); color: var(--attention); white-space: nowrap; }
 .sp-live-warn .truncate { flex: 1 1 auto; min-width: 0; }
 .sp-live-warn .link { flex: none; padding: 0; border: 0; background: none; color: var(--fg); font: inherit; cursor: pointer; }
 .sp-live-warn .link:hover { text-decoration: underline; }
-.sp-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.sp-card-actions .btn { display: inline-flex; align-items: center; gap: var(--space-1); }
-
 .sp-give { display: flex; align-items: center; gap: var(--space-2); }
 .sp-give .truncate { flex: 1; min-width: 0; }
 
-.sp-card { display: grid; gap: var(--space-2); background: color-mix(in srgb, var(--warn) 8%, var(--card)); outline: none; }
-.sp-card:focus-visible { box-shadow: var(--shadow-focus); border-color: var(--line-strong); }
-.sp-card-title { font-weight: 600; }
-.sp-card-detail { font-size: var(--fs-12); overflow-wrap: anywhere; color: var(--fg-2); }
-.sp-card-foot { font-size: var(--fs-11); }
-.sp-card kbd { font-size: var(--fs-11); opacity: 0.7; }
-.sp-card .btn.acked { outline: 2px solid var(--ring); }
-
-.sp-shot { display: grid; gap: var(--space-2); }
+/* The screenshot to crop is a sheet; inside it are the picture and the line that says how to take a part. */
 .sp-shot-frame { position: relative; cursor: crosshair; user-select: none; touch-action: none; }
 .sp-shot-frame img { display: block; width: 100%; height: auto; border-radius: var(--radius-sm); }
-.sp-shot-box { position: absolute; border: 2px solid var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); pointer-events: none; }
-.sp-shot-hint { font-size: var(--fs-12); }
+.sp-shot-box { position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+.sp-shot-hint { margin-bottom: var(--space-2); font-size: var(--fs-12); }
 
 .sp-attach { display: flex; flex-wrap: wrap; gap: var(--space-1); padding-bottom: var(--space-1); }
 /* The side questions sit over the composer, scrolling on their own so a long one never hides it. */
 .sp-questions { flex: none; max-height: 45vh; overflow-y: auto; padding: 0 var(--space-2) var(--space-1); }
-/* Light pills: a fill and no outline, so the three offers read as quiet actions on the composer and
-   not as a row of boxes over it. */
-.sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-color: transparent; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
-.sp-attach .chip:hover:not(:disabled) { background: var(--surface-3); color: var(--fg); }
+/* The page's three offers, as the composer's own chips are drawn: 28 px, no box until the pointer is on one. */
+.sp-attach .chip { display: inline-flex; align-items: center; gap: var(--space-1); height: var(--ctl-h-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-13); font-weight: 400; cursor: pointer; transition: background var(--t-fast), color var(--t-fast); }
+.sp-attach .chip:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.sp-attach .chip:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .sp-attach .chip:disabled { opacity: 0.5; cursor: default; }
-.sp-attach .sp-asks-chip { margin-left: auto; border-color: transparent; background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); font-weight: 500; }
-.sp-attach .sp-asks-chip:hover { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
-.sp-attach .sp-asks-chip.on { background: color-mix(in srgb, var(--warn) 24%, transparent); }
+.sp-attach .sp-asks-chip { margin-left: auto; color: var(--attention); font-weight: 500; }
+.sp-attach .sp-asks-chip:hover:not(:disabled) { background: var(--hover); color: var(--attention); }
+.sp-attach .sp-asks-chip.on { background: var(--selected); }
 
 /* A new conversation: what it will work on above, the app's whole composer at the foot, as in an
    open conversation, so dictation, files, the model and the approval mode are all there from the start. */
 .sp-new { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sp-new-intro { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3); }
-.sp-consent { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-13); }
+.sp-consent { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); font-size: var(--fs-13); }
 .sp-consent p { margin: var(--space-1) 0 0; color: var(--fg-2); }
 .sp-new-tab { display: flex; align-items: center; gap: var(--space-1); min-width: 0; font-size: var(--fs-12); color: var(--fg-2); }
 .sp-new-tab .truncate { flex: 1 1 auto; min-width: 0; }
 .sp-new-cancel { flex: none; padding: 0; border: 0; background: none; color: var(--fg-2); text-decoration: underline; font: inherit; cursor: pointer; }
+.sp-new-cancel:hover { color: var(--fg); }
 
 /* Under the header, never at the foot: there a line covered the composer's controls. */
 .sidepanel .toast {

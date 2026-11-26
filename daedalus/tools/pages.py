@@ -169,14 +169,14 @@ def _join(dest: str, rel: str) -> str:
 
 @tool_group("pages")
 @search_hint(
-    "custom page screen inside the app dashboard tool viewer form embed service web app rail new page create scaffold template "
+    "custom page screen inside the app dashboard tool viewer form embed service web app sidebar new page create scaffold template "
     "страница своя страница экран в приложении дашборд панель инструмент вьювер форма встроить сервис создать страницу шаблон"
 )
 @tool(
     name="PageCreate",
     description=(
         "Create a custom page: a screen of the operator's own inside the Daedalus app, at /app/p/<slug>, which can sit "
-        "in the rail and the phone drawer. Anything goes inside it — any framework, CDN, WebAssembly, WebSockets, the "
+        "pinned in the sidebar (a phone's drawer is the same sidebar). Anything goes inside it — any framework, CDN, WebAssembly, WebSockets, the "
         "whole /api — and nothing restarts. slug: 1-63 lower-case letters (any script), digits, hyphens. title: a string or one per "
         "language ({\"en\": …, \"ru\": …}). kind: 'static' (files you write or import), 'service' (a web app you run, "
         "proxied; target = a port of the services range or the name of a service from ServiceStart), 'link' (another "
@@ -619,8 +619,8 @@ def check_text(result: Any, saved: dict[str, str], seen: dict[str, str], vision_
 
 @tool_group("pages")
 @search_hint(
-    "publish page make live release page version deploy page to the app rail "
-    "опубликовать страницу выложить сделать живой версия страницы в приложение на рейку"
+    "publish page make live release page version deploy page to the app sidebar pin "
+    "опубликовать страницу выложить сделать живой версия страницы в приложение в боковую панель"
 )
 @tool(
     name="PagePublish",
@@ -641,8 +641,8 @@ async def page_publish(context: ToolContext, slug: str, note: str = "") -> ToolR
     title = _plain_title(manifest["title"])
     lines = [
         f"Published {slug!r} as version {version}. It is live at {_addresses(slug)} and in the app's list of pages.",
-        f"To put it on the rail: SettingsGet('navigation'), then SettingsChange({{\"navigation\": {{\"rail\": [<the current items>, \"page:{slug}\"]}}}}) — "
-        "keep the items already there; 'drawer' is the phone's list, the same way.",
+        f"To pin it in the sidebar: SettingsGet('navigation'), then SettingsChange({{\"navigation\": {{\"pinned\": [<the current items>, \"page:{slug}\"]}}}}) — "
+        "keep the items already there. A phone's drawer is the same sidebar, so it follows.",
         f"Show it to the operator with PageShow({slug!r}), or link it in your answer as [{title}](/app/p/{slug}).",
     ]
     return ok(context, "\n".join(lines), slug=slug, version=version)
@@ -729,13 +729,13 @@ async def page_remove(context: ToolContext, slug: str, confirm: bool = False) ->
         return error(context, (
             f"{slug!r} has {count} published version{'s' if count != 1 else ''}, and removing it deletes them, the draft and the page's stored "
             "values for good. Ask the operator with AskUser (unless they asked for this removal themselves), then call PageRemove again "
-            "with confirm=true. To take it off the rail without deleting anything, change the navigation instead."
+            "with confirm=true. To take it out of the sidebar without deleting anything, change the navigation instead."
         ))
     try:
         await store.remove(slug)
     except PageError as exc:
         return _refused(context, exc)
-    return ok(context, f"Removed {slug!r}: its versions, draft and stored values are gone. A rail item 'page:{slug}' is ignored from now on; drop it from the navigation when you next change it.")
+    return ok(context, f"Removed {slug!r}: its versions, draft and stored values are gone. A pinned item 'page:{slug}' is ignored from now on; drop it from the navigation when you next change it.")
 
 
 @tool_group("pages")

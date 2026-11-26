@@ -3,20 +3,22 @@
 // a project, that project's; opened from the navigation, every canvas under the chat or project it
 // belongs to. The editor is a chunk of its own, so the list never loads the board just to show cards.
 
-import { lazy, Suspense, useMemo, useRef, useState, type ReactElement } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactElement } from "react";
 import { api } from "../api";
 import { Icon, type IconName } from "../icons";
 import { t } from "../i18n";
 import { navigate, pathFor, useRoute } from "../router";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
-import { OverflowMenu, PageHeader, Segmented, Sheet } from "../ui/index";
+import { OverflowMenu, PageHeader, Segmented, Sheet, Skeleton, useMedia } from "../ui/index";
+import { Page } from "../shell";
+import { Button, IconButton } from "../ui/primitives";
 import { deleteWithUndo, type MenuItem } from "../ui/dialogs";
 import { relTimeLong } from "../format";
 import { useEvent } from "../events";
 import { TEMPLATES, templateDoc, type TemplateId } from "./templates";
 import type { Canvas, CanvasItem, CanvasListing, Scope, ScopeRef } from "./model";
-import { CanvasThumb, download, fileName, pickCanvasFile } from "./parts";
+import { CanvasRow, download, fileName, pickCanvasFile } from "./parts";
 import "./canvas.css";
 
 const CanvasEditor = lazy(() => import("./CanvasEditor").then((module) => ({ default: module.CanvasEditor })));
@@ -51,6 +53,7 @@ function CanvasList({ toast, sessionId, projectId }: { toast: (message: string) 
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState<ScopeRef | null>(null);
   const [busy, setBusy] = useState(false);
+  const phone = useMedia("(max-width: 1023px)");
   const open = (id: string) => navigate(pathFor("canvas", id, { session: sessionId, project: projectId }));
 
   useEvent(["canvas.changed"], () => refresh(), [refresh]);
@@ -151,99 +154,70 @@ function CanvasList({ toast, sessionId, projectId }: { toast: (message: string) 
   }
 
   const nothingAnywhere = !sessionId && !projectId && data !== undefined && data.items.length === 0;
+  const shown = sections.reduce((n, section) => n + section.items.length, 0);
   const showTools = total > 3;
-  return (
-    <div className="screen wide canvas-screen">
-      <PageHeader title={t("nav.canvas")} />
-      {showTools && (
-        <div className="cv-toolbar-row">
-          <label className="cv-search">
-            <Icon name="search" size={15} />
-            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("canvas.search")} aria-label={t("canvas.search")} />
-          </label>
-          <Segmented<Sort> value={sort} onChange={setSort} label={t("canvas.sort")} options={[{ id: "recent", label: t("canvas.sort.recent") }, { id: "name", label: t("canvas.sort.name") }]} />
-        </div>
-      )}
-      {error && !data && <div className="empty">{error}</div>}
-      {loading && !data && <div className="cv-grid">{[0, 1, 2].map((key) => <div key={key} className="cv-card skeleton" aria-hidden="true" />)}</div>}
-      {nothingAnywhere && (
-        <div className="cv-empty">
-          <div className="cv-empty-mark"><Icon name="grid" size={26} /></div>
-          <h2>{t("canvas.empty.title")}</h2>
-          <p>{t("canvas.empty.body")}</p>
-        </div>
-      )}
-      {sections.map(({ scope, items }) => {
-        const scoped = !!sessionId || !!projectId;
-        if (!scoped && !items.length) return null;
-        return (
-          <section key={scopeKey(scope.kind, scope.id)} className="cv-section" aria-label={scope.name}>
-            <div className="cv-section-head">
-              <h2>
-                <Icon name={scope.kind === "project" ? "folder" : "chat"} size={15} />
-                <span>{scope.kind === "chat" && sessionId === scope.id ? t("canvas.scope.this.chat") : scope.kind === "project" ? t("canvas.scope.project", { name: scope.name }) : scope.name}</span>
-                <span className="cv-section-count">{items.length}</span>
-              </h2>
-              <button className="btn small" onClick={() => void importInto(scope)} aria-label={t("canvas.import.into", { where: scope.name })} title={t("canvas.import")}><Icon name="import" size={15} /></button>
-              <button className="btn small primary" onClick={() => setCreating(scope)} disabled={busy} aria-label={t("canvas.new.in", { where: scope.name })}><Icon name="plus" size={15} /> {t("canvas.new")}</button>
-            </div>
-            {items.length === 0 ? (
-              <div className="cv-section-empty">{t(query ? "canvas.search.none" : scope.kind === "chat" ? "canvas.empty.chat" : "canvas.empty.project")}</div>
-            ) : (
-              <div className="cv-grid">
-                {items.map((item) => (
-                  <CanvasCard key={item.id} item={item} renaming={renaming === item.id} menu={menuFor(item)} onOpen={() => open(item.id)} onRename={(title) => void rename(item, title)} onCancelRename={() => setRenaming(null)} />
-                ))}
-              </div>
-            )}
-          </section>
-        );
-      })}
-      {creating && (
-        <Sheet title={t("canvas.new.in", { where: creating.name })} onClose={() => setCreating(null)}>
-          <TemplatePicker onPick={(template) => void create(creating, template)} busy={busy} />
-        </Sheet>
-      )}
-    </div>
+  // A phone's header has room for its menu and the title; the search goes into the page under it.
+  const search = showTools && (
+    <label className="cv-search">
+      <Icon name="search" size={16} />
+      <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("canvas.search")} aria-label={t("canvas.search")} />
+    </label>
   );
-}
-
-function CanvasCard({ item, renaming, menu, onOpen, onRename, onCancelRename }: { item: CanvasItem; renaming: boolean; menu: MenuItem[]; onOpen: () => void; onRename: (title: string) => void; onCancelRename: () => void }) {
-  const field = useRef<HTMLInputElement>(null);
   return (
-    <article className="cv-card">
-      <button className="cv-card-open" onClick={onOpen} aria-label={item.title} tabIndex={renaming ? -1 : 0}>
-        <CanvasThumb path={`/api/canvases/${item.id}/preview`} version={item.version} />
-      </button>
-      <div className="cv-card-foot">
-        <div className="cv-card-text">
-          {renaming ? (
-            <input
-              ref={field}
-              className="field cv-rename"
-              autoFocus
-              defaultValue={item.title}
-              maxLength={160}
-              aria-label={t("canvas.title")}
-              onFocus={(event) => event.target.select()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") onRename(event.currentTarget.value);
-                if (event.key === "Escape") { event.stopPropagation(); onCancelRename(); }
-              }}
-              onBlur={(event) => onRename(event.currentTarget.value)}
-            />
-          ) : (
-            <button className="cv-card-title" onClick={onOpen}>{item.title}</button>
-          )}
-          <span className="cv-card-meta">
-            {item.updated_by === "agent" && <Icon name="bots" size={12} />}
-            <time dateTime={item.updated_at}>{t(item.updated_by === "agent" ? "canvas.meta.agent" : "canvas.meta.you", { time: relTimeLong(item.updated_at) })}</time>
-            {item.shared && <span className="cv-card-shared" title={t("canvas.share.on")} aria-label={t("canvas.share.on")}><Icon name="link" size={12} /></span>}
-          </span>
-        </div>
-        <OverflowMenu small items={menu} label={t("canvas.actions", { title: item.title })} />
-      </div>
-    </article>
+    <>
+      <PageHeader
+        title={t("nav.canvas")}
+        actions={showTools && <>
+          {!phone && search}
+          <Segmented<Sort> value={sort} onChange={setSort} label={t("canvas.sort")} options={[{ id: "recent", label: t("canvas.sort.recent") }, { id: "name", label: t("canvas.sort.name") }]} />
+        </>}
+      />
+      <Page width="list" className="canvas-screen">
+        {phone && search}
+        {error && !data && <div className="empty"><b>{t("canvas.error")}</b><div>{error}</div><button className="btn primary" onClick={refresh}>{t("common.retry")}</button></div>}
+        {loading && !data && <Skeleton rows={3} />}
+        {nothingAnywhere && (
+          <div className="empty">
+            <Icon name="grid" size={20} />
+            <b>{t("canvas.empty.title")}</b>
+            <div>{t("canvas.empty.body")}</div>
+          </div>
+        )}
+        {data && !nothingAnywhere && query && shown === 0 && <div className="empty"><Icon name="search" size={20} /><b>{t("canvas.search.none")}</b></div>}
+        {sections.map(({ scope, items }) => {
+          const scoped = !!sessionId || !!projectId;
+          if (!scoped && !items.length) return null;
+          if (query && !items.length) return null;
+          return (
+            <section key={scopeKey(scope.kind, scope.id)} className="cv-section" aria-label={scope.name}>
+              <div className="cv-section-head">
+                <h2>
+                  <Icon name={scope.kind === "project" ? "folder" : "chat"} size={14} />
+                  <span>{scope.kind === "chat" && sessionId === scope.id ? t("canvas.scope.this.chat") : scope.kind === "project" ? t("canvas.scope.project", { name: scope.name }) : scope.name}</span>
+                  <span className="cv-section-count">{items.length}</span>
+                </h2>
+                <IconButton icon="import" size={28} label={t("canvas.import.into", { where: scope.name })} onClick={() => void importInto(scope)} />
+                <Button size="sm" icon="plus" disabled={busy} aria-label={t("canvas.new.in", { where: scope.name })} onClick={() => setCreating(scope)}>{t("canvas.new")}</Button>
+              </div>
+              {items.length === 0 ? (
+                <div className="cv-section-empty">{t(scope.kind === "chat" ? "canvas.empty.chat" : "canvas.empty.project")}</div>
+              ) : (
+                <div className="cv-list" role="list">
+                  {items.map((item) => (
+                    <CanvasRow key={item.id} item={item} renaming={renaming === item.id} menu={menuFor(item)} onOpen={() => open(item.id)} onRename={(title) => void rename(item, title)} onCancelRename={() => setRenaming(null)} />
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+        {creating && (
+          <Sheet title={t("canvas.new.in", { where: creating.name })} size="md" onClose={() => setCreating(null)}>
+            <TemplatePicker onPick={(template) => void create(creating, template)} busy={busy} />
+          </Sheet>
+        )}
+      </Page>
+    </>
   );
 }
 

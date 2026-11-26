@@ -59,9 +59,9 @@ def main() -> None:
         expect(labels.nth(1)).to_have_text("Autopilot · your choice")
         expect(labels.nth(1)).to_have_attribute("title", "You chose: Changelog")
 
-        # The switch in the toggles menu, with the turns taken, and off at once; the chip names it while on.
-        chip = page.locator(".composer .composer-mode")
-        expect(chip).to_have_text("Autopilot")
+        # The switch in the access menu, with the turns taken, and off at once; the chip names it while on.
+        chip = page.locator(".composer .composer-access")
+        expect(chip.locator(".access-more")).to_have_text("Autopilot")
         chip.click()
         row = page.locator(".autopilot-row")
         expect(row).to_have_attribute("aria-checked", "true")
@@ -70,7 +70,7 @@ def main() -> None:
         expect(row).to_have_attribute("aria-checked", "false")
         assert SWITCHED == [{"on": False}], SWITCHED
         page.keyboard.press("Escape")
-        expect(chip).to_have_text("Agent")
+        expect(chip.locator(".access-more")).to_have_count(0)
 
         # Settings → Chat: autopilot's settings and today's numbers, and the profile with Forget.
         settings = browser.new_page(viewport={"width": 1440, "height": 900})
@@ -83,13 +83,13 @@ def main() -> None:
         style = settings.locator("[data-section='user-style']")
         expect(style.locator("[data-style-profile]")).to_contain_text("Writes short, direct requests")
         style.get_by_role("button", name="Forget").click()
-        settings.get_by_role("button", name="Confirm").click()
+        settings.locator(".dialog-actions").get_by_role("button", name="Forget").click()
         expect(style.locator("[data-style-empty]")).to_be_visible()
 
         # The same page in Russian names them in Russian.
         settings.goto(f"{BASE}/settings/chat?token=t&lang=ru&scheme=dark")
-        expect(settings.locator("[data-section='autopilot'] .section-title")).to_have_text("Автопилот")
-        expect(settings.locator("[data-section='user-style'] .section-title")).to_have_text("Как вы пишете")
+        expect(settings.locator("[data-section='autopilot'] .set-label")).to_have_text("Автопилот")
+        expect(settings.locator("[data-section='user-style'] .set-label")).to_have_text("Как вы пишете")
         browser.close()
     assert not UNHANDLED.report()
     print("autopilot: labels, the switch and the settings hold")

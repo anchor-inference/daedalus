@@ -42,6 +42,7 @@ from api_stub import (  # noqa: E402
     folders,
     fulfil_shared,
 )
+from waiting import until  # noqa: E402
 
 UNHANDLED = Unhandled()
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -154,7 +155,7 @@ def record(page: Page, seconds: float = 1.3) -> None:
         mic.click()
     else:
         page.locator(".composer .plus").click()
-        page.locator(".plus-menu [role=menuitem]").filter(has=page.locator(".ic-mic")).click()
+        page.locator(".attach-menu [data-action='record']").click()
     page.wait_for_selector(".voicebar[data-phase=recording]", timeout=5000)
     page.wait_for_timeout(int(seconds * 1000))
 
@@ -201,7 +202,7 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     record(page, 0.8)
     page.locator(".voicebar-send").click()
     page.wait_for_function("() => document.querySelector('.composer .composer-field').textContent === ''", timeout=10000)
-    page.wait_for_timeout(300)
+    until(page, lambda: bool(HOST.sent))
     check(len(HOST.sent) == 1 and HOST.sent[0].startswith("Also this.\n\n") and HOST.sent[0].endswith(HEARD), f"send sends the typed text and the words ({HOST.sent})")
 
     # A failure keeps everything, and a retry sends the kept name.
@@ -334,7 +335,7 @@ def run(browser) -> list[str]:  # type: ignore[no-untyped-def]
     offered = offered_by("#asr-transcriber")
     check(offered[:1] == ["cloud"] and "gigaam-ru" in offered, f"the transcriber offers the endpoint and the installed model ({offered})")
     page.locator(".dropdown-list [role=option][data-value='gigaam-ru']").click()
-    page.wait_for_timeout(400)
+    until(page, lambda: bool(saved) and saved[-1].get("asr", {}).get("transcriber") == "gigaam-ru")
     check(bool(saved) and saved[-1].get("asr", {}).get("transcriber") == "gigaam-ru", f"choosing it saves [asr].transcriber ({saved[-1:] if saved else saved})")
     check(not saved or saved[-1]["asr"].get("api_key") == "", "and never sends the key back")
     fallback = offered_by("#asr-fallback")

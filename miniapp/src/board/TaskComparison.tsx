@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { absTime } from "../format";
 import { t } from "../i18n";
+import { Select } from "../ui/primitives";
 import { navigate, projectHome } from "../router";
 import { invalidate, useOffline, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
@@ -272,13 +273,15 @@ export function TaskComparison({ task, staff, onChanged, bare = false }: { task:
         {task.status !== "todo" && <div className="result-warning">{t("pair.taskUnavailable")}</div>}
         {hasOpenGroup && <div className="result-warning">{t("pair.groupOpen")}</div>}
         <label className="field">{t("pair.first")}
-          <select className="field" value={first} onChange={(event) => setFirst(event.target.value)}><option value="">{t("pair.chooseWorker")}</option>{workers.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select>
+          <Select label={t("pair.first")} size="md" className="wide" value={first} onChange={setFirst}
+            options={[{ id: "", label: t("pair.chooseWorker") }, ...workers.map((member) => ({ id: member.id, label: member.name }))]} />
         </label>
         <label className="field">{t("pair.firstAllowance")}
           <input className="field" inputMode="decimal" value={firstAllowance} onChange={(event) => setFirstAllowance(event.target.value)} placeholder="0.00" />
         </label>
         <label className="field">{t("pair.second")}
-          <select className="field" value={second} onChange={(event) => setSecond(event.target.value)}><option value="">{t("pair.chooseWorker")}</option>{workers.filter((member) => member.id !== first).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select>
+          <Select label={t("pair.second")} size="md" className="wide" value={second} onChange={setSecond}
+            options={[{ id: "", label: t("pair.chooseWorker") }, ...workers.filter((member) => member.id !== first).map((member) => ({ id: member.id, label: member.name }))]} />
         </label>
         <label className="field">{t("pair.secondAllowance")}
           <input className="field" inputMode="decimal" value={secondAllowance} onChange={(event) => setSecondAllowance(event.target.value)} placeholder="0.00" />
@@ -291,7 +294,8 @@ export function TaskComparison({ task, staff, onChanged, bare = false }: { task:
       </details>
       {groups.length > 0 && <>
         <label className="field">{t("pair.history")}
-          <select className="field" value={groupId} onChange={(event) => setSelectedId(event.target.value)}>{groups.map((group) => <option key={group.group_id} value={group.group_id}>{group.created_at ? absTime(group.created_at) : t("pair.recent")} · {t(`pair.state.${group.state}`)}</option>)}</select>
+          <Select label={t("pair.history")} size="md" className="wide" value={groupId} onChange={setSelectedId}
+            options={groups.map((group) => ({ id: group.group_id, label: `${group.created_at ? absTime(group.created_at) : t("pair.recent")} · ${t(`pair.state.${group.state}`)}` }))} />
         </label>
         {(olderBefore ?? history.data?.next_before) && <button type="button" className="linkbtn" disabled={olderBusy} onClick={() => void loadOlder()}>{t("pair.older")}</button>}
         {olderError && <div className="result-warning">{olderError}</div>}

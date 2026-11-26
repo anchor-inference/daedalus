@@ -1,15 +1,15 @@
 """Drive the Terminals status line, and refuse what does not behave.
 
-Under each workspace pane: a staff member's CLI shows its model and effort, the folder and its branch
-with a dirty mark, a context meter on the window the CLI reported, the cache share, the output and the
-cost, each in its theme colour (`--data-*`); a CLI that reported no window shows the count and no
+Under each workspace pane: a staff member's CLI shows its model and effort, a context meter on the
+window the CLI reported, the cache share, the output and the cost, each in its theme colour
+(`--data-*`), and the pane's header the folder and the branch with a dirty mark; a CLI that reported no window shows the count and no
 meter; one waiting for permission says so in the wait colour, and the line follows the listing when a
 member starts waiting; a plain shell shows its last command and its exit; a terminal the host knows
 little about shows what it knows and never "undefined". A narrow pane drops the cache and the output
-first and nothing spills out of its line; every value is in the tooltip. The Overview's cards carry
-the same line, shorter. The bar's four tabs at 1440 px keep their titles readable. The Russian page
+first and nothing spills out of its line; every value is in the tooltip. The four panes' headers at
+1440 px keep their titles readable. The Russian page
 has Russian words, and no page throws. The same colour check runs in a second theme (THEME, default
-`serebro`), since the line must follow whichever theme the reader picked.
+`paper`, the light one), since the line must follow whichever theme the reader picked.
 
     cd miniapp && npm run build
     mkdir -p /tmp/app-root && ln -s "$PWD/dist" /tmp/app-root/app
@@ -34,7 +34,7 @@ from terminal_stub import TerminalStub, wait_live  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
-SECOND_THEME = os.environ.get("THEME", "serebro")
+SECOND_THEME = os.environ.get("THEME", "paper")
 CLAUDE, CODEX, SHELL, BARE = "s1claude0000", "s2codex00000", "s3shell00000", "s4bare000000"
 IDS = [CLAUDE, CODEX, SHELL, BARE]
 
@@ -80,7 +80,7 @@ def open_page(context, term: TerminalStub, path: str, lang: str = "en", theme: s
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.errors = errors  # type: ignore[attr-defined]
     page.goto(f"{BASE}/{path}{'&' if '?' in path else '?'}token=t&scheme=dark&lang={lang}")
-    page.wait_for_selector(".tp-ws, .term-card", timeout=20000)
+    page.wait_for_selector(".tp-ws", timeout=20000)
     return page
 
 
@@ -104,9 +104,8 @@ def token(page: Page, name: str) -> str:
 
 
 def colours(page: Page, c: Check, where: str) -> None:
-    for selector, name in ((f"{foot(page, CLAUDE)} .tsl-path", "--data-path"), (f"{foot(page, CLAUDE)} .tsl-branch", "--data-branch"),
-                           (f"{foot(page, CLAUDE)} .tsl-ctx", "--data-context"), (f"{foot(page, CLAUDE)} .tsl-cache", "--data-cache"),
-                           (f"{foot(page, CLAUDE)} .tsl-out", "--data-output")):
+    for selector, name in ((f"{foot(page, CLAUDE)} .tsl-ctx", "--data-context"), (f"{foot(page, CLAUDE)} .tsl-cache", "--data-cache"),
+                           (f"{foot(page, CLAUDE)} .tsl-out", "--data-output"), (f".tp-pane[data-pane='{CLAUDE}'] .tp-pane-cwd", "--fg-3")):
         got, want = colour_of(page, selector), token(page, name)
         c.that(got == want, f"{where}: {selector} is drawn in {got}, not {name} ({want})")
 
@@ -115,7 +114,8 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     """A 1920 px window, where a pane of a 2 × 2 grid holds the whole line."""
     term = fleet()
     context = browser.new_context(viewport={"width": 1920, "height": 1080}, color_scheme="dark")
-    page = open_page(context, term, f"terminals/{CLAUDE}?layout=4&panes={','.join(IDS)}")
+    # The operator's own terminal is the active pane: it has no hold line to take room from the others' lines.
+    page = open_page(context, term, f"terminals/{BARE}?layout=4&panes={','.join(IDS)}")
     for i in IDS:
         wait_live(page, i)
     page.wait_for_timeout(500)
@@ -124,8 +124,10 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     line = page.locator(foot(page, CLAUDE)).inner_text().replace("\n", " ")
     print("claude:", line)
     c.that(seg_text(page, CLAUDE, "agent").split() == ["opus", "high"], f"the model and effort are not shown: {seg_text(page, CLAUDE, 'agent')!r}")
-    c.that("staff/ira" in seg_text(page, CLAUDE, "where") and page.locator(f"{foot(page, CLAUDE)} .tsl-dirty").count() == 1, f"the branch or its dirty mark is missing: {seg_text(page, CLAUDE, 'where')!r}")
-    c.that("…/worktrees/ira" in seg_text(page, CLAUDE, "where"), f"the folder is not shortened to its end: {seg_text(page, CLAUDE, 'where')!r}")
+    where = page.locator(f".tp-pane[data-pane='{CLAUDE}'] .tp-pane-cwd").inner_text()
+    c.that("staff/ira*" in where, f"the header's branch or its dirty mark is missing: {where!r}")
+    c.that("…/worktrees/ira" in where, f"the header's folder is not shortened to its end: {where!r}")
+    c.that(not page.locator(f"{foot(page, CLAUDE)} [data-seg='where']").count(), "the foot repeats the folder the header says")
     c.that(seg_text(page, CLAUDE, "context") == "61k/200k", f"the context is {seg_text(page, CLAUDE, 'context')!r}, not 61k/200k")
     meter = page.locator(f"{foot(page, CLAUDE)} .tsl-meter")
     c.that(meter.count() == 1 and meter.get_attribute("aria-valuenow") == "31", "the context meter is missing or does not say 31 %")
@@ -135,8 +137,11 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     tip = page.locator(f"{foot(page, CLAUDE)} .tsl").get_attribute("title") or ""
     c.that("Context: 61,000 of 200,000 tokens (31%)" in tip and "Folder: /home/operator/work/bakery-site/.agents/worktrees/ira" in tip, f"the tooltip does not carry the full values: {tip!r}")
     colours(page, c, "the default theme")
-    size = page.eval_on_selector(foot(page, CLAUDE), "(e) => ({ h: e.getBoundingClientRect().height, f: parseFloat(getComputedStyle(e).fontSize) })")
-    c.that(size["h"] <= 25 and size["f"] <= 11.5, f"the status line is {size}, more than a 24 px line of 11 px text")
+    size = page.eval_on_selector(f"{foot(page, CLAUDE)} .tsl", "(e) => ({ h: e.getBoundingClientRect().height, f: parseFloat(getComputedStyle(e).fontSize) })")
+    foot_h = page.eval_on_selector(foot(page, CLAUDE), "(e) => e.getBoundingClientRect().height")
+    # 12 px since nothing is drawn under the 12 px floor; the foot around it is the page's 36 px.
+    c.that(size["h"] <= 25 and size["f"] <= 12, f"the status line is {size}, more than a 24 px line of 12 px text")
+    c.that(abs(foot_h - 36) <= 1, f"the pane's foot is {foot_h} px, not 36")
 
     # A CLI that reported no window: a count and no meter; nothing else invented.
     print("codex:", page.locator(foot(page, CODEX)).inner_text().replace("\n", " "))
@@ -152,10 +157,12 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     c.that(page.locator(f"{foot(page, SHELL)} [data-seg='command']").get_attribute("data-result") == "failed", "a failed command is not marked failed")
     c.that(not seg_text(page, SHELL, "agent"), "a plain shell is given an agent")
 
-    # Little known: the folder, and no word for what is missing.
+    # Little known: the folder in the header, an empty foot, and no word for what is missing.
     bare = page.locator(foot(page, BARE)).inner_text()
     print("bare:", bare.replace("\n", " "))
-    c.that(bare.strip() == "/srv", f"the bare terminal's line is {bare!r}, not its folder alone")
+    c.that(page.locator(f"{foot(page, BARE)} .tsl").count() == 0, "the bare terminal has a status line though nothing is known of it")
+    c.that(bare.strip() == "This is your terminal · type right in it", f"the bare terminal's foot says {bare!r}, not who types")
+    c.that(page.locator(f".tp-pane[data-pane='{BARE}'] .tp-pane-cwd").inner_text().strip() == "/srv", "the bare terminal's header does not say its folder")
     every = page.locator(".tp-pane-foot").all_inner_texts()
     c.that(not any(w in " ".join(every) for w in ("undefined", "null", "NaN", "[term.")), f"a line says what is missing: {every}")
 
@@ -166,30 +173,25 @@ def workspace(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     waiting = seg_text(page, CODEX, "waiting")
     c.that("waiting" in waiting and "npm install grammy" in waiting, f"the waiting segment says {waiting!r}")
     c.that(colour_of(page, f"{foot(page, CODEX)} .tsl-wait") == token(page, "--data-wait"), "the waiting segment is not in the wait colour")
-    c.that(page.locator(".tp-top .tp-waiting").count() == 1, "the bar does not say something is waiting")
+    c.that(page.locator(".pagehead .tp-waiting").count() == 1, "the header does not say something is waiting")
     c.that(not page.errors, f"the workspace threw: {page.errors}")  # type: ignore[attr-defined]
     context.close()
 
 
-def tabs(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
-    """The four tabs at 1440 px with the list shown keep their titles whole: a tab short of room drops
-    its key and its state word and keeps the dot, and its tooltip names the state."""
+def headers(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
+    """The four panes at 1440 px with the list shown keep their titles whole, and the list's rows say the
+    same state their panes do."""
     term = fleet()
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     page = open_page(context, term, f"terminals/{CLAUDE}?layout=4&panes={','.join(IDS)}")
     wait_live(page, CLAUDE)
     page.wait_for_timeout(400)
-    shown = page.eval_on_selector_all(".tp-tab", """(ts) => ts.map((t) => { const title = t.querySelector('.tp-tab-title'); const state = t.querySelector('.tp-tab-state');
-        return { text: title.textContent, w: Math.round(t.getBoundingClientRect().width), whole: title.scrollWidth <= title.clientWidth + 1, state: state ? getComputedStyle(state).display : '-' }; })""")
-    print("tabs at 1440:", shown)
-    c.that(all(t["whole"] for t in shown), f"a tab's title is cut at 1440: {shown}")
-    tip = page.locator(".tp-tab[data-slot='0']").get_attribute("title") or ""
-    c.that(tip == "Ira · Claude Code · working", f"the tab's tooltip does not name its state: {tip!r}")
-    # The state word survives where the tab has room for it: one pane, one wide tab.
-    page.locator(".tp-layout[data-layout='1']").click()
-    page.wait_for_timeout(300)
-    one = page.eval_on_selector(".tp-tab", "(t) => { const s = t.querySelector('.tp-tab-state'); return s ? getComputedStyle(s).display : '-'; }")
-    c.that(one not in ("none", "-"), f"a wide tab hides its state word: {one}")
+    shown = page.eval_on_selector_all(".tp-pane-head .tp-pane-title .truncate", "(ts) => ts.map((t) => ({ text: t.textContent, whole: t.scrollWidth <= t.clientWidth + 1 }))")
+    print("titles at 1440:", shown)
+    c.that(len(shown) == 4 and all(t["whole"] for t in shown), f"a pane's title is cut at 1440: {shown}")
+    pane = page.locator(f".tp-pane[data-pane='{CLAUDE}']").get_attribute("data-state")
+    row = page.locator(f".tp-row[data-terminal='{CLAUDE}']").get_attribute("data-state")
+    c.that(pane == row == "working", f"the pane says {pane!r} and its row {row!r}, not working in both")
     context.close()
 
 
@@ -213,25 +215,10 @@ def narrow(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     context.close()
 
 
-def overview(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
-    term = fleet()
-    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    page = open_page(context, term, "terminals?view=overview")
-    page.wait_for_selector(f".term-card[data-terminal='{CLAUDE}'] .tsl", timeout=15000)
-    card = page.locator(f".term-card[data-terminal='{CLAUDE}'] .tsl")
-    words = card.inner_text().replace("\n", " ")
-    print("card:", words)
-    c.that("opus" in words and "≈$2.84" in words and page.locator(f".term-card[data-terminal='{CLAUDE}'] .tsl-meter").count() == 1, f"the card's line lacks the model, the meter or the cost: {words!r}")
-    c.that(page.locator(f".term-card[data-terminal='{CLAUDE}'] .tsl-cache").count() == 0, "the card's line carries the cache share")
-    c.that("npm test" in page.locator(f".term-card[data-terminal='{SHELL}'] .tsl").inner_text(), "the shell's card does not show its last command")
-    c.that(not page.errors, f"the Overview threw: {page.errors}")  # type: ignore[attr-defined]
-    context.close()
-
-
 def russian(browser, c: Check) -> None:  # type: ignore[no-untyped-def]
     term = fleet()
     context = browser.new_context(viewport={"width": 1920, "height": 1080}, color_scheme="dark")
-    page = open_page(context, term, f"terminals/{CLAUDE}?layout=4&panes={','.join(IDS)}", lang="ru", theme=SECOND_THEME)
+    page = open_page(context, term, f"terminals/{BARE}?layout=4&panes={','.join(IDS)}", lang="ru", theme=SECOND_THEME)
     wait_live(page, CLAUDE)
     page.wait_for_timeout(400)
     cache = seg_text(page, CLAUDE, "cache")
@@ -251,9 +238,8 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
         workspace(browser, c)
-        tabs(browser, c)
+        headers(browser, c)
         narrow(browser, c)
-        overview(browser, c)
         russian(browser, c)
         browser.close()
     missed = UNHANDLED.report()

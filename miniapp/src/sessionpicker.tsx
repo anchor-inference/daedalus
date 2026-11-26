@@ -16,7 +16,7 @@ export function SessionPicker({ title, exclude, onPick, onClose }: { title: stri
   const q = filter.trim().toLowerCase();
   const items = (sessions ?? []).filter((s) => s.id !== exclude && (!q || s.title.toLowerCase().includes(q) || s.id.includes(q)));
   return (
-    <Sheet title={title} onClose={onClose} size="narrow">
+    <Sheet title={title} onClose={onClose} size="sm">
       <input className="field" autoFocus placeholder={t("app.beside.filter")} value={filter} onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8 }} />
       {sessions === null && <div className="empty">{t("common.loading")}</div>}
       {sessions !== null && items.length === 0 && <div className="empty">{t("app.beside.empty")}</div>}

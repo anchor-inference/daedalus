@@ -240,7 +240,7 @@ def run() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         name = page.locator("#project-name")
         expect(name).to_be_visible()
         name.fill("Plain")
@@ -251,8 +251,8 @@ def run() -> int:
         assert created[0] == {"name": "Plain", "snapshots": True, "folder_name": "plain"}, created[0]
 
         page.reload()
-        page.locator(".project-chip").click()
-        expect(page.locator(".projects-row:not(.head)")).to_have_count(1)
+        page.locator("[data-action='all-projects']").click()
+        expect(page.locator(".projects-row")).to_have_count(1)
         page.locator(".projects-new").click()
         page.locator("#project-name").fill("Existing")
         page.locator(".np-card", has_text="Existing folder").click()
@@ -264,7 +264,7 @@ def run() -> int:
         # for the first project. Read at once, it raced the request on a loaded machine.
         expect(page.locator(".sheet")).to_have_count(0)
         assert created[1] == {"name": "Existing", "snapshots": False, "folders": [{"path": "/srv/projects/esp32-door"}]}, created[1]
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         page.locator(".projects-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         resources = page.locator("details.project-resources")
         expect(resources).to_be_visible()
@@ -344,7 +344,8 @@ def run() -> int:
         expect(authority).to_contain_text("Active approvals: 0")
         authority.get_by_text("Approve an action", exact=True).click()
         # The form opens on task assignment, which this project's coordinator is not offered.
-        authority.locator("select").first.select_option("planning")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='planning']").click()
         authority.get_by_role("button", name="Approve", exact=True).click()
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Couldn't confirm", timeout=5000)
@@ -352,9 +353,11 @@ def run() -> int:
         authority.get_by_role("button", name="Try again").click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[1] == authority_requests[0], "uncertain approval did not replay the exact request"
-        authority.locator("select").first.select_option("execution")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='execution']").click()
         expect(authority.get_by_role("button", name="Approve", exact=True)).to_be_disabled()
-        authority.locator("select").nth(1).select_option("t-owned")
+        authority.locator(".dropdown-btn").nth(1).click()
+        page.locator(".dropdown-list [role=option][data-value='t-owned']").click()
         authority.get_by_role("button", name="Approve", exact=True).click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("release its staff member or stop its bound execution")
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
@@ -367,7 +370,8 @@ def run() -> int:
         page.locator(".sheet-backdrop.confirm .dialog button").last.click()
         expect(authority).to_contain_text("Active approvals: 1", timeout=5000)
         assert authority_requests[-1]["expected_grant_generation"] == 1 and authority_requests[-1]["reason"] == "Reduce coordinator scope"
-        authority.locator("select").first.select_option("watch")
+        authority.locator(".dropdown-btn").first.click()
+        page.locator(".dropdown-list [role=option][data-value='watch']").click()
         expect(authority).to_contain_text("matching events may wake the coordinator")
         authority.get_by_role("button", name="Approve", exact=True).click()
         expect(page.locator(".sheet-backdrop.confirm .dialog")).to_contain_text("without a new approval each time")

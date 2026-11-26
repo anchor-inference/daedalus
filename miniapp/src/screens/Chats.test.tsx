@@ -83,10 +83,10 @@ describe("ChatsScreen", () => {
     listing.data = { sessions: [chat("a", "bakery", 0.1, { status: "waiting" }), chat("b", "bakery", 2), kid], projects, next_cursor: null } as SessionList;
     await act(async () => root.render(<ChatsScreen onOpen={vi.fn()} toast={vi.fn()} />));
     expect(host.textContent).toContain("Bakery site");
-    expect(host.querySelectorAll(".ph-row")).toHaveLength(2);
-    expect(host.querySelector(".ph-row-m")?.textContent).toContain("Needs you");
-    await act(async () => host.querySelector<HTMLButtonElement>(".ph-row-more")!.click());
-    const words = Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent ?? "");
+    expect(host.querySelectorAll(".list-row")).toHaveLength(2);
+    expect(host.querySelector(".list-row-m")?.textContent).toContain("Needs you");
+    await act(async () => host.querySelector<HTMLButtonElement>(".list-row-more")!.click());
+    const words = Array.from(document.querySelectorAll(".menu-row")).map((b) => b.textContent ?? "");
     expect(words).toEqual(expect.arrayContaining([
       "New agent in Bakery site", "Rename", "Move to a project…", "Settings for Bakery site", "Archive", "Delete",
     ]));
@@ -104,18 +104,18 @@ describe("ChatsScreen", () => {
     expect(Array.from(block.querySelectorAll("[data-session]")).map((r) => (r as HTMLElement).dataset.session)).toEqual(["c", "a", "b"]);
     expect(host.querySelectorAll("[data-session=\"c\"]")).toHaveLength(1);
     // Folded, the project keeps the chat that waits for the operator.
-    await act(async () => block.querySelector<HTMLElement>("[data-project-head=\"bakery\"] .ph-row")!.click());
+    await act(async () => block.querySelector<HTMLElement>("[data-project-head=\"bakery\"] .list-row")!.click());
     expect(Array.from(block.querySelectorAll("[data-session]")).map((r) => (r as HTMLElement).dataset.session)).toEqual(["c", "a"]);
-    await act(async () => block.querySelector<HTMLButtonElement>("[data-session=\"c\"] .ph-row-more")!.click());
-    expect(Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent)).toContain("Unpin");
+    await act(async () => block.querySelector<HTMLButtonElement>("[data-session=\"c\"] .list-row-more")!.click());
+    expect(Array.from(document.querySelectorAll(".menu-row")).map((b) => b.textContent)).toContain("Unpin");
   });
 
   it("offers Pin on a chat below the block", async () => {
     listing.data = { sessions: [chat("d", "old", 30)], projects: [folder("old", "Router", 1, iso(30), true)], next_cursor: null } as SessionList;
     await act(async () => root.render(<ChatsScreen onOpen={vi.fn()} toast={vi.fn()} />));
     expect(host.querySelector("[data-pinned]")).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>(".ph-row-more")!.click());
-    expect(Array.from(document.querySelectorAll(".ph-mrow")).map((b) => b.textContent)).toContain("Pin");
+    await act(async () => host.querySelector<HTMLButtonElement>(".list-row-more")!.click());
+    expect(Array.from(document.querySelectorAll(".menu-row")).map((b) => b.textContent)).toContain("Pin");
   });
 
   it("says nothing matches under a chip with nothing in it and offers the whole list back", async () => {
@@ -124,7 +124,7 @@ describe("ChatsScreen", () => {
     await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>(".ph-chip")).find((b) => b.textContent?.startsWith("Loops"))!.click());
     expect(host.querySelector(".ph-empty")?.textContent).toContain("Nothing matches.");
     await act(async () => host.querySelector<HTMLButtonElement>(".ph-empty .ph-btn")!.click());
-    expect(host.querySelectorAll(".ph-row")).toHaveLength(1);
+    expect(host.querySelectorAll(".list-row")).toHaveLength(1);
   });
 
   it("shows the error with its cause and a way to try again, and a skeleton while it loads", async () => {

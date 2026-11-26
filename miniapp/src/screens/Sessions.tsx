@@ -1,18 +1,24 @@
-// The desktop's left column in Agents mode: "New chat" as the one accent, the projects and the chats
-// apart, and the chats by day. Which project is a project and which is a chat's own scratch folder is
+// The list in Agents mode's sidebar, under the frame's pinned block (sidebar.tsx): the projects and the
+// chats apart, newest first. Which project is a project and which is a chat's own scratch folder is
 // decided once, in grouping.ts (`isProject`), by the same rule the phone's Chats page splits by.
 //
-// A chat row is two lines: the title takes the whole width, and the line under it says the state in
-// words only when it asks for the operator (waiting, working, failed), then the host mark, the model or
-// the loop's cadence, and the time. A project row is one line with a square tile, where a chat has a
-// round plate: the shape says which is which before the name is read. Projects start collapsed, the
-// one holding the open chat opens itself, and a collapsed project still shows its live chats, because
-// a closed folder must never hide a question.
+// Every row is one line of 32 px. A chat is its title, and at the right edge the one thing about it the
+// operator acts on: its state in a word while it asks for them or works ("needs you" in the attention
+// colour, "working" in the live one), otherwise when it last moved. A computer, browser or terminal chat,
+// a loop and a fork carry a small mark beside that word; the model, the host and the loop's cadence are
+// in the row's tooltip. A project is a folder with its count, or its state in a word while one of its
+// chats asks or works. Projects start collapsed, the one holding the open chat opens itself, and a
+// collapsed project still lists the chats that wait for the operator, because a closed folder must
+// never hide a question.
 //
 // What the operator pins sits in a block of its own above both sections, newest pin first, and is not
 // drawn again below it: a pinned project keeps its fold and its live chats, a pinned chat its row.
 //
-// The keyboard: `/` reaches the search from anywhere outside a text field, the arrows walk the rows
+// The filters are one menu on the "Chats" label: which kind of chat, which state, the loops and the
+// archive. They stood above the list as five rows of tabs and chips, which pushed the first project a
+// quarter of the way down the window.
+//
+// The keyboard: `/` opens the search from anywhere outside a text field, the arrows walk the rows
 // (left and right fold and unfold a project), Enter opens, Ctrl+Enter opens beside, F2 renames, E
 // archives, P pins or unpins, and Delete deletes after the same confirmation the menu asks for.
 
@@ -23,6 +29,7 @@ import { api, Project, type ProjectRef, SessionList, SessionSummary } from "../a
 import { projectPath } from "../folders";
 import { Skeleton, fmtInterval, statusWord } from "../ui/components";
 import { type MenuItem, OverflowMenu, Sheet, confirmDialog, toast } from "../ui/dialogs";
+import { Menu, isAction } from "../ui/primitives";
 import { relTime, shortModel, untilShort } from "../format";
 import { type Folder, type Row as RowModel, type SidebarDay, agentName, arrange, folderOpen, kindOf, liveRow, rememberFolder, sidebarSections } from "../grouping";
 import { Icon, type IconName } from "../icons";
@@ -45,7 +52,7 @@ import { useReveal } from "../reveal";
 import { pinCommand, setPinned } from "../pins";
 import { HostMark } from "../runon";
 import { PrivateMark, isPrivate } from "../privatechat";
-import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { KIND_TABS, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
 import { remoteRowWords } from "../remote";
 
 type SearchList = SessionList & { semantic: boolean; reason: string; partial: boolean; indexing: boolean };
@@ -61,7 +68,7 @@ function typing(target: EventTarget | null): boolean {
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 }
 
-export function SessionsScreen({ onOpen, toast, current, project = "", projects = [], onProjects, onClearProject }: { onOpen: (id: string) => void; toast: (t: string) => void; current?: string; project?: string; projects?: Project[]; onProjects?: () => void; onClearProject?: () => void }) {
+export function SessionsScreen({ onOpen, toast, current, project = "", projects = [], onProjects, onClearProject, searchOpen = false, onSearchOpen }: { onOpen: (id: string) => void; toast: (t: string) => void; current?: string; project?: string; projects?: Project[]; onProjects?: () => void; onClearProject?: () => void; searchOpen?: boolean; onSearchOpen?: (open: boolean) => void }) {
   const [view, setView] = useState<View>("all");
   // Which kind of chat the column shows (chatkind.tsx): remembered in this browser, and the mode New
   // chat starts in. A search looks through every kind, the way it looks past the status chips.
@@ -110,7 +117,7 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [query, project, searching]);
-  // `/` reaches the search from anywhere a key is not already somebody's: Ctrl+K is the palette's,
+  // `/` opens the search from anywhere a key is not already somebody's: Ctrl+K is the palette's,
   // and a focused terminal or text field keeps every letter. Heard on the window, after the
   // document: a screen with a search of its own (the calendar's `/`) takes the key there first and
   // marks it handled, and the column, mounted before that screen, used to steal it.
@@ -120,11 +127,18 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
       if (typing(e.target) || insideTerminal(e.target)) return;
       if (document.querySelector("[role=dialog], [role=menu]")) return;
       e.preventDefault();
+      onSearchOpen?.(true);
       searchRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [onSearchOpen]);
+  // Opened from the head's button, the field takes the focus; closed, what it held is dropped, or the
+  // list would stay narrowed to a search nobody can see.
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+    else setQuery("");
+  }, [searchOpen]);
   const lens = projects.find((p) => p.id === project);
 
   // The Agents list never shows what belongs to orchestration mode, found by a search or not.
@@ -212,86 +226,59 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
     onClearProject();
   };
 
-  const chip = (name: View, label: string, count?: number, tone = "") => (
-    <button type="button" className={`sb-chip ${tone} ${view === name ? "on" : ""}`} aria-pressed={view === name} onClick={() => setView(view === name && name !== "all" ? "all" : name)}>
-      {label}{count !== undefined && <b className="num">{count}</b>}
-    </button>
-  );
-  const moreOn = view === "loops" || view === "archive";
-  // The split New chat button's menu, and the right click anywhere on it: the ways a chat begins.
-  const newSplit = useRef<HTMLDivElement>(null);
-  const newChatItems = useMemo<MenuItem[]>(() => [
-    { label: t("ph.newchat"), icon: "compose", hint: t("side.newchat.keys"), onSelect: () => navigate(pathFor("agents")) },
-    { label: t("shell.search.newagent"), icon: "user", onSelect: () => navigate(newAgentPath()) },
-    { label: t("side.import"), icon: "import", hint: t("imp.entry.hint"), onSelect: () => openImport() },
-  ], []);
-  useContextActions(newSplit, newChatItems);
+  // The "Chats" label is the filters' menu: which kind of chat, which state, the loops, the archive.
+  // Choices that set how the list reads keep the menu open, as a checkbox does.
+  const kindItems: MenuItem[] = KIND_TABS.map((k) => ({
+    label: t(k === "all" ? "side.show.all" : `kind.tab.${k}`), checked: tab === k, aside: everything.data ? <span className="num">{counts.kinds[k] ?? 0}</span> : undefined,
+    onSelect: () => setTab(k),
+  }));
+  const chatsMenu: MenuItem[] = [
+    { group: t("side.show") },
+    ...kindItems,
+    { group: t("side.state") },
+    { label: t("agents.filter.all"), checked: view === "all", aside: everything.data ? <span className="num">{counts.all}</span> : undefined, onSelect: () => setView("all") },
+    { label: t("side.filter.attention"), checked: view === "attention", aside: everything.data ? <span className="num">{counts.attention}</span> : undefined, onSelect: () => setView(view === "attention" ? "all" : "attention") },
+    { label: t("side.filter.working"), checked: view === "working", aside: everything.data ? <span className="num">{counts.working}</span> : undefined, onSelect: () => setView(view === "working" ? "all" : "working") },
+    "-",
+    { label: t("ph.filter.loops"), icon: "loop", checked: view === "loops", onSelect: () => setView(view === "loops" ? "all" : "loops") },
+    { label: t("agents.filter.archive"), icon: "archive", checked: view === "archive", onSelect: () => setView(view === "archive" ? "all" : "archive") },
+  ];
+  // What the label says while a filter is on, so a short list is never read as "my chats are gone".
+  const viewWord = view === "attention" ? t("side.filter.attention") : view === "working" ? t("side.filter.working") : view === "loops" ? t("ph.filter.loops") : view === "archive" ? t("agents.filter.archive") : "";
+  const filterWords = [tab !== "all" ? t(`kind.tab.${tab}`) : "", viewWord].filter(Boolean).join(" · ");
   const projectCount = sections.projects.length;
   const pinnedCount = sections.pinned.length;
 
   return (
     <>
-      <div className="sb-tools" onKeyDown={onColumnKey}>
-        {/* A split button: the wide part starts a chat, the narrow one beside it holds the other way a
-            chat begins, a session another program left on the machine. That used to hide in the New
-            project menu, where nobody looking to continue a chat would think to open it. */}
-        <div className="sb-newsplit" ref={newSplit}>
-          <button type="button" className="sb-new" onClick={() => navigate(pathFor("agents"))} title={t("side.newchat.title")}>
-            <Icon name="compose" size={16} />
-            <span>{t("ph.newchat")}</span>
-            <kbd>{t("side.newchat.keys")}</kbd>
-          </button>
-          <OverflowMenu className="sb-new-more" icon="chevron" label={t("side.newchat.more")} items={newChatItems} />
-        </div>
-        <div className="sb-pbtns">
-          {onProjects && (
-            <button type="button" className="project-chip sb-pbtn" onClick={onProjects} aria-haspopup="dialog" title={lens ? projectPath(lens) : t("side.allprojects.title")}>
-              <Icon name={lens ? "folder" : "grid"} size={14} />
-              <span className="truncate">{lens ? lens.name : t("shell.projects.all")}</span>
-            </button>
+      {(lens || searchOpen) && (
+        <div className="sb-tools" onKeyDown={onColumnKey}>
+          {/* The lens narrows every list in the column, and a quiet chip naming a project was all that
+              said so: an operator who forgot it was on read a column of two chats as "my dialogs are
+              gone". So a lens is announced in words with its count and lifted in one click. */}
+          {lens && onClearProject && (
+            <div className="sb-lens" role="status" title={t("side.lens.hint")}>
+              <Icon name="folder" size={14} />
+              <span className="truncate">{everything.data ? plural("side.lens.count", counts.all, { name: lens.name }) : t("side.lens.only", { name: lens.name })}</span>
+              <button type="button" className="sb-lens-clear" onClick={onClearProject} aria-label={t("ph.lens.clear", { name: lens.name })}>
+                {t("side.lens.showall")}<Icon name="close" size={12} />
+              </button>
+            </div>
           )}
-          <button type="button" className="sb-pbtn sb-newproject" onClick={() => openNewProject()} title={t("np.title")}>
-            <Icon name="plus" size={15} /><span className="truncate">{t("ph.newproject")}</span>
-          </button>
+          {searchOpen && (
+            <label className={`sb-search ${query ? "filled" : ""}`}>
+              <Icon name="search" size={16} />
+              <input ref={searchRef} type="search" placeholder={t("side.search.placeholder")} value={query} maxLength={500} aria-label={t("search.label")}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.preventDefault(); if (query) setQuery(""); else onSearchOpen?.(false); }
+                  if (e.key === "ArrowDown") { e.preventDefault(); list.current?.querySelector<HTMLElement>("[data-nav]")?.focus(); }
+                }} />
+              <button type="button" className="sb-clear" onClick={() => onSearchOpen?.(false)} aria-label={t("side.search.close")} title={t("side.search.close")}><Icon name="close" size={14} /></button>
+            </label>
+          )}
         </div>
-        {/* The lens narrows every list in the column, and a quiet chip naming a project was all that
-            said so: an operator who forgot it was on read a column of two chats as "my dialogs are
-            gone". So a lens is announced in words with its count and lifted in one click. */}
-        {lens && onClearProject && (
-          <div className="sb-lens" role="status" title={t("side.lens.hint")}>
-            <Icon name="folder" size={14} />
-            <span className="truncate">{everything.data ? plural("side.lens.count", counts.all, { name: lens.name }) : t("side.lens.only", { name: lens.name })}</span>
-            <button type="button" className="sb-lens-clear" onClick={onClearProject} aria-label={t("ph.lens.clear", { name: lens.name })}>
-              {t("side.lens.showall")}<Icon name="close" size={12} />
-            </button>
-          </div>
-        )}
-        <label className={`sb-search ${query ? "filled" : ""}`}>
-          <Icon name="search" size={15} />
-          <input ref={searchRef} type="search" placeholder={t("side.search.placeholder")} value={query} maxLength={500} aria-label={t("search.label")}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") { if (query) setQuery(""); else e.currentTarget.blur(); }
-              if (e.key === "ArrowDown") { e.preventDefault(); list.current?.querySelector<HTMLElement>("[data-nav]")?.focus(); }
-            }} />
-          {query
-            ? <button type="button" className="sb-clear" onClick={() => { setQuery(""); searchRef.current?.focus(); }} aria-label={t("ph.search.clear")} title={t("ph.search.clear")}><Icon name="close" size={14} /></button>
-            : <kbd title={t("side.search.key")}>/</kbd>}
-        </label>
-        {!searching && <KindTabs tab={tab} onChange={setTab} counts={everything.data ? counts.kinds : undefined} className="sb-kinds" />}
-        {!searching && (
-          <div className="sb-chips" role="group" aria-label={t("agents.filter.label")}>
-            {chip("all", t("agents.filter.all"), everything.data ? counts.all : undefined)}
-            {chip("attention", t("side.filter.attention"), everything.data ? counts.attention : undefined, "warn")}
-            {chip("working", t("side.filter.working"), everything.data ? counts.working : undefined)}
-            {moreOn && chip(view, view === "loops" ? t("ph.filter.loops") : t("agents.filter.archive"))}
-            <OverflowMenu small className={`sb-chip icon ${moreOn ? "on" : ""}`} label={t("side.filter.more")} items={[
-              { label: t("ph.filter.loops"), icon: "loop", checked: view === "loops", onSelect: () => setView(view === "loops" ? "all" : "loops") },
-              { label: t("agents.filter.archive"), icon: "archive", checked: view === "archive", onSelect: () => setView(view === "archive" ? "all" : "archive") },
-            ]} />
-          </div>
-        )}
-      </div>
+      )}
       <div ref={list} className="screen agents-screen sb-list" onKeyDown={(e) => { onListKey(e); onColumnKey(e); }}>
         {searching && <div className="search-notice sb-notice" role="status">
           <Icon name="search" size={13} />
@@ -310,16 +297,9 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             <div>{lens ? t("agents.empty.project.sub", { root: projectPath(lens) }) : t("agents.empty.sub")}</div>
           </div>
         )}
-        {!searching && data && kindShown !== "all" && view === "all" && arranged.shown === 0 ? (
-          <div className="empty sb-kind-empty" data-kind-empty={kindShown}>
-            {kindIcon(kindShown) && <span className={`sb-kind-empty-icon kind-${kindShown}`}><Icon name={kindIcon(kindShown)!} size={18} /></span>}
-            <b>{t(`kind.empty.${kindShown}`)}</b>
-            {kindShown !== "chat" && <div>{t(`kind.empty.${kindShown}.sub`)}</div>}
-          </div>
-        ) : ((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty">{t("common.nothing")}</div>}
         {pinnedCount > 0 && (
           <>
-            <div className="sb-sec first sb-pinsec"><Icon name="pushpin" size={12} /><span>{t("side.pinned")}</span><span className="n num">{pinnedCount}</span></div>
+            <div className="sb-sec sb-pinsec"><span>{t("side.pinned")}</span></div>
             <div className="sb-pinned" data-pinned="">
               {sections.pinned.map((f) => f.chat
                 ? <PinnedChat key={f.key} folder={f} onOpen={onOpen} current={current} />
@@ -327,30 +307,39 @@ export function SessionsScreen({ onOpen, toast, current, project = "", projects 
             </div>
           </>
         )}
-        {projectCount > 0 && (
+        {(!searching || projectCount > 0) && (
           <>
-            <div className={`sb-sec ${pinnedCount > 0 ? "" : "first"}`}><span>{t("side.projects")}</span><span className="n num">{projectCount}</span></div>
+            {/* The label is the way to every project, archived ones included; the + makes one. */}
+            <div className="sb-sec sb-sec-projects">
+              {onProjects ? <button type="button" className="sb-sec-link" data-action="all-projects" onClick={onProjects} title={t("side.allprojects.title")}>{t("side.projects")}</button> : <span>{t("side.projects")}</span>}
+              {!searching && <button type="button" className="iconbtn sb-sec-add" onClick={() => openNewProject()} aria-label={t("np.title")} title={t("np.title")}><Icon name="plus" size={14} /></button>}
+            </div>
             {sections.projects.map((f) => (
               <ProjectGroup key={f.key} folder={f} onOpen={onOpen} current={current} filtered={filtered} toast={toast} />
             ))}
           </>
         )}
-        {(sections.chats > 0 || view === "archive") && (
-          <>
-            <div className={`sb-sec ${projectCount > 0 || pinnedCount > 0 ? "" : "first"}`}>
-              <span>{view === "archive" ? t("agents.filter.archive") : t("side.chats")}</span><span className="n num">{sections.chats}</span>
-              {!searching && (
-                <span className="sb-sec-acts">
-                  <button type="button" className={`iconbtn small quiet ${view === "archive" ? "on" : ""}`} aria-pressed={view === "archive"} onClick={() => setView(view === "archive" ? "all" : "archive")}
-                    aria-label={t(view === "archive" ? "side.archive.hide" : "side.archive.show")} title={t(view === "archive" ? "side.archive.hide" : "side.archive.show")}>
-                    <Icon name="archive" size={14} />
-                  </button>
-                </span>
-              )}
-            </div>
-            {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} chatProjects={chatProjects} />)}
-          </>
+        {(!searching || sections.chats > 0) && (
+          <div className="sb-sec sb-sec-chats">
+            {searching ? <span>{t("side.chats")}</span> : (
+              <Menu label={t("side.chats.menu")} side="bottom" align="start" items={chatsMenu} trigger={
+                <button type="button" className={`sb-sec-link sb-chats-menu ${filterWords ? "on" : ""}`} aria-label={filterWords ? `${t("side.chats.menu")}: ${filterWords}` : t("side.chats.menu")}>
+                  <span>{t("side.chats")}</span>
+                  {filterWords && <span className="sb-sec-filter truncate">{filterWords}</span>}
+                  <Icon name="chevron" size={12} />
+                </button>
+              } />
+            )}
+          </div>
         )}
+        {!searching && data && kindShown !== "all" && view === "all" && arranged.shown === 0 ? (
+          <div className="empty sb-kind-empty" data-kind-empty={kindShown}>
+            {kindIcon(kindShown) && <span className={`sb-kind-empty-icon kind-${kindShown}`}><Icon name={kindIcon(kindShown)!} size={16} /></span>}
+            <b>{t(`kind.empty.${kindShown}`)}</b>
+            {kindShown !== "chat" && <div>{t(`kind.empty.${kindShown}.sub`)}</div>}
+          </div>
+        ) : ((results && !pending && arranged.shown === 0) || (!searching && data && filtered && arranged.shown === 0)) && <div className="empty sb-empty">{t("common.nothing")}</div>}
+        {sections.days.map((d) => <DayGroup key={d.day} day={d.day} rows={d.rows} onOpen={onOpen} current={current} chatProjects={chatProjects} />)}
         {!searching && next && <button ref={more} className="btn ghost load-more" disabled={paging} onClick={() => void loadMore()}>{t(paging ? "agents.loading" : "agents.more")}</button>}
       </div>
     </>
@@ -443,7 +432,9 @@ function folderState(rows: RowModel[]): "waiting" | "running" | "" {
   return "";
 }
 
-/** One day of the chats section. Windowed: a long history is the same few rows in the DOM. */
+/** One day of the chats section, without a heading of its own: each row says when it last moved at its
+ *  right edge, so the day's name was a row of its own saying the same. Windowed: a long history is the
+ *  same few rows in the DOM. */
 function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDay; rows: RowModel[]; onOpen: (id: string) => void; current?: string; chatProjects: Map<string, ProjectRef> }) {
   const host = useRef<HTMLDivElement>(null);
   const unfolded = useSubsShown();
@@ -451,8 +442,7 @@ function DayGroup({ day, rows, onOpen, current, chatProjects }: { day: SidebarDa
   const keys = useMemo(() => shown.map(lineKey), [shown]);
   return (
     <div ref={host} className="sb-day" data-day={day}>
-      <div className="sb-dayhead">{t(`side.day.${day}`)}</div>
-      <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={44} render={(i) => shown[i].sub ? (
+      <WindowedRows keys={keys} host={host} rowSelector=":scope > .sb-row" estimate={34} render={(i) => shown[i].sub ? (
         <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} />
       ) : (
         <ChatRow row={shown[i].row} fork={shown[i].fork} onOpen={onOpen} current={current} projectName={shown[i].row.s.project} pin={shown[i].fork ? undefined : "off"} subsOpen={unfolded(shown[i].row)} chat={shown[i].fork ? undefined : chatProjects.get(shown[i].row.s.project_id)} />
@@ -520,9 +510,10 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
   ];
   useContextActions(head, items);
   const all_lines = useMemo(() => lines(folder.rows), [folder.rows]);
-  // Only the live lines themselves: an idle fork of a working chat is not what the collapsed row
-  // keeps in sight for.
-  const peek = useMemo(() => all_lines.filter((l) => liveRow(l.row)), [all_lines]);
+  // Only the lines that wait for the operator: a working chat is said by the project's own word, and
+  // listing it as well made a closed folder as long as an open one. An idle fork of a waiting chat is
+  // not what the collapsed row keeps in sight for.
+  const peek = useMemo(() => all_lines.filter((l) => liveRow(l.row) && rowState(l.row.s, l.row.kids) === "waiting"), [all_lines]);
   const chats = showing ? (all ? all_lines : all_lines.slice(0, KIDS_SHOWN)) : peek;
   const hidden = showing ? all_lines.length - chats.length : 0;
   const unfolded = useSubsShown();
@@ -549,27 +540,29 @@ const ProjectGroup = memo(function ProjectGroup({ folder, onOpen, current, filte
         onDragOver={(e) => { if (!takesDrop(e, folder)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!dropping) setDropping(true); }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
         onDrop={(e) => { setDropping(false); if (!takesDrop(e, folder)) return; e.preventDefault(); toggle(true); void dropChat(folder); }}>
-        <span className="sb-tile">{folder.system ? <CompanionFace size={14} /> : <Icon name="folder" size={14} />}{state && <span className={`sb-st ${state}`} />}</span>
-        <span className="sb-main"><span className="sb-t">{folder.name}</span></span>
+        <span className="sb-tile">{folder.system ? <CompanionFace size={16} /> : <Icon name="folder" size={16} />}</span>
+        <span className="sb-t">{folder.name}</span>
         <span className="sb-ptrail">
-          {showing ? <span className="sb-chev" aria-hidden><Icon name="chevron" size={14} /></span> : <span className="sb-pcount num" title={plural("agents.count", folder.total)}>{folder.total}</span>}
+          {showing ? <span className="sb-chev" aria-hidden><Icon name="chevron" size={14} /></span>
+            : state ? <span className={`sb-word ${state}`}>{stateWord(state)}</span>
+            : folder.total > 0 && <span className="sb-pcount num" title={plural("agents.count", folder.total)}>{folder.total}</span>}
         </span>
         <span className="sb-acts" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <button type="button" className="iconbtn small quiet sb-padd" onClick={newIn} aria-label={t("side.project.newagent", { name: folder.name })} title={t("side.project.newagent", { name: folder.name })}><Icon name="plus" size={16} /></button>
+          <button type="button" className="iconbtn small quiet sb-padd" onClick={newIn} aria-label={t("side.project.newagent", { name: folder.name })} title={t("side.project.newagent", { name: folder.name })}><Icon name="plus" size={14} /></button>
           <OverflowMenu small className="quiet" label={t("side.project.menu", { name: folder.name })} items={items} />
         </span>
       </div>
       {(shown.length > 0 || (showing && folder.rows.length === 0)) && (
         <div className={`sb-kids ${showing ? "" : "peek"}`}>
           {showing && folder.rows.length === 0 && <div className="sb-empty sub">{filtered ? t("common.nothing") : t("agents.folder.none")}</div>}
-          <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={40} render={(i) => shown[i].sub ? (
+          <WindowedRows keys={keys} host={section} rowSelector=":scope > .sb-kids > .sb-row" estimate={34} render={(i) => shown[i].sub ? (
             <SubagentRow kid={shown[i].sub!} leader={shown[i].row.s} last={!!shown[i].last} nested />
           ) : (
-            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} system={folder.system} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} />
+            <ChatRow row={shown[i].row} fork={shown[i].fork} nested onOpen={onOpen} current={current} projectName={folder.name} onNewIn={newIn} onParent={() => head.current?.focus()} subsOpen={unfolded(shown[i].row)} />
           )} />
           {(hidden > 0 || (all && all_lines.length > KIDS_SHOWN)) && (
             <button type="button" className="sb-more" onClick={() => setAll((v) => !v)}>
-              <Icon name="more" size={14} />{hidden > 0 ? t("side.more", { n: hidden }) : t("side.fewer")}
+              {hidden > 0 ? t("side.more", { n: hidden }) : t("side.fewer")}
             </button>
           )}
         </div>
@@ -595,11 +588,9 @@ type RowProps = {
   onOpen: (id: string) => void;
   current?: string;
   fork?: { of: string; seq: number };
-  /** Hung from a project's tile, on its guide line: 40 px and a smaller plate. */
+  /** Inside a project's fold: indented to the project's name. */
   nested?: boolean;
   projectName: string;
-  /** The chat lives in the installation's own project, whose chats carry the mic. */
-  system?: boolean;
   onNewIn?: () => void;
   /** Where Left goes from a chat inside a project: to the project's row. */
   onParent?: () => void;
@@ -622,14 +613,14 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   if ((l.terminals ?? 0) !== (r.terminals ?? 0) || l.match?.snippet !== r.match?.snippet || l.project_id !== r.project_id) return false;
   if (a.projectName !== b.projectName || a.onNewIn !== b.onNewIn || a.onOpen !== b.onOpen) return false;
   if ((a.current === l.id || a.row.kids.some((k) => k.id === a.current)) !== (b.current === r.id || b.row.kids.some((k) => k.id === b.current))) return false;
-  if (a.nested !== b.nested || a.system !== b.system || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin || !!a.subsOpen !== !!b.subsOpen) return false;
+  if (a.nested !== b.nested || a.fork?.seq !== b.fork?.seq || a.fork?.of !== b.fork?.of || a.pin !== b.pin || !!a.subsOpen !== !!b.subsOpen) return false;
   if (a.chat?.id !== b.chat?.id || a.chat?.entity_revision !== b.chat?.entity_revision || !!a.chat?.settings.ephemeral !== !!b.chat?.settings.ephemeral) return false;
   if (JSON.stringify(l.metadata?.loop ?? null) !== JSON.stringify(r.metadata?.loop ?? null)) return false;
   const lk = a.row.kids, rk = b.row.kids;
   return lk.length === rk.length && lk.every((k, i) => k.id === rk[i].id && k.status === rk[i].status && k.title === rk[i].title);
 }
 
-/** The state a plate's dot and the meta line's word say: only what asks for the operator or works. */
+/** The state a row says at its right edge, in place of its time: only what asks for the operator or works. */
 function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "running" | "failed" | "" {
   if (s.status === "waiting" || kids.some((k) => k.status === "waiting")) return "waiting";
   if (s.status === "failed") return "failed";
@@ -637,12 +628,17 @@ function rowState(s: SessionSummary, kids: SessionSummary[]): "waiting" | "runni
   return "";
 }
 
+/** The word for a row's state, lower case as it trails the title: "needs you", "working", "failed". */
+function stateWord(state: "waiting" | "running" | "failed"): string {
+  return t(`side.state.${state}`);
+}
+
 /**
- * A chat: a round plate with its kind and a dot for its state, the title over the whole width, and a
- * meta line under it. Hovering or focusing it shows "Open beside" and the menu; the right click opens
- * the same menu, with the commands of the phone's sheet.
+ * A chat: one line, its title and at the right edge its state or its time, with a small mark before
+ * that for a chat of another kind. Hovering or focusing it shows "Open beside" and the menu over the
+ * right edge; the right click opens the same menu, with the commands of the phone's sheet.
  */
-const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, system, onNewIn, onParent, pin, subsOpen, chat }: RowProps) {
+const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, projectName, onNewIn, onParent, pin, subsOpen, chat }: RowProps) {
   const s = row.s;
   const kids = row.kids;
   // The project's own settings are the project row's to offer; in a chat's menu they were one more
@@ -659,7 +655,6 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   // it lets go (chatkind.tsx).
   const plate = kindPlate(s);
   const kind = plate.kind;
-  const icon: IconName = s.archived ? "archive" : s.metadata?.loop ? "loop" : kindIcon(kind) ?? (fork || s.metadata?.forked_from ? "fork" : system ? "mic" : "bots");
   const kindClass = plate.className ? ` ${plate.className}` : "";
   const kindTitle = plate.title;
   const open = () => onOpen(s.id);
@@ -673,17 +668,17 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
   const menu: MenuItem[] = [
     { label: t("common.open"), icon: "open", hint: t("side.key.open"), onSelect: open },
     { label: t("side.beside"), icon: "columns", hint: t("side.key.beside"), onSelect: beside },
-    { label: t("rail.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
+    { label: t("nav.ctx.newtab"), icon: "external", onSelect: () => void window.open(new URL(sessionPath(s.id), location.href).href, "_blank", "noopener") },
     ...(pin ? [pinCommand(s.project_id, pin === "on", { key: true })] : []),
     ...(onNewIn ? [{ label: t("side.project.newagent", { name: projectName }), icon: "compose" as const, onSelect: onNewIn }] : []),
     "-",
     ...items.map((item): MenuItem => {
-      if (item === "-") return item;
+      if (!isAction(item)) return item;
       const hint = item.icon === "pen" ? t("side.key.rename") : item.icon === "archive" ? t("side.key.archive") : item.icon === "trash" ? t("side.key.delete") : undefined;
       return hint ? { ...item, hint } : item;
     }),
   ];
-  const withRule = menu.flatMap((item, i) => (item !== "-" && item.danger && menu[i - 1] !== "-" ? ["-" as const, item] : [item]));
+  const withRule = menu.flatMap((item, i) => (isAction(item) && item.danger && menu[i - 1] !== "-" ? ["-" as const, item] : [item]));
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
@@ -697,54 +692,50 @@ const ChatRow = memo(function ChatRow({ row, onOpen, current, fork, nested, proj
     else if (e.key === "ArrowLeft" && plain && kids.length && subsOpen) { e.preventDefault(); toggleSubagents(s.id, false); }
     else if (e.key === "ArrowLeft" && plain && onParent) { e.preventDefault(); onParent(); }
   };
-  const tail = [
-    // A remote chat says which computer it works on first: two chats in one folder on two laptops
-    // are told apart by nothing else on the row.
+  // What the row no longer has room to say is its tooltip: which computer a remote chat works on, the
+  // loop's cadence, the fork's message, the model.
+  const about = [
     remoteRowWords(s),
     s.metadata?.loop ? loopLine(s) : "",
     fork ? t("agents.fork.at", { n: fork.seq }) : "",
-    s.model ? shortModel(s.model, 28) : "",
+    s.model ?? "",
     s.workspace_own && !fork ? t("agents.own.chip") : "",
     s.metadata?.subagent_of ? t("agents.orphan") : "",
   ].filter(Boolean).join(" · ");
+  const mark: IconName | null = s.archived ? "archive" : kindIcon(kind) ?? (s.metadata?.loop ? "loop" : fork || s.metadata?.forked_from ? "fork" : null);
   return (
-    <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""}`}
-      title={s.model ? `${s.model} · ${s.id}` : s.id} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
+    <div data-session={s.id} data-nav="chat" className={`sb-row sb-chat ${here ? "current" : ""} ${unread ? "unread" : ""} ${nested ? "nested" : ""} ${fork ? "fork" : ""} ${s.match ? "match" : ""}`}
+      title={about ? `${agentName(s)}\n${about}` : agentName(s)} role="link" aria-current={here ? "page" : undefined} tabIndex={0} onClick={open} onKeyDown={onKey}
       draggable onDragStart={(e) => startChatDrag(e, s)} onDragEnd={endChatDrag}>
-      {kids.length ? (
-        // The left of a leader's row folds its helpers: the plate turns into the disclosure, with
-        // their number on it, so the row says it has them without a word in its meta line.
-        <button type="button" className={`sb-plate sb-subs ${subsOpen ? "open" : ""}${kindClass}`} aria-expanded={!!subsOpen}
-          aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })}
-          onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
-          <span className="sb-subs-icon"><Icon name={icon} size={nested ? 12 : 14} /></span>
-          <span className="sb-subs-chev" aria-hidden><Icon name="chevron" size={nested ? 12 : 14} /></span>
-          <span className="sb-subs-n num" aria-hidden>{kids.length}</span>
-          {state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}
-        </button>
-      ) : (
-        <span className={`sb-plate${kindClass}`} data-kind={kind === "chat" ? undefined : kind} title={kindTitle} role={kindTitle ? "img" : undefined} aria-label={kindTitle}><Icon name={icon} size={nested ? 12 : 14} />{state && <span className={`sb-st ${state}`} />}{imported && <PlateMark harness={imported} />}</span>
-      )}
-      <span className="sb-main">
-        <span className="sb-l1">
+      {s.match ? (
+        <span className="sb-main">
           <span className="sb-t">{agentName(s)}</span>
-          {unread && <span className="unread-dot" role="img" aria-label={t("agents.unread")} title={t("agents.unread")} />}
+          <span className="sb-snip search-passage">{s.match.snippet}</span>
         </span>
-        <span className="sb-l2">
-          {s.match ? <span className="sb-m"><span className="search-passage sb-ell">{s.match.snippet}</span></span> : (
-            <span className={`sb-m ${s.metadata?.loop?.status === "paused" ? "paused" : ""}`}>
-              {state && <span className={`sb-word ${state}`}>{statusWord(state)}</span>}
-              <HostMark env={s.env} />
-              <PrivateMark on={isPrivate(s)} size={11} />
-              {s.terminals ? <span className="sb-terms num" title={plural("term.count", s.terminals)} aria-label={plural("term.count", s.terminals)}><Icon name="terminal" size={11} />{s.terminals}</span> : null}
-              {tail && <span className="sb-ell">{tail}</span>}
-            </span>
-          )}
-          <span className="sb-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>
-        </span>
+      ) : <span className="sb-t">{agentName(s)}</span>}
+      {unread && <span className="unread-dot" role="img" aria-label={t("agents.unread")} title={t("agents.unread")} />}
+      <span className="sb-marks">
+        {mark && <span className={`sb-kind${kindClass}`} data-kind={kind === "chat" ? undefined : kind} title={kindTitle} role={kindTitle ? "img" : undefined} aria-label={kindTitle}><Icon name={mark} size={14} /></span>}
+        {imported && <PlateMark harness={imported} />}
+        <HostMark env={s.env} />
+        <PrivateMark on={isPrivate(s)} size={12} />
+        {s.terminals ? <span className="sb-terms num" title={plural("term.count", s.terminals)} aria-label={plural("term.count", s.terminals)}><Icon name="terminal" size={12} />{s.terminals}</span> : null}
+        {kids.length > 0 && (
+          // A leader's helpers fold out under it from here: their number and a chevron, so the row says
+          // it has them without a line of its own.
+          <button type="button" className={`sb-subs ${subsOpen ? "open" : ""}`} aria-expanded={!!subsOpen}
+            aria-label={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })} title={t(subsOpen ? "side.subs.hide" : "side.subs.show", { name: agentName(s) })}
+            onClick={(e) => { e.stopPropagation(); toggleSubagents(s.id); }} onKeyDown={(e) => e.stopPropagation()}>
+            <span className="sb-subs-n num">{kids.length}</span>
+            <Icon name="chevron" size={12} />
+          </button>
+        )}
       </span>
+      {state
+        ? <span className={`sb-word ${state}`}>{stateWord(state)}</span>
+        : <span className="sb-time num" title={new Date(s.last_message_at).toLocaleString()}>{relTime(s.last_message_at)}</span>}
       <span className="sb-acts session-row-menu" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-        <button type="button" className="iconbtn small quiet" onClick={beside} aria-label={t("side.beside")} title={t("side.beside")}><Icon name="columns" size={15} /></button>
+        <button type="button" className="iconbtn small quiet" onClick={beside} aria-label={t("side.beside")} title={t("side.beside")}><Icon name="columns" size={14} /></button>
         <OverflowMenu contextSelector="[data-session]" small className="quiet" label={`${s.title}: ${t("dlg.menu")}`} items={withRule} />
         {layers}
       </span>
@@ -760,7 +751,7 @@ function subState(s: SessionSummary): "running" | "waiting" | "failed" | "idle" 
 }
 
 /**
- * A subagent under its unfolded leader: one short line on the leader's tree, smaller and quieter than
+ * A subagent under its unfolded leader: one short line indented under it, smaller and quieter than
  * a chat, with its state as a dot. It opens beside the leader, in the Subagents tab; its full chat is
  * the tab's button and the row's menu. The arrows walk it like any row, and Left goes to the leader.
  */
@@ -783,11 +774,9 @@ const SubagentRow = memo(function SubagentRow({ kid, leader, last, nested }: { k
   return (
     <div ref={box} data-subagent={kid.id} data-nav="chat" role="link" tabIndex={0} aria-current={here ? "page" : undefined}
       className={`sb-row sb-sub ${here ? "current" : ""} ${last ? "last" : ""} ${nested ? "nested" : ""}`} title={kid.model ? `${kid.model} · ${kid.id}` : kid.id} onClick={open} onKeyDown={onKey}>
-      <span className="sb-tree" aria-hidden />
       <span className={`sub-dot ${state}`} aria-hidden />
       <span className="sb-t">{agentName(kid)}</span>
-      {state !== "idle" && <span className={`sb-word ${state}`}>{statusWord(state)}</span>}
-      <span className="sb-time num">{relTime(kid.last_message_at)}</span>
+      {state !== "idle" ? <span className={`sb-word ${state}`}>{stateWord(state)}</span> : <span className="sb-time num">{relTime(kid.last_message_at)}</span>}
     </div>
   );
 });
@@ -844,7 +833,7 @@ export function useSessionCommands(session: SessionSummary, opts: { onProject?: 
   const layers = <>
     {moving && <MoveSessionSheet sessionId={session.id} current={session.project_id} currentOwn={!!session.workspace_own} onClose={() => setMoving(false)} onMoved={() => invalidate("/api/sessions")} toast={toast} />}
     {promoting && opts.chat && <MakeProjectSheet project={opts.chat} title={session.title} onClose={() => setPromoting(false)} onMade={opts.onMadeProject} />}
-    {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="narrow">
+    {editing && <Sheet title={t("session.rename")} onClose={() => setEditing(false)} size="sm">
       <form onSubmit={(event) => { event.preventDefault(); void rename(); }}>
         <input className="field" aria-label={t("session.rename")} autoFocus value={title} maxLength={128} onChange={(event) => setTitle(event.target.value)} />
         <button className="btn primary" type="submit" disabled={saving || !title.trim()}>{t("common.save")}</button>

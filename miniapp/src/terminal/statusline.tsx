@@ -1,7 +1,7 @@
-// The status line under a workspace pane, and its shorter twin on an Overview card: paddock's line of
-// mono segments, one colour per kind of data (the --data-* tokens of the active theme). Segments a
-// narrow pane cannot hold are dropped by container queries in workspace.css, least useful first; the
-// tooltip always carries every value in full.
+// The status line in a workspace pane's foot: paddock's line of mono segments, one colour per kind of
+// data (the --data-* tokens of the active theme). Segments a narrow pane cannot hold are dropped by
+// container queries in workspace.css, least useful first; the tooltip always carries every value in
+// full. The folder and the branch are the pane header's words, so the foot leaves them out.
 
 import { t } from "../i18n";
 import type { TerminalView } from "../api";
@@ -21,15 +21,13 @@ function ContextMeter({ context }: { context: NonNullable<StatusFacts["context"]
   );
 }
 
-/** The segments of one line. `variant="card"` keeps the agent, the place, the meter, the cost and a
- *  shell's command. */
-export function StatusLine({ facts, variant = "pane" }: { facts: StatusFacts; variant?: "pane" | "card" }) {
-  if (!hasFacts(facts)) return null;
-  const { agent, path, branch, context, cachePct, output, cost, waiting, command } = facts;
+/** The segments of one line, without the folder and the branch: the pane's header says those. */
+export function StatusLine({ facts }: { facts: StatusFacts }) {
+  const { agent, context, cachePct, output, cost, waiting, command } = facts;
+  if (!hasFacts({ ...facts, path: null, branch: null })) return null;
   return (
-    <div className="tsl" data-variant={variant} title={statusTooltip(facts)}>
-      {/* A card's own foot already says what the member waits for, with its Answer button. */}
-      {waiting && variant === "pane" && (
+    <div className="tsl" title={statusTooltip(facts)}>
+      {waiting && (
         <span className="tsl-seg tsl-wait" data-seg="waiting">
           <span className="tsl-wait-dot" aria-hidden="true" />
           <span className="tsl-wait-word">{t("term.status.waiting")}</span>
@@ -42,22 +40,11 @@ export function StatusLine({ facts, variant = "pane" }: { facts: StatusFacts; va
           {agent.effort && <span className="tsl-effort">{agent.effort}</span>}
         </span>
       )}
-      {(path || branch) && (
-        <span className="tsl-seg tsl-where" data-seg="where">
-          {path && <span className="tsl-path truncate">{path.short}</span>}
-          {branch && (
-            <span className="tsl-branch truncate" data-dirty={branch.dirty ? "1" : undefined}>
-              {branch.name}
-              {branch.dirty && <span className="tsl-dirty" aria-label={t("term.status.dirty")}>*</span>}
-            </span>
-          )}
-        </span>
-      )}
       {context && <ContextMeter context={context} />}
-      {cachePct !== null && variant === "pane" && (
+      {cachePct !== null && (
         <span className="tsl-seg tsl-cache" data-seg="cache">{t("term.status.cache", { pct: cachePct })}</span>
       )}
-      {output !== null && variant === "pane" && (
+      {output !== null && (
         <span className="tsl-seg tsl-out" data-seg="output">{t("term.status.output", { n: shortTokens(output) })}</span>
       )}
       {cost && <span className="tsl-seg tsl-cost" data-seg="cost">{costText(cost)}</span>}
@@ -73,7 +60,7 @@ export function StatusLine({ facts, variant = "pane" }: { facts: StatusFacts; va
 }
 
 /** The line for a terminal row, with the live state of a pane when one shows it. */
-export function TerminalStatusLine({ row, state, home, variant }: { row: TerminalView | null | undefined; state?: TerminalState | null; home?: string | null; variant?: "pane" | "card" }) {
+export function TerminalStatusLine({ row, state, home }: { row: TerminalView | null | undefined; state?: TerminalState | null; home?: string | null }) {
   if (!row) return null;
-  return <StatusLine facts={statusFacts(row, state, home)} variant={variant} />;
+  return <StatusLine facts={statusFacts(row, state, home)} />;
 }

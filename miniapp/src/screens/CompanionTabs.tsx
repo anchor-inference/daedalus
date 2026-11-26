@@ -12,9 +12,11 @@ import { Icon } from "../icons";
 import { pathFor, sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
-import { Dropdown, OverflowMenu, Sheet, go, useMedia } from "../ui/index";
+import { Select, OverflowMenu, Sheet, go, useMedia } from "../ui/index";
 import type { MenuItem } from "../ui/dialogs";
 import { timeAgo } from "../ui/components";
+import { Page } from "../shell";
+import "./settings.css";
 
 // Four, because four fit across a phone. What the companion runs on its clock is the second half of
 // Goals — a goal's cadence and its own schedules are the same question, "what will it do next" — and
@@ -48,18 +50,18 @@ type Goal = {
 
 export function CompanionTab({ tab, toast, onOpen }: { tab: CompanionTabId; toast: (t: string) => void; onOpen: (id: string) => void }) {
   return (
-    <div className="screen wide companion-pane">
+    <Page width={tab === "computer" ? "full" : "list"} className="companion-pane">
       {tab === "goals" && <Goals toast={toast} />}
       {tab === "activity" && <Activity onOpen={onOpen} />}
       {tab === "computer" && <Computer toast={toast} />}
-    </div>
+    </Page>
   );
 }
 
 /** Tools and Memory: what it may do and what it keeps, opened from the header's menu. */
 export function CompanionSheet({ kind, sessionId, toast, onClose }: { kind: "tools" | "memory"; sessionId: string; toast: (t: string) => void; onClose: () => void }) {
   return (
-    <Sheet title={t(`companion.sheet.${kind}`)} onClose={onClose} size="narrow" className="companion-sheet">
+    <Sheet title={t(`companion.sheet.${kind}`)} onClose={onClose} size="sm" className="companion-sheet">
       {kind === "tools" ? <Tools /> : <Memory sessionId={sessionId} toast={toast} />}
     </Sheet>
   );
@@ -113,15 +115,15 @@ function Goals({ toast }: { toast: (t: string) => void }) {
 
   return (
     <>
-      <div className="companion-head-row">
-        <div className="section-title">{t("companion.tab.goals")}</div>
+      <div className="set-label companion-head-row">
+        <span>{t("companion.tab.goals")}</span>
         <button className="btn small" onClick={() => setAdding(true)}>
           <Icon name="plus" size={14} /> {t("companion.goals.add")}
         </button>
       </div>
       {adding && <GoalForm onClose={() => setAdding(false)} onSaved={refresh} toast={toast} />}
       {goals.length === 0 && data && <div className="companion-empty sub">{t("companion.goals.empty")}</div>}
-      <div className="companion-list">
+      <div className={`set-card companion-list${goals.length ? "" : " none"}`}>
         {goals.map((goal) => {
           const open = goal.status === "active" || goal.status === "paused";
           const menu: MenuItem[] = [
@@ -131,15 +133,15 @@ function Goals({ toast }: { toast: (t: string) => void }) {
           ];
           const when = goal.status === "active" && goal.next_check_at ? t("companion.goals.next", { when: shortDateTime(goal.next_check_at) }) : "";
           return (
-            <div key={goal.id} className={`card companion-goal ${goal.status}`}>
+            <div key={goal.id} className={`companion-goal ${goal.status}`}>
               <div className="companion-goal-top">
                 <b className="grow">{goal.title}</b>
-                {goal.status !== "active" && <span className="chip quiet">{t(`companion.goals.status.${goal.status}`)}</span>}
+                {goal.status !== "active" && <span className="companion-goal-status">{t(`companion.goals.status.${goal.status}`)}</span>}
                 <OverflowMenu items={menu} small label={t("companion.goals.menu")} />
               </div>
               {goal.brief && <div className="sub clamp-2">{goal.brief}</div>}
               <div className="companion-goal-meta sub num">
-                <Icon name="clock" size={13} />
+                <Icon name="clock" size={14} />
                 <span>{[cadenceLabel(goal.cadence), when, goal.sessions.length ? t("companion.goals.agents", { n: goal.sessions.length }) : ""].filter(Boolean).join(" · ")}</span>
               </div>
               {goal.last_report && (
@@ -159,7 +161,7 @@ function Goals({ toast }: { toast: (t: string) => void }) {
           );
         })}
       </div>
-      <button type="button" className="companion-closed link" onClick={() => setClosed(!closed)} aria-pressed={closed}>
+      <button type="button" className="btn ghost small companion-closed" onClick={() => setClosed(!closed)} aria-pressed={closed}>
         {t(closed ? "companion.goals.closed.hide" : "companion.goals.closed")}
       </button>
       <Schedule />
@@ -188,7 +190,7 @@ function GoalForm({ onClose, onSaved, toast }: { onClose: () => void; onSaved: (
     }
   }
   return (
-    <Sheet title={t("companion.goals.add")} onClose={onClose} size="narrow">
+    <Sheet title={t("companion.goals.add")} onClose={onClose} size="sm">
       <form className="companion-goal-form" onSubmit={(e) => void add(e)}>
         <label className="companion-field">
           <span className="sub">{t("companion.goals.title.label")}</span>
@@ -200,7 +202,7 @@ function GoalForm({ onClose, onSaved, toast }: { onClose: () => void; onSaved: (
         </label>
         <div className="companion-field">
           <span className="sub">{t("companion.goals.cadence")}</span>
-          <Dropdown
+          <Select
             label={t("companion.goals.cadence")}
             value={preset}
             onChange={setPreset}
@@ -227,7 +229,7 @@ function Schedule() {
   if (!data || (!data.schedules.length && !data.proposals.length)) return null;
   const row = (r: ScheduleRow, waiting: boolean) => (
     <div key={r.id} className="companion-sched">
-      <Icon name={waiting ? "question" : "clock"} size={15} />
+      <Icon name={waiting ? "question" : "clock"} size={16} />
       <div className="grow">
         <div className="truncate">{r.name}</div>
         <div className="sub num">{waiting ? t("companion.schedule.waiting") : r.next_run_at ? t("companion.schedule.next", { when: shortDateTime(r.next_run_at) }) : r.cron || shortDateTime(r.run_at)}</div>
@@ -236,11 +238,11 @@ function Schedule() {
   );
   return (
     <>
-      <div className="companion-head-row">
-        <div className="section-title">{t("companion.schedule.title")}</div>
+      <div className="set-label companion-head-row">
+        <span>{t("companion.schedule.title")}</span>
         <a className="btn ghost small" href={pathFor("schedules")} onClick={(e) => go(e, pathFor("schedules"))}>{t("companion.schedule.manage")}</a>
       </div>
-      <div className="card companion-scheds">
+      <div className="set-card companion-scheds">
         {data.proposals.map((r) => row(r, true))}
         {data.schedules.map((r) => row(r, false))}
       </div>
@@ -259,14 +261,15 @@ function Activity({ onOpen }: { onOpen: (id: string) => void }) {
   if (data && !items.length) return <div className="empty"><div>{t("companion.activity.empty")}</div></div>;
   return (
     <>
-      <ol className="companion-activity">
+      <div className="set-label">{t("companion.tab.activity")}</div>
+      <ol className="set-card companion-activity">
         {items.map((item) => {
           const known = `companion.activity.kind.${item.kind}`;
           const word = t(known).startsWith("[") ? item.kind : t(known);
           return (
             <li key={item.id} className={`companion-event kind-${item.kind}`}>
               <span className="sub num companion-event-when">{timeAgo(item.at)}</span>
-              <span className="chip quiet">{word}</span>
+              <span className="companion-event-kind">{word}</span>
               {item.session_id ? (
                 <a className="link truncate" href={sessionPath(item.session_id)} onClick={(e) => { e.preventDefault(); onOpen(item.session_id!); }}>{item.title}</a>
               ) : (
@@ -295,7 +298,7 @@ function Computer({ toast }: { toast: (t: string) => void }) {
     <>
       <div className="sub companion-intro">{t("companion.computer.intro")}</div>
       {data && !data.available && data.reason && <div className="sub">{data.reason}</div>}
-      <div className="card companion-computer">
+      <div className="set-card companion-computer">
         <BrowserTab groups={data?.groups ?? []} toast={toast} phone={phone} />
       </div>
     </>
@@ -310,8 +313,8 @@ function Tools() {
   return (
     <div className="companion-sheet-body">
       <div className="sub">{t("companion.tools.never")}</div>
-      <div className="section-title">{t("companion.tools.own")}</div>
-      <div className="card companion-tools">
+      <div className="set-label">{t("companion.tools.own")}</div>
+      <div className="set-card companion-tools">
         {data.companion.map((tool) => (
           <div key={tool.name} className="companion-tool">
             <code>{tool.name}</code>
@@ -319,7 +322,7 @@ function Tools() {
           </div>
         ))}
       </div>
-      <div className="section-title">{t("companion.tools.agents")}</div>
+      <div className="set-label">{t("companion.tools.agents")}</div>
       <div className="sub">{t("companion.tools.agents.body", { n: data.agents.tools })}</div>
       <div className="sub">{data.agents.mcp.length ? t("companion.tools.mcp", { list: data.agents.mcp.join(", ") }) : t("companion.tools.mcp.none")}</div>
     </div>
@@ -346,7 +349,7 @@ function Memory({ sessionId, toast }: { sessionId: string; toast: (t: string) =>
       <div className="sub">{t("companion.memory.intro")}</div>
       {(!sessionId || (data && !records.length)) && <div className="companion-empty sub">{t("companion.memory.empty")}</div>}
       {records.length > 0 && (
-        <div className="card companion-tools">
+        <div className="set-card companion-tools">
           {records.map((r) => (
             <div key={r.id} className="companion-note">
               <span className="grow">{r.text}</span>
@@ -378,40 +381,50 @@ export function CompanionEditor({ profile, onClose, onSaved, toast }: { profile:
       setBusy(false);
     }
   }
+  const canSave = !busy && !!name.trim();
   return (
-    <Sheet title={t("companion.edit")} onClose={onClose} size="narrow">
+    <Sheet
+      title={t("companion.edit")}
+      onClose={onClose}
+      size="sm"
+      className="companion-editor-sheet"
+      footer={
+        <div className="btnrow companion-editor-foot">
+          <button className="btn ghost small" onClick={onClose}>{t("companion.edit.cancel")}</button>
+          <button className="btn primary small" disabled={!canSave} onClick={() => void save()}>{t("companion.edit.save")}</button>
+        </div>
+      }
+    >
       <div className="companion-editor">
         <div className="companion-editor-face">
           <CompanionAvatar avatar={avatar} size={96} name={name} />
         </div>
-        <label className="companion-field">
-          <span className="sub">{t("companion.edit.name")}</span>
-          <input className="field" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-label={t("companion.edit.name")} />
-        </label>
-        <label className="companion-field">
-          <span className="sub">{t("companion.edit.shape")}</span>
-          <Dropdown label={t("companion.edit.shape")} value={avatar.shape} onChange={(shape) => setAvatar({ ...avatar, shape })} options={SHAPES.map((id) => ({ id, label: t(`companion.shape.${id}`) }))} />
-        </label>
-        <div className="companion-field">
-          <span className="sub">{t("companion.edit.color")}</span>
-          <div className="companion-swatches">
-            {SWATCHES.map((color) => (
-              <button key={color} type="button" className={`companion-swatch${avatar.color === color ? " on" : ""}`} style={{ background: color }} aria-label={color} aria-pressed={avatar.color === color} onClick={() => setAvatar({ ...avatar, color })} />
-            ))}
-            <input type="color" value={avatar.color} onChange={(e) => setAvatar({ ...avatar, color: e.target.value })} aria-label={t("companion.edit.color")} />
+        <div className="set-card">
+          <label className="set-row">
+            <span className="set-row-title">{t("companion.edit.name")}</span>
+            <input className="field companion-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-label={t("companion.edit.name")} />
+          </label>
+          <div className="set-row">
+            <span className="set-row-title">{t("companion.edit.shape")}</span>
+            <Select className="set-value" label={t("companion.edit.shape")} value={avatar.shape} onChange={(shape) => setAvatar({ ...avatar, shape })} options={SHAPES.map((id) => ({ id, label: t(`companion.shape.${id}`) }))} />
           </div>
-        </div>
-        <label className="companion-field">
-          <span className="sub">{t("companion.edit.eyes")}</span>
-          <Dropdown label={t("companion.edit.eyes")} value={avatar.eyes} onChange={(eyes) => setAvatar({ ...avatar, eyes })} options={EYES.map((id) => ({ id, label: t(`companion.eyes.${id}`) }))} />
-        </label>
-        <label className="companion-field">
-          <span className="sub">{t("companion.edit.accessory")}</span>
-          <Dropdown label={t("companion.edit.accessory")} value={avatar.accessory} onChange={(accessory) => setAvatar({ ...avatar, accessory })} options={ACCESSORIES.map((id) => ({ id, label: t(`companion.accessory.${id}`) }))} />
-        </label>
-        <div className="btnrow">
-          <button className="btn ghost small" onClick={onClose}>{t("companion.edit.cancel")}</button>
-          <button className="btn small" disabled={busy || !name.trim()} onClick={() => void save()}>{t("companion.edit.save")}</button>
+          <div className="set-row">
+            <span className="set-row-title">{t("companion.edit.color")}</span>
+            <div className="companion-swatches">
+              {SWATCHES.map((color) => (
+                <button key={color} type="button" className={`companion-swatch${avatar.color === color ? " on" : ""}`} style={{ background: color }} aria-label={color} aria-pressed={avatar.color === color} onClick={() => setAvatar({ ...avatar, color })} />
+              ))}
+              <input type="color" value={avatar.color} onChange={(e) => setAvatar({ ...avatar, color: e.target.value })} aria-label={t("companion.edit.color")} />
+            </div>
+          </div>
+          <div className="set-row">
+            <span className="set-row-title">{t("companion.edit.eyes")}</span>
+            <Select className="set-value" label={t("companion.edit.eyes")} value={avatar.eyes} onChange={(eyes) => setAvatar({ ...avatar, eyes })} options={EYES.map((id) => ({ id, label: t(`companion.eyes.${id}`) }))} />
+          </div>
+          <div className="set-row">
+            <span className="set-row-title">{t("companion.edit.accessory")}</span>
+            <Select className="set-value" label={t("companion.edit.accessory")} value={avatar.accessory} onChange={(accessory) => setAvatar({ ...avatar, accessory })} options={ACCESSORIES.map((id) => ({ id, label: t(`companion.accessory.${id}`) }))} />
+          </div>
         </div>
       </div>
     </Sheet>

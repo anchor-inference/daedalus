@@ -1,7 +1,8 @@
-// Where each destination sits: the desktop rail, its More launcher, the phone drawer and the phone's More
-// launcher, from three inputs — the layout the app ships with, the operator's `[navigation]` section of
-// the configuration, and the pages the agent has published. Every place that draws navigation asks
-// `resolveNav` and nothing else, so the rail and the drawer cannot disagree about what exists.
+// Where each destination sits: pinned at the top of the sidebar or in its More launcher, from three
+// inputs — the layout the app ships with, the operator's `[navigation]` section of the configuration,
+// and the pages the agent has published. A phone's drawer is the sidebar, so it has no list of its own.
+// Every place that draws navigation asks `resolveNav` and nothing else, so no two of them can
+// disagree about what exists.
 //
 // No runtime import of the router or the store: this module is a pure function a test can load
 // without a browser (router.ts reads window.history the moment it loads).
@@ -13,7 +14,7 @@ import type { Screen } from "./router";
 
 export type Counts = { inbox?: number; changes?: number; services?: number; agents?: number };
 
-export const ICONS: Record<Screen, IconName> = { agents: "bots", companion: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", canvas: "grid", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file" };
+export const ICONS: Record<Screen, IconName> = { agents: "bots", companion: "mic", inbox: "inbox", board: "board", terminals: "terminal", harnesses: "wrench", changes: "changes", schedules: "clock", calendar: "calendar", canvas: "grid", services: "globe", memory: "bulb", usage: "chart", health: "check", settings: "settings", orchestration: "compass", browser: "globe", page: "file", primitives: "apps" };
 
 /** A destination's name, in the reader's language. */
 export function screenTitle(s: Screen): string {
@@ -27,11 +28,13 @@ export function countFor(s: Screen, counts: Counts): number {
   return 0;
 }
 
-/** The desktop rail as it ships, under the two modes. */
-export const DESKTOP_RAIL: Screen[] = ["inbox", "board", "calendar", "canvas", "changes", "terminals", "companion", "schedules"];
+/** The destinations pinned under New chat at the top of the sidebar, as it ships: the five the
+ *  operator opens every day. Five, not the eight the icon rail held: as labelled rows each costs the
+ *  list of chats a row, and the rest are one press away in More. */
+export const PINNED: Screen[] = ["inbox", "board", "calendar", "changes", "terminals"];
 
 /** Every destination the operator may place, grouped as the More launcher heads them (`nav.group.*`).
- *  The two modes and Settings are not here: they are the frame of the rail, not items on it. */
+ *  The two modes and Settings are not here: they are the sidebar's frame, its head and its foot. */
 export const MENU_GROUPS: { key: string; items: Screen[] }[] = [
   { key: "work", items: ["companion", "inbox", "board", "calendar", "canvas", "terminals", "harnesses"] },
   { key: "autonomy", items: ["changes", "schedules", "services"] },
@@ -43,13 +46,8 @@ export const PAGES_GROUP = "pages";
 
 export const NAV_SCREENS: Screen[] = MENU_GROUPS.flatMap((g) => g.items);
 
-/** The phone drawer's places as they ship, per mode; the phone's More launcher holds `PHONE_MORE`. */
-export const PHONE_AGENTS: Screen[] = ["inbox", "terminals", "board", "companion", "usage"];
-export const PHONE_ORCHESTRATION: Screen[] = ["inbox", "terminals", "usage"];
-export const PHONE_MORE: Screen[] = ["calendar", "canvas", "changes", "schedules", "services", "memory", "harnesses", "health"];
-
 /** The server's `[navigation]` section. Every field may be missing: an older host has none of it. */
-export type NavConfig = { rail?: string[]; more?: string[]; drawer?: string[]; hidden?: string[]; icons?: Record<string, string> };
+export type NavConfig = { pinned?: string[]; more?: string[]; hidden?: string[]; icons?: Record<string, string> };
 
 /** One entry of `GET /api/pages`. The title may be one string or one per language. */
 export type PageInfo = { slug: string; title?: string | Record<string, string> | null; icon?: string | null; icon_path?: string | null; path?: string | null; version?: number | string | null; updated_at?: string | null };
@@ -70,11 +68,9 @@ export type NavItem = {
 };
 
 export type ResolvedNav = {
-  rail: NavItem[];
+  /** Pinned at the top of the sidebar, in order. */
+  pinned: NavItem[];
   more: { key: string; items: NavItem[] }[];
-  /** The phone drawer's places, per mode. */
-  drawer: { agents: NavItem[]; orchestration: NavItem[] };
-  phoneMore: NavItem[];
   /** Every item that is shown somewhere, in the order the More launcher lists them. */
   shown: NavItem[];
   /** Every item this installation has, hidden ones included, for Settings → Navigation. */
@@ -162,65 +158,41 @@ function orderBy(items: NavItem[], ordered: string[]): NavItem[] {
   return [...listed, ...items.filter((it) => !at.has(it.id))];
 }
 
-export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[] | null; selfdev: SelfDevMode; counts?: Counts }): ResolvedNav {
-  const config = input.config ?? {};
-  const all = catalogue(input.pages, input.selfdev, config, input.counts ?? {});
+/** Where the desktop puts each item, from the configuration alone. Hidden wins, then pinned, then
+ *  More; an item mentioned nowhere keeps the place it ships with, which for a page is More — a new
+ *  page should not push the operator's pinned rows around. */
+export function placeDesktop(all: NavItem[], config: NavConfig): { pinned: NavItem[]; more: { key: string; items: NavItem[] }[]; hidden: Set<string>; shown: NavItem[] } {
   const hidden = new Set(list(config.hidden));
-  const rail = list(config.rail);
+  const pinned = list(config.pinned);
   const more = list(config.more);
-  const drawer = list(config.drawer);
   const shown = all.filter((it) => !hidden.has(it.id));
   const byId = new Map(shown.map((it) => [it.id, it]));
-
-  // Desktop. Hidden wins, then the rail, then More; an item mentioned nowhere keeps the place it
-  // ships with, which for a page is More — a new page should not push the operator's rail around.
-  const onRail = (it: NavItem) => rail.includes(it.id) || (!more.includes(it.id) && it.screen !== null && DESKTOP_RAIL.includes(it.screen));
-  const railItems = [
-    ...rail.map((id) => byId.get(id)).filter((it): it is NavItem => !!it),
-    ...DESKTOP_RAIL.map((s) => byId.get(s)).filter((it): it is NavItem => !!it && !rail.includes(it.id) && onRail(it)),
+  const isPinned = (it: NavItem) => pinned.includes(it.id) || (!more.includes(it.id) && it.screen !== null && PINNED.includes(it.screen));
+  const pinnedItems = [
+    ...pinned.map((id) => byId.get(id)).filter((it): it is NavItem => !!it),
+    ...PINNED.map((s) => byId.get(s)).filter((it): it is NavItem => !!it && !pinned.includes(it.id) && isPinned(it)),
   ];
-  const inMore = shown.filter((it) => !onRail(it));
+  const inMore = shown.filter((it) => !isPinned(it));
   const sections = [...MENU_GROUPS.map((g) => g.key), PAGES_GROUP]
     .map((key) => ({ key, items: orderBy(inMore.filter((it) => it.group === key), more) }))
     .filter((g) => g.items.length > 0);
-
-  // Phone. A drawer list that was set is the whole drawer, for both modes; until then each mode
-  // keeps the drawer it ships with, and orchestration's leaves the board and the companion page out.
-  let agents: NavItem[];
-  let orchestration: NavItem[];
-  if (drawer.length) {
-    agents = drawer.map((id) => byId.get(id)).filter((it): it is NavItem => !!it);
-    orchestration = agents;
-  } else {
-    agents = PHONE_AGENTS.map((s) => byId.get(s)).filter((it): it is NavItem => !!it);
-    orchestration = PHONE_ORCHESTRATION.map((s) => byId.get(s)).filter((it): it is NavItem => !!it);
-  }
-  const inDrawer = new Set(agents.map((it) => it.id));
-  const phoneMore = drawer.length
-    ? shown.filter((it) => !inDrawer.has(it.id))
-    : [
-        ...PHONE_MORE.map((s) => byId.get(s)).filter((it): it is NavItem => !!it),
-        // Placed nowhere by the shipped layout: a screen of a later build, and every page.
-        ...shown.filter((it) => !inDrawer.has(it.id) && !(it.screen && PHONE_MORE.includes(it.screen))),
-      ];
-
-  return { rail: railItems, more: sections, drawer: { agents, orchestration }, phoneMore, shown, catalogue: all, hidden };
+  return { pinned: pinnedItems, more: sections, hidden, shown };
 }
 
-/** What the More launcher draws for one surface: the desktop's rail beside it, or a phone drawer.
- *
- *  `catalogue` is every shown item, those the surface already shows first and in its order, then the
- *  rest in the menu's order: the launcher lists everything, the rail's items included, so it is a
- *  table of contents rather than a list of leftovers, and `placed` is what its dot marks. `fallback`
- *  is what Frequent offers before it has learned anything: the items the surface does not show,
- *  which are the ones the operator needs the launcher for. */
-export function launcherLayout(nav: ResolvedNav, placedItems: NavItem[]): { catalogue: NavItem[]; placed: Set<string>; fallback: string[] } {
+export function resolveNav(input: { config?: NavConfig | null; pages?: PageInfo[] | null; selfdev: SelfDevMode; counts?: Counts }): ResolvedNav {
+  const config = input.config ?? {};
+  const all = catalogue(input.pages, input.selfdev, config, input.counts ?? {});
+  const { pinned, more, hidden, shown } = placeDesktop(all, config);
+  return { pinned, more, shown, catalogue: all, hidden };
+}
+
+/** What the More launcher needs to know about the sidebar beside it: which items it already shows (its
+ *  pinned rows), which the pin on a row marks, and what Frequent offers before it has learned anything:
+ *  the items the sidebar does not show, which are the ones the operator needs the launcher for. */
+export function launcherLayout(nav: ResolvedNav, placedItems: NavItem[]): { placed: Set<string>; fallback: string[] } {
   const placed = new Set(placedItems.map((it) => it.id));
-  const shown = new Set(nav.shown.map((it) => it.id));
-  const first = placedItems.filter((it) => shown.has(it.id));
-  const catalogue = [...first, ...nav.shown.filter((it) => !placed.has(it.id))];
-  const unplaced = [...nav.more.flatMap((g) => g.items), ...nav.phoneMore, ...nav.shown].map((it) => it.id).filter((id) => !placed.has(id));
-  return { catalogue, placed, fallback: [...new Set(unplaced)] };
+  const unplaced = [...nav.more.flatMap((g) => g.items), ...nav.shown].map((it) => it.id).filter((id) => !placed.has(id));
+  return { placed, fallback: [...new Set(unplaced)] };
 }
 
 /** The id of the item the route stands on: a screen's name, or `page:<slug>`. */
@@ -233,17 +205,13 @@ export function currentId(screen: Screen, detail: string | null): string {
  *  Ids the screen did not show — a page that is gone for now, a screen of another build — are kept
  *  where they were: a removed page that comes back finds its place, and a page list that failed to
  *  load for one save does not wipe the layout. */
-export function desktopLayout(previous: NavConfig, order: string[], placement: Record<string, "rail" | "more" | "hidden">, known: Set<string>): Pick<Required<NavConfig>, "rail" | "more" | "hidden"> {
-  const keep = (field: "rail" | "more" | "hidden") => list(previous[field]).filter((id) => !known.has(id));
+export function desktopLayout(previous: NavConfig, order: string[], placement: Record<string, "pinned" | "more" | "hidden">, known: Set<string>): Pick<Required<NavConfig>, "pinned" | "more" | "hidden"> {
+  const keep = (field: "pinned" | "more" | "hidden") => list(previous[field]).filter((id) => !known.has(id));
   return {
-    rail: [...order.filter((id) => placement[id] === "rail"), ...keep("rail")],
+    pinned: [...order.filter((id) => placement[id] === "pinned"), ...keep("pinned")],
     more: [...order.filter((id) => placement[id] === "more"), ...keep("more")],
     hidden: [...order.filter((id) => placement[id] === "hidden"), ...keep("hidden")],
   };
-}
-
-export function drawerLayout(previous: NavConfig, on: string[], known: Set<string>): string[] {
-  return [...on, ...list(previous.drawer).filter((id) => !known.has(id))];
 }
 
 /** Moves the item at `from` to `to`, the rest closing up behind it. */

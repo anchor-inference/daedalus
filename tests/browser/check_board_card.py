@@ -1,10 +1,11 @@
-"""A task on the Board screen reads as a task, in both languages.
+"""A task on the Board screen reads as a task, in both languages, wide and on a phone.
 
 The card a project's orchestrator wrote used to open on its title, its status and a Move to row, and
 nothing else: its brief, who did it and what came of it were only on the project's own board. Checked
-here: the sheet shows the four parts of the brief that are written, who it is assigned to, the history
-with the member's result, and a link that opens the same task on its project's board. A task outside
-every project shows none of that and still opens.
+here: the pane (a sheet on a phone) gives the brief as one Description and one Acceptance, who it is
+assigned to, the history with the member's result, and a link that opens the same task on its
+project's board. A task outside every project shows none of that and still opens; a new task is made,
+checked off and closed from the pane.
 """
 
 from __future__ import annotations
@@ -25,8 +26,10 @@ CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
 PID = "9f3c2a1b7d40"
 
 WORDS = {
-    "en": {"objective": "Objective", "done_when": "Done when", "assigned": "Assigned to Ira", "open": "Open on the board of Bakery", "history": "History and results", "notes": "Notes"},
-    "ru": {"objective": "Цель", "done_when": "Готово, когда", "assigned": "Исполнитель: Ira", "open": "Открыть на доске проекта Bakery", "history": "История и результаты", "notes": "Заметки"},
+    "en": {"description": "Description", "acceptance": "Acceptance", "deliverable": "Deliverable", "assigned": "Ira · team", "open": "Open on the board of Bakery", "history": "History and results",
+           "title": "Title", "checklist": "Checklist (one item per line)", "actions": "Task actions"},
+    "ru": {"description": "Описание", "acceptance": "Приёмка", "deliverable": "Результат", "assigned": "Ira · команда", "open": "Открыть на доске проекта Bakery", "history": "История и результаты",
+           "title": "Название", "checklist": "Чек-лист (по пункту в строке)", "actions": "Действия с задачей"},
 }
 RESULT = "[2026-09-24 09:30] result from Ira: plan.md written, four limits and two open questions"
 
@@ -71,49 +74,56 @@ def serve(page: Page, stub: BoardStub, unhandled: Unhandled) -> None:
     page.route("**/api/**", handle)
 
 
+def pane_of(page: Page):  # type: ignore[no-untyped-def]
+    """The open task: the pane beside a wide board, the sheet on a phone."""
+    return page.locator(".task-pane:not(.in-sheet), .task-sheet")
+
+
 def check(page: Page, lang: str, unhandled: Unhandled) -> None:
     words = WORDS[lang]
     stub = board()
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/board/t-plan?token=t&lang={lang}")
-    sheet = page.locator(".sheet")
-    expect(sheet).to_contain_text("Delivery limits plan")
-    brief = sheet.locator(".board-task-brief")
-    expect(brief).to_have_count(3)  # the empty part is left out, not drawn as a blank heading
-    expect(brief.first).to_contain_text(words["objective"])
-    expect(brief.first).to_contain_text("Plan the delivery limits for the shop")
-    expect(brief.nth(2)).to_contain_text(words["done_when"])
-    expect(sheet.locator(".board-task-where")).to_contain_text(words["assigned"])
-    expect(sheet).to_contain_text(words["history"])
-    expect(sheet).to_contain_text("plan.md written, four limits")
+    pane = pane_of(page)
+    expect(pane).to_contain_text("Delivery limits plan")
+    blocks = pane.locator(".task-block")
+    # The brief is two blocks, not four headed parts: the objective and the deliverable are the
+    # description, "done when" is the acceptance; the empty boundaries are left out, not a blank line.
+    description = blocks.filter(has_text=words["description"])
+    expect(description).to_contain_text("Plan the delivery limits for the shop")
+    expect(description).to_contain_text(f"{words['deliverable']}: plan.md in the notes folder")
+    expect(blocks.filter(has_text=words["acceptance"])).to_contain_text("plan.md names every limit")
+    expect(pane.locator(".task-kv")).to_contain_text(words["assigned"])
+    expect(pane).to_contain_text(words["history"])
+    expect(pane).to_contain_text("plan.md written, four limits")
     overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 0, f"{lang}: the page scrolls sideways by {overflow}px"
 
-    sheet.get_by_role("button", name=words["open"]).click()
+    pane.get_by_role("button", name=words["open"]).click()
     page.wait_for_url(f"**/project/{PID}/board?task=t-plan*")
 
     page.goto(f"{BASE}/board/t-own?token=t&lang={lang}")
-    own = page.locator(".sheet")
-    expect(own).to_contain_text("Every pot is wet.")
-    expect(own.locator(".board-task-brief")).to_have_count(0)
-    expect(own.locator(".board-task-where")).to_have_count(0)
+    own = pane_of(page)
+    expect(own.locator(".task-block").filter(has_text=words["acceptance"])).to_contain_text("Every pot is wet.")
+    expect(own.get_by_role("button", name=words["open"])).to_have_count(0)
 
     page.goto(f"{BASE}/board?token=t&lang={lang}")
     page.get_by_role("button", name="New task" if lang == "en" else "Новая задача").first.click()
-    created = page.locator(".sheet")
-    created.locator("input.field").first.fill("Check plants")
-    created.locator("textarea.field").nth(1).fill("Each pot inspected")
+    created = page.locator(".sheet.board-new")
+    created.get_by_label(words["title"]).fill("Check plants")
+    created.get_by_label(words["checklist"]).fill("Each pot inspected")
     created.get_by_role("button", name="Create" if lang == "en" else "Создать").click()
     expect(created).to_have_count(0)
     assert stub.created[-1]["client_operation_id"] and stub.created[-1]["expected_collection_revision"] == 3
+    assert stub.created[-1]["checklist"] == ["Each pot inspected"], stub.created[-1]
     # A desktop's card, or the row of a phone's list.
-    page.locator(".task, .ph-task", has_text="Check plants").first.click()
-    task_sheet = page.locator(".sheet")
+    page.locator(".task-card, .ph-task", has_text="Check plants").first.click()
+    task_pane = pane_of(page)
     task_id = next(task["id"] for task in stub.tasks if task["title"] == "Check plants")
     with page.expect_response(lambda response: urlsplit(response.url).path.endswith(f"/api/board/{task_id}") and response.request.method == "PUT"):
-        task_sheet.get_by_role("checkbox").click()
+        task_pane.get_by_role("checkbox").click()
     assert stub.updated[-1][1]["check_ids"] == ["C1"] and stub.updated[-1][1]["client_operation_id"]
-    task_sheet.get_by_role("button", name="Actions" if lang == "en" else "Действия").click()
+    task_pane.get_by_role("button", name=words["actions"]).click()
     page.get_by_role("menuitem", name="Close as done…" if lang == "en" else "Закрыть как готовую…").click()
     dialog = page.locator(".sheet-backdrop.confirm .dialog")
     dialog.locator("textarea").fill("Checked by hand")

@@ -4,15 +4,16 @@
 import { forwardRef, type ReactNode, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { api, ApiError, AsrStatus, AutopilotStatus, ModelFallback, PendingAnswered, Question, type SessionTranslation, SkillEntry, SlashCommand } from "./api";
 import { clipboardImages, nameIncoming, pastedFiles } from "./attachfiles";
-import { Popover } from "./ui/dialogs";
-import { Banner, BottomSheet, SheetRow } from "./ui/phone";
+import { Banner } from "./ui/primitives";
+import { MenuRow, Popover } from "./ui/primitives";
 import { useOffline } from "./store";
 import { Icon } from "./icons";
 import { fileGlyph, previewKind, canPreview } from "./preview";
 import { enterSends, errorText, fmtBytes, fmtTok, haptic } from "./ui";
 import { AccountChoice, ModelChoice, ModelSelect } from "./modelselect";
-import { TogglesSelect } from "./toggles";
-import { AgentLangSelect, agentLangLabel, type AgentLangChoice } from "./agentlang";
+import { AccessSelect } from "./toggles";
+import type { AgentLangChoice } from "./agentlang";
+import { ApprovalCard } from "./approvalcard";
 import { MicButton, VoiceBar, VoiceNoteFailed, useVoiceNote } from "./voicebar";
 import { landWords } from "./voicenote";
 import { MeetingCard, MeetingOffer, isAudio, useMeeting } from "./meeting";
@@ -53,7 +54,6 @@ import { btwCommand, btwQuestion } from "./btw/btw";
 import type { Answer } from "./questions/ask";
 import { clearQuoteReplies, removeQuoteReply, replyPreview, serialiseReplies, useQuoteReplies } from "./quotereply";
 import { ReplyCard, ReplyDialog } from "./replyselect";
-import { ServerGrantButton } from "./servergrant";
 
 export type { Answer } from "./questions/ask";
 
@@ -101,17 +101,17 @@ export type ComposerProps = {
   suggestion?: string;
   /** The suggestion went into the field: the screen stops offering it. */
   onSuggestionUsed?: () => void;
-  /** The session's YAGNI switch; absent where the composer offers no switches and names the agent only. */
+  /** The session's YAGNI switch, in the access chip's menu; absent where the session offers no switches. */
   yagni?: boolean;
   onYagni?: (on: boolean) => void;
-  /** The session's autopilot switch, beside YAGNI in the toggles menu. */
+  /** The session's autopilot switch, beside YAGNI in the access menu. */
   autopilot?: AutopilotStatus | null;
   onAutopilot?: (on: boolean) => void;
-  /** The session's "Bypass all checks", last in the toggles menu. */
+  /** The session's "Bypass all checks": the access chip says "Full access" while it is on. */
   bypass?: boolean;
   onBypass?: (on: boolean) => void;
-  /** The language the agent works in here, and the settings' default for it; the chip is shown only
-   *  where the session can be told one (`onAgentLang`). */
+  /** The language the agent works in here, and the settings' default for it; a row of the access menu
+   *  only where the session can be told one (`onAgentLang`). */
   translation?: SessionTranslation;
   translationDefault?: string;
   onAgentLang?: (choice: AgentLangChoice) => void;
@@ -157,10 +157,11 @@ export type ComposerProps = {
    *  goal line, the quote a message answers): inside the composer so they take the field's width at
    *  every size instead of copying its padding rule by rule. */
   above?: ReactNode;
-  /** A control of the conversation's own beside the mode chip: the approval mode of a conversation in
+  /** A control of the conversation's own beside the access chip: the approval mode of a conversation in
    *  the operator's Chrome. */
   beside?: ReactNode;
-  /** Open the prompt coach with the draft as it stands; absent where there is no coach (inside one). */
+  /** Open the prompt coach with the draft as it stands; absent where there is no coach (inside one).
+   *  It and the side question are the "Helpers" of the + menu. */
   onCoach?: (draft: string) => void;
   /** Ask a side question about the chat (`/btw`, or the helpers' menu): the question, or "" to open its
    *  window on an empty field. Never a message to the chat, so never a steer while a run is on. */
@@ -183,8 +184,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // the far side of the window from the chip that was pressed.
   const [modelAnchor, setModelAnchor] = useState<HTMLElement | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [langOpen, setLangOpen] = useState(false);
   // The operator's secrets on this draft, by name: the value went to the host when the form was sent.
   const [secrets, setSecrets] = useState<AttachedSecret[]>([]);
   const [secretOpen, setSecretOpen] = useState(false);
@@ -193,8 +192,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const replies = useQuoteReplies(sessionId);
   const [replyOpen, setReplyOpen] = useState<string | null>(null);
   const openReply = replies.find((reply) => reply.id === replyOpen) ?? null;
-  const focus = useComposerFocus(phone);
-  const focused = focus.focused;
   const offline = useOffline();
   const textarea = useRef<CodeFieldHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -202,8 +199,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const photosInput = useRef<HTMLInputElement>(null);
   const plusButton = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLDivElement>(null);
-  const helpButton = useRef<HTMLButtonElement>(null);
-  const dock = useRef<HTMLDivElement>(null);
 
   // The draft is the session's: leaving and coming back finds it, another session does not.
   useEffect(() => {
@@ -480,16 +475,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     }
   }
-  // ⌘M and ⌘⇧S reach the composer from anywhere on the screen; y / n answer the dock when nobody is typing.
-  const approval = props.approval ?? null;
-  // The agent's ask for the operator's Chrome is a switch of this conversation, not a call let through
-  // once: it names that Chrome and carries the consent summary the panel's first switch shows.
-  const approvalTitle = !approval ? "" : approval.chrome ? t("composer.chrome.title", { name: approval.chrome.name }) : approval.blocked ? t("composer.blocked.title", { tool: approval.tool || "tool" }) : t("composer.approval.title", { tool: approval.tool || "tool" });
-  // A call the auto-review blocked: the same dock, but it says that it overrides the review and why the
-  // review said no, so "Allow anyway" is pressed knowing what it lifts.
-  const approvalKind = !approval ? "" : approval.chrome ? "chrome" : approval.blocked ? "blocked" : "policy";
-  const approveLabel = !approval ? "" : t(approval.chrome ? "composer.chrome.allow" : approval.blocked ? "composer.allowAnyway" : "composer.approve");
-  const denyLabel = !approval ? "" : t(approval.chrome ? "composer.chrome.deny" : approval.blocked ? "composer.keepBlocked" : "composer.deny");
+  // ⌘M and ⌘⇧S reach the composer from anywhere on the screen; y / n answer the card when nobody is typing.
+  // A call the project's rule answered from the card is put away here at once: the screen's own answers
+  // mark their call answered, this one goes past them, and the card stayed until the host's next word.
+  const [settled, setSettled] = useState<string | null>(null);
+  const approval = props.approval && props.approval.callId !== settled ? props.approval : null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Ctrl+M is Enter in a terminal and Ctrl+Shift+S nothing the composer should hear.
@@ -552,21 +542,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const fieldWords = steers && status === "running" ? t("session.composer.running.steer") : t(placeholderKey(status, asking));
   const place = composerContext(props.place);
 
-  // A phone draws the composer in two shapes (ui/phone.css): one 48 px row at rest, and the text over
-  // a toolbar once the field has the reader or holds anything. The white circle is Send, greyed while
-  // the field is empty, and Stop while a run is on. It used to open Voice mode while the field was
-  // empty; that is a beta with a chat of its own, and an ordinary chat offers only dictation.
-  const empty = !draft.trim() && files.length === 0 && secrets.length === 0 && replies.length === 0;
-  // A question or a permission request does not open the field: they sit in the tray above it, and
-  // the field stays the one 48 px row the reader can answer in with words of their own.
-  const shape = !phone ? undefined : focused || !empty || progress !== null || needsReview ? "open" : "idle";
+  // A phone draws the composer as the desktop's card at a finger's sizes (ui/parts/composer.css): the
+  // field over one row of 44 px controls, the same shape at rest and while typing. It used to rest as
+  // one row and grow a toolbar when the field took the reader, and the composer then changed height
+  // under the finger that had pressed it. The circle is Send, greyed while the field is empty, and
+  // Stop while a run is on.
+  const shape = phone ? "card" : undefined;
   const useCurrent = () => { setSavedTarget(currentTarget); writeDraftTarget(sessionId, currentTarget); clearSendIntent(sessionId); };
   const moved = draftChange(savedTarget, currentTarget);
 
   return (
-    <div ref={root} className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}
-      onFocus={phone ? focus.onFocus : undefined}
-      onBlur={phone ? focus.onBlur : undefined}>
+    <div ref={root} className="composer" data-primary={action} data-shape={shape} data-typed={phone && draft.trim() ? "" : undefined}>
       {props.above}
       {phone && needsReview && (
         <Banner tone="warn" icon="alert" sub={moved} action={<button type="button" className="ph-btn sm" onClick={useCurrent}>{t("composer.draft.useCurrent")}</button>}>
@@ -602,55 +588,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ))}
         </div>
       )}
-      {approval && phone && (
-        // The phone's tray: the same place and shape as the queue above the field, the narrowest
-        // grant first and white, the session-wide grant apart from it, and refusal in red words so a
-        // tired thumb does not take it for the primary.
-        <div ref={dock} className="dock approval ph-tray" role="group" aria-label={approvalTitle} data-kind={approvalKind}>
-          <div className={`ph-tray-head ${approval.blocked ? "bad" : "warn"}`}><Icon name="shield" size={14} /><span>{t(approval.blocked ? "composer.tray.blocked" : "composer.tray.permission")}</span></div>
-          <div className="ph-tray-title">{approvalTitle}</div>
-          {approval.detail && <div className={`ph-tray-detail ${approval.chrome ? "" : "mono"}`}>{approval.detail}</div>}
-          {approval.blocked && <div className="ph-tray-detail" data-blocked-reason>{t("composer.blocked.reason", { reason: approval.blocked })}</div>}
-          {approval.chrome && <div className="ph-tray-detail sub" data-chrome-consent>{t("uc.switch.consent.body")}</div>}
-          <div className="ph-tray-actions">
-            <button type="button" className="ph-btn primary" data-action="allow" onClick={() => props.onApprove?.(approval)}>{approveLabel}</button>
-            {props.similar && props.onApproveSimilar && !approval.chrome && (
-              <button type="button" className="ph-btn" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
-                <span className="truncate">{t("composer.approve.similar", { label: props.similar })}</span>
-              </button>
-            )}
-            {props.server && props.onApproveServer && !approval.chrome && (
-              <ServerGrantButton phone server={props.server} onGrant={(hours) => props.onApproveServer?.(approval, hours)} />
-            )}
-            <button type="button" className="ph-btn ph-deny" onClick={() => props.onDeny?.(approval)}>{denyLabel}</button>
-          </div>
-        </div>
-      )}
-      {approval && !phone && (
-        <div ref={dock} className="dock approval" role="group" aria-label={approvalTitle} data-kind={approvalKind}>
-          <div className="dock-title">
-            <Icon name={approval.chrome || approval.blocked ? "shield" : "wrench"} size={16} />
-            <span className="grow">{approvalTitle}</span>
-            <kbd className="sub">{t("composer.approval.hint")}</kbd>
-          </div>
-          {approval.detail && (approval.chrome
-            ? <div className="dock-detail">{approval.detail}</div>
-            : <div className="dock-detail mono truncate" title={approval.detail}>{approval.detail}</div>)}
-          {approval.blocked && <div className="dock-detail" data-blocked-reason>{t("composer.blocked.reason", { reason: approval.blocked })}</div>}
-          {approval.chrome && <div className="dock-detail sub" data-chrome-consent>{t("uc.switch.consent.body")}</div>}
-          <div className="dock-actions">
-            <button type="button" className="btn small primary" data-action="allow" onClick={() => props.onApprove?.(approval)}>{approveLabel}</button>
-            {props.similar && props.onApproveSimilar && !approval.chrome && (
-              <button type="button" className="btn small" data-action="allow-similar" title={t("composer.approve.similar.title")} onClick={() => props.onApproveSimilar?.(approval)}>
-                {t("composer.approve.similar", { label: props.similar })}
-              </button>
-            )}
-            {props.server && props.onApproveServer && !approval.chrome && (
-              <ServerGrantButton server={props.server} onGrant={(hours) => props.onApproveServer?.(approval, hours)} />
-            )}
-            <button type="button" className="btn small" onClick={() => props.onDeny?.(approval)}>{denyLabel}</button>
-          </div>
-        </div>
+      {approval && (
+        <ApprovalCard sessionId={sessionId} approval={approval} phone={phone} similar={props.similar} server={props.server} toast={toast}
+          onApprove={props.onApprove} onApproveSimilar={props.onApproveSimilar} onApproveServer={props.onApproveServer} onDeny={props.onDeny}
+          // A refusal is where the operator says what to do instead: the field comes back with the keyboard.
+          onAnswered={(how) => {
+            if (how === "settled") setSettled(approval.callId);
+            if (how === "deny" && !phone) window.setTimeout(() => textarea.current?.focus(), 0);
+          }} />
       )}
       {answered && !approval && (
         <div className="dock answered" role="status" data-answered-by={answered.by}>
@@ -664,18 +609,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       {asking && !approval && props.onAnswer && (
         <AskCard key={questionsKey(questions)} ref={ask} questions={questions!} phone={phone} onSend={props.onAnswer} toast={toast} translateTo={props.translation?.active ? props.translation.agent : undefined} held={props.answerTranslating ?? null} onFiles={fileReadySession === sessionId ? addFiles : undefined} />
       )}
-      {paletteItems.length + skillItems.length > 0 && (
-        <div className="palette" role="listbox">
-          {paletteItems.slice(0, 8).map((c) => (
-            <button key={c.name} type="button" role="option" aria-selected={false} className="palette-item" onClick={() => pickCommand(c)}>
-              <span className="mono">/{c.name} <span className="sub">{c.args}</span></span>
-              <span className="sub">{c.description}</span>
+      {paletteItems.length + skillItems.length > 0 && !approval && (
+        <div className="palette" role="listbox" aria-label={t("composer.palette")}>
+          {paletteItems.slice(0, 8).map((c, i) => (
+            <button key={c.name} type="button" role="option" aria-selected={i === 0} className={`palette-item ${i === 0 ? "active" : ""}`} onClick={() => pickCommand(c)}>
+              <span className="palette-name mono">/{c.name}{c.args && <span className="sub"> {c.args}</span>}</span>
+              <span className="palette-desc">{c.description}</span>
             </button>
           ))}
-          {skillItems.map((s) => (
-            <button key={`skill:${s.id}`} type="button" role="option" aria-selected={false} className="palette-item palette-skill" onClick={() => pickSkill(s)}>
-              <span className="mono">{s.name} <span className="sub">{t("composer.skill.kind")}</span></span>
-              <span className="sub">{s.description}</span>
+          {skillItems.map((s, i) => (
+            <button key={`skill:${s.id}`} type="button" role="option" aria-selected={paletteItems.length === 0 && i === 0} className={`palette-item palette-skill ${paletteItems.length === 0 && i === 0 ? "active" : ""}`} onClick={() => pickSkill(s)}>
+              <span className="palette-name mono">{s.name} <span className="sub">{t("composer.skill.kind")}</span></span>
+              <span className="palette-desc">{s.description}</span>
             </button>
           ))}
         </div>
@@ -683,18 +628,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <VoiceNoteFailed note={note} />
       <MeetingCard meeting={meeting} />
       {meetingFile && !voiceBar && <MeetingOffer file={meetingFile} onStart={startMeeting} />}
-      {/* A tap anywhere on the phone's pill that is not a control is a tap on its field: the field is
-          36 px inside a 48 px pill, and the pill is the target the reader sees. */}
-      <div className={`composer-box ${voiceBar ? "voicing" : ""}`} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>
+      {/* A tap anywhere on the phone's pill that is not a control is a tap on its field. The box stays
+          mounted under an approval card, hidden, so the draft and its height survive the question. */}
+      <div className={`composer-box ${voiceBar ? "voicing" : ""}`} hidden={!!approval} onClick={phone ? (e) => { if (e.target === e.currentTarget) textarea.current?.focus(); } : undefined}>
         {voiceBar && <VoiceBar note={note} />}
         <span className="drop-hint" aria-hidden="true"><Icon name="attach" size={18} />{t("composer.drop")}</span>
-        {!phone && !voiceBar && place.length > 0 && (
-          <div className="composer-place" aria-label={t("composer.place")}>
-            {place.map((chip) => <span key={chip.kind} className="composer-place-chip" title={t(`composer.place.${chip.kind}`, { name: chip.name })}>
-              <Icon name="folder" size={12} /><span className="truncate">{chip.name}</span>
-            </span>)}
-          </div>
-        )}
         {progress !== null && <div className="sub upload-progress" role="status">{t("upload.progress", { percent: Math.floor(progress * 100) })}</div>}
         {!phone && fileStorageError && files.length > 0 && <div className="sub upload-progress" role="status">{t("composer.attachments.unsaved")}</div>}
         {fileReadySession !== sessionId && <div className="sub upload-progress" role="status">{t("composer.attachments.restoring")}</div>}
@@ -717,7 +655,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           value={draft}
           disabled={sending || fileReadySession !== sessionId}
           onChange={setDraft}
-          placeholder={ghost ? ghost : phone && approval ? t("composer.tray.instead") : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
+          placeholder={ghost ? ghost : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
           onPaste={onPaste}
           onKeyDown={onKeyDown}
           ariaLabel={ghost ? t("composer.suggest.label", { text:ghost }) : props.idlePlaceholder && placeholderKey(status, asking) === "session.composer.idle" ? props.idlePlaceholder : fieldWords}
@@ -732,73 +670,43 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           <button ref={plusButton} type="button" className={`iconbtn flat plus ${plusOpen ? "on" : ""}`} disabled={sending || fileReadySession !== sessionId} onClick={() => setPlusOpen((o) => !o)} aria-label={t("composer.plus")} title={t("composer.plus")} aria-haspopup="menu" aria-expanded={plusOpen}>
             <Icon name="plus" />
           </button>
-          {plusOpen && phone && (
-            <PlusSheet onClose={() => setPlusOpen(false)}
-              onPhoto={() => photoInput.current?.click()}
-              onPhotos={() => photosInput.current?.click()}
-              onFiles={() => fileInput.current?.click()}
-              onPaste={() => void pasteFromClipboard()}
-              onRecord={props.asr?.configured && note.supported && note.state.phase === "idle" ? () => void note.start() : undefined}
-              onCommands={commands.length || props.skills?.length ? () => { setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); } : undefined}
-              onSecret={() => setSecretOpen(true)}
-              onCoach={props.onCoach ? () => props.onCoach!(draft) : undefined}
-              onBtw={props.onBtw ? () => props.onBtw!("") : undefined}
-              onLanguage={props.onAgentLang && props.translation ? () => setLangOpen(true) : undefined}
-              language={props.translation ? agentLangLabel(props.translation) : undefined}
-              commandsHint={commands.length || props.skills?.length ? t("ph.plus.commands.hint", { n: commands.length + (props.skills?.length ?? 0) }) : undefined}
-              place={place.map((chip) => chip.name).join(" · ") || undefined} />
-          )}
-          {plusOpen && !phone && (
-            <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="plus-menu" label={t("composer.plus")}>
-              <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><Icon name="attach" size={16} />{t("session.attach")}</button>
-              {phone && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); photoInput.current?.click(); }}><Icon name="image" size={16} />{t("composer.photo")}</button>}
-              {props.asr?.configured && <button type="button" role="menuitem" disabled={!note.supported || note.state.phase !== "idle"} onClick={() => { setPlusOpen(false); void note.start(); }}><Icon name="mic" size={16} />{t("session.mic")}</button>}
-              <button type="button" role="menuitem" onClick={() => void pasteFromClipboard()}><Icon name="copy" size={16} />{t("composer.paste")}</button>
-              <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setSecretOpen(true); }}><Icon name="lock" size={16} />{t("composer.secret")}</button>
-            </Popover>
-          )}
-          {/* The helpers — the prompt coach and the side question — are one button beside the field on a
-              desktop, a menu of two when both are there; a phone's row has no room for it, and they wait
-              in the + sheet there instead. */}
-          {!phone && (props.onCoach || props.onBtw) && (
-            <button ref={helpButton} type="button" className={`iconbtn flat coach-open ${helpOpen ? "on" : ""}`}
-              onClick={() => { if (props.onCoach && props.onBtw) setHelpOpen((o) => !o); else if (props.onCoach) props.onCoach(draft); else props.onBtw!(""); }}
-              aria-label={props.onCoach && props.onBtw ? t("helpers.open") : props.onCoach ? t("coach.open") : t("btw.open")}
-              title={props.onCoach && props.onBtw ? t("helpers.open") : props.onCoach ? t("coach.open") : t("btw.open")}
-              aria-haspopup={props.onCoach && props.onBtw ? "menu" : undefined} aria-expanded={props.onCoach && props.onBtw ? helpOpen : undefined}>
-              <Icon name="wand" />
-            </button>
-          )}
-          {helpOpen && !phone && (
-            <Popover anchor={helpButton.current} onClose={() => setHelpOpen(false)} className="plus-menu helpers-menu" label={t("helpers.open")}>
-              {props.onCoach && <button type="button" role="menuitem" data-action="coach" onClick={() => { setHelpOpen(false); props.onCoach!(draft); }}><Icon name="wand" size={16} />{t("coach.open")}</button>}
-              {props.onBtw && <button type="button" role="menuitem" data-action="btw" onClick={() => { setHelpOpen(false); props.onBtw!(""); }}><Icon name="ask" size={16} />{t("btw.open")}<kbd className="menu-kbd">/btw</kbd></button>}
+          {plusOpen && (
+            // One menu at every size (a sheet on a phone): what goes into the message, then the helpers —
+            // the prompt coach and the side question had a wand button of their own beside the field.
+            <Popover anchor={plusButton.current} onClose={() => setPlusOpen(false)} className="attach-menu" label={t("composer.plus")}>
+              <MenuRow role="menuitem" icon="attach" label={t("session.attach")} data={{ action: "files" }} onSelect={() => { setPlusOpen(false); fileInput.current?.click(); }} />
+              {phone && <MenuRow role="menuitem" icon="camera" label={t("composer.photo")} data={{ action: "photo" }} onSelect={() => { setPlusOpen(false); photoInput.current?.click(); }} />}
+              {phone && <MenuRow role="menuitem" icon="image" label={t("ph.plus.photos")} data={{ action: "photos" }} onSelect={() => { setPlusOpen(false); photosInput.current?.click(); }} />}
+              {props.asr?.configured && <MenuRow role="menuitem" icon="mic" label={t("session.mic.menu")} disabled={!note.supported || note.state.phase !== "idle"} data={{ action: "record" }} onSelect={() => { setPlusOpen(false); void note.start(); }} />}
+              <MenuRow role="menuitem" icon="paste" label={t("composer.paste")} data={{ action: "paste" }} onSelect={() => void pasteFromClipboard()} />
+              <MenuRow role="menuitem" icon="lock" label={t("composer.secret")} sub={t("composer.secret.hint")} data={{ action: "secret" }} onSelect={() => { setPlusOpen(false); setSecretOpen(true); }} />
+              {(commands.length > 0 || (props.skills?.length ?? 0) > 0) && <MenuRow role="menuitem" icon="bolt" label={t("ph.plus.commands")} kbd="/" data={{ action: "commands" }} onSelect={() => { setPlusOpen(false); setDraft("/"); window.setTimeout(() => textarea.current?.focus(), 0); }} />}
+              {(props.onCoach || props.onBtw) && <div className="menu-group" role="presentation">{t("helpers.group")}</div>}
+              {props.onCoach && <MenuRow role="menuitem" icon="wand" label={t("coach.open")} sub={t("coach.open.hint")} data={{ action: "coach" }} onSelect={() => { setPlusOpen(false); props.onCoach!(draft); }} />}
+              {props.onBtw && <MenuRow role="menuitem" icon="ask" label={t("btw.open")} sub={t("btw.open.hint")} kbd="/btw" data={{ action: "btw" }} onSelect={() => { setPlusOpen(false); props.onBtw!(""); }} />}
+              {place.length > 0 && <div className="menu-sep" role="separator" />}
+              {place.length > 0 && <MenuRow icon="folder" label={t("ph.plus.place")} aside={place.map((chip) => chip.name).join(" · ")} data={{ place: "" }} />}
             </Popover>
           )}
           {openReply && <ReplyDialog key={openReply.id} sessionId={sessionId} reply={openReply} phone={phone} onClose={() => setReplyOpen(null)} />}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])}
             onChanged={(id, name) => setSecrets((list) => (name === null ? list.filter((other) => other.id !== id) : list.map((other) => (other.id === id ? { ...other, name } : other))))} />}
-          {props.onYagni
-            ? <TogglesSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass} sheet={phone} />
-            : <span className="composer-mode">{t("composer.mode.agent")}</span>}
-          {/* The language chip is the desktop's: on a phone it did not fit beside the model and pushed
-              the row into itself (the model cut to "clau…", its effort lying on the microphone), and the
-              choice is a row of the + sheet there, the way the helpers are. */}
-          {props.onAgentLang && props.translation && <AgentLangSelect state={props.translation} defaultAgent={props.translationDefault} onChoose={props.onAgentLang} sheet={phone}
-            chip={!phone} open={langOpen} onOpenChange={setLangOpen} />}
+          <AccessSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass}
+            translation={props.translation} translationDefault={props.translationDefault} onAgentLang={props.onAgentLang} compact={phone} />
           {props.beside}
-          {phone && offline && shape === "open" && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
+          {phone && offline && <span className="grow ph-hint">{t("ph.offline.kept")}</span>}
           <div className="composer-tools">
-            {/* A running phone composer has no room for the pill, but the list still opens from the panel's
+            {/* A running phone composer has no room for the chip, but the list still opens from the panel's
                 strip: without the component mounted that chip did nothing at all while a turn ran. */}
-            <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={(o) => { if (o) setModelAnchor(null); setModelOpen(o); }} onChoose={props.onChooseModel} sheet={phone}
+            <ModelSelect model={props.model} fallback={props.fallback} open={modelOpen} onOpenChange={(o) => { if (o) setModelAnchor(null); setModelOpen(o); }} onChoose={props.onChooseModel}
               effort={props.reasoningEffort} thinking={props.thinking} onChooseEffort={props.onChooseEffort} account={props.account} anchor={modelAnchor} pill={!phone || status !== "running"} />
+            {/* The context in use, as a number: it opens the panel at its Context section. A ring beside
+                the number read as a spinner at rest, and the number alone says the same. */}
             {pct !== null && ctx && (
-              <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={t("composer.context.label")}>
-                <Ring pct={pct} />
-                {/* The number beside the ring: a partial circle alone, at rest, read as a spinner. */}
-                <span className="ctx-pct" aria-hidden>{`${pct}%`}</span>
+              <button type="button" className={`ctx-ring ${pct >= 90 ? "bad" : pct >= 60 ? "attn" : ""}`} onClick={props.onContext} disabled={!props.onContext}
+                title={t("composer.context", { pct, used: fmtTok(ctx.tokens), window: fmtTok(ctx.window), n: fmtInt(ctx.messages) })} aria-label={`${t("composer.context.label")}: ${pct}%`}>
+                <span className="ctx-pct">{`${pct}%`}</span>
               </button>
             )}
             {props.asr?.configured && <MicButton note={note} />}
@@ -816,7 +724,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 });
 
 /**
- * Whether the phone's composer has the reader, for its open shape. Leaving it closes the shape only
+ * Whether the start page's composer on a phone has the reader, for its open shape. Leaving it closes the shape only
  * once the finger is up: closing on the blur that a press causes shrank the composer by a toolbar's
  * height under that finger, everything above it slid down, and the tap landed on whatever moved
  * into its place (the newest-message button was missed every time). And only the field opens it:
@@ -860,50 +768,6 @@ function draftChange(saved: DraftTarget | null, now: DraftTarget): string {
   if (!saved || (saved.workspace === now.workspace && saved.project === now.project)) return "";
   const where = now.workspace.split("/").filter(Boolean).pop() || now.project || "—";
   return t("ph.draft.workspace", { name: where });
-}
-
-/**
- * The composer's "+" on a phone: three tiles for what is attached most (a photo now, a picture from the
- * gallery, a file) and rows for the rest. Each command is offered only where the composer has it.
- */
-export function PlusSheet({ onClose, onPhoto, onPhotos, onFiles, onPaste, onRecord, onCommands, commandsHint, onSecret, onCoach, onBtw, onLanguage, language, place, extra }: {
-  onClose: () => void; onPhoto: () => void; onPhotos?: () => void; onFiles: () => void; onPaste?: () => void; onRecord?: () => void;
-  onCommands?: () => void; commandsHint?: string; onSecret?: () => void; onCoach?: () => void; onBtw?: () => void;
-  /** The agent's language, with what the desktop's chip would say ("EN ⇄ RU"). */
-  onLanguage?: () => void; language?: string; place?: string; extra?: ReactNode;
-}) {
-  const run = (fn: () => void) => () => { onClose(); fn(); };
-  return (
-    <BottomSheet onClose={onClose} className="ph-plus-sheet" label={t("composer.plus")}>
-      <div className="ph-tiles">
-        <button type="button" className="ph-tile" onClick={run(onPhoto)}><Icon name="camera" size={22} /><span>{t("composer.photo")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onPhotos ?? onFiles)}><Icon name="image" size={22} /><span>{t("ph.plus.photos")}</span></button>
-        <button type="button" className="ph-tile" onClick={run(onFiles)}><Icon name="attach" size={22} /><span>{t("session.attach")}</span></button>
-      </div>
-      {onPaste && <SheetRow icon="paste" label={t("composer.paste")} hint={t("ph.plus.paste.hint")} onClick={onPaste} />}
-      {onRecord && <SheetRow icon="mic" label={t("session.mic")} onClick={run(onRecord)} />}
-      {onCommands && <SheetRow icon="bolt" label={t("ph.plus.commands")} hint={commandsHint} chevron onClick={run(onCommands)} />}
-      {onSecret && <SheetRow icon="lock" label={t("composer.secret")} hint={t("composer.secret.hint")} onClick={run(onSecret)} />}
-      {onCoach && <SheetRow icon="wand" label={t("coach.open")} hint={t("coach.open.hint")} onClick={run(onCoach)} data={{ action: "coach" }} />}
-      {onBtw && <SheetRow icon="ask" label={t("btw.open")} hint={t("btw.open.hint")} onClick={run(onBtw)} data={{ action: "btw" }} />}
-      {onLanguage && <SheetRow icon="globe" label={t("agentlang.for")} value={language} chevron onClick={run(onLanguage)} data={{ action: "language" }} />}
-      {place && <SheetRow icon="folder" label={t("ph.plus.place")} hint={t("ph.plus.place.hint")} value={place} />}
-      {extra}
-    </BottomSheet>
-  );
-}
-
-/** The context in use, as an arc: full circle is the whole window. Numbers live in the tooltip. */
-function Ring({ pct }: { pct: number }) {
-  const r = 7;
-  const c = 2 * Math.PI * r;
-  const filled = Math.max(0, Math.min(100, pct)) / 100;
-  return (
-    <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
-      <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-      <circle cx="9" cy="9" r={r} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${c * filled} ${c}`} transform="rotate(-90 9 9)" />
-    </svg>
-  );
 }
 
 /** `onReplace`, where the holder can take a file back, puts a pencil on a picture that opens the markup editor. */

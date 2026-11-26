@@ -370,7 +370,7 @@ async def test_goals_are_edited_from_the_page_too(client: Any) -> None:
 # -- carrying the voice concierge over ----------------------------------------------------------------
 
 
-def test_the_voice_section_becomes_the_companion_section_with_its_place_on_the_rail(tmp_path: Any) -> None:
+def test_the_voice_section_becomes_the_companion_section_with_its_place_in_the_navigation(tmp_path: Any) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
         '[voice]\npreset = "opencode.fast"\nprogress_max_per_minute = 2\n\n[voice.tts]\nlocal_voice = "multi-supertonic"\nlocal_speed = 1.2\n\n'
@@ -381,7 +381,7 @@ def test_the_voice_section_becomes_the_companion_section_with_its_place_on_the_r
     assert config.companion.preset == "opencode.fast" and config.companion.progress_max_per_minute == 2
     assert config.companion.tts.local_voice == "multi-supertonic" and config.companion.tts.local_speed == 1.2
     assert config.companion.name == "Daedalus"
-    assert config.navigation.rail == ["terminals", "companion", "inbox"] and config.navigation.icons == {"companion": "bolt"}
+    assert config.navigation.pinned == ["terminals", "companion", "inbox"] and config.navigation.icons == {"companion": "bolt"}
     written = path.read_text(encoding="utf-8")
     assert "[voice]" not in written and "[companion]" in written
     # Loading the rewritten file changes nothing more.

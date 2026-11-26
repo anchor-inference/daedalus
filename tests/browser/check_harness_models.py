@@ -1,6 +1,6 @@
 """Which models a CLI offers: chosen on the Harnesses screen, listed first on the hiring form.
 
-On a desktop at 1440 px: Claude Code's row unfolds to "Models to offer", a tick per model it listed and
+On a desktop at 1440 px: Claude Code's row opens beside the list to "Models to offer", a tick per model it listed and
 none ticked while every model is offered; two are ticked and saved, the host is sent exactly those two,
 and the row says "2 of 11". The hiring form then lists the two under "Offered" and the other nine
 under "Other models", so every model is still there to pick. "Offer all" clears the choice and the
@@ -77,25 +77,31 @@ def ticked(page: Page) -> list[str]:
 
 
 def model_select(page: Page) -> dict[str, list[str]]:
-    """The hiring form's model options by group; ungrouped options under the empty name."""
-    return page.eval_on_selector("#staff-model", """select => {
+    """The hiring form's model options by group (the line each says under its name); ungrouped
+    options under the empty name. The list is the Select's, drawn only while it is open."""
+    page.locator("#staff-model").click()
+    page.wait_for_selector(".dropdown-list .dropdown-item", timeout=5000)
+    out = page.eval_on_selector_all(".dropdown-list .dropdown-item", """items => {
         const out = {};
-        for (const option of select.options) {
-            if (!option.value) continue;
-            const group = option.parentElement.tagName === 'OPTGROUP' ? option.parentElement.label : '';
-            (out[group] = out[group] || []).push(option.value);
+        for (const item of items) {
+            if (!item.dataset.value) continue;
+            const group = item.querySelector('.sub')?.textContent ?? '';
+            (out[group] = out[group] || []).push(item.dataset.value);
         }
         return out;
     }""")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".dropdown-list", state="detached", timeout=5000)
+    return out
 
 
 def hiring_models(page: Page, lang: str) -> dict[str, list[str]]:
     page.goto(f"{BASE}/project/{P1}/team?token=t&lang={lang}")
-    page.wait_for_selector(".pagehead-actions .iconbtn.primary", timeout=15000)
-    page.locator(".pagehead-actions .iconbtn.primary").click()
+    page.wait_for_selector(".pagehead-actions .btn.primary", timeout=15000)
+    page.locator(".pagehead-actions .btn.primary").click()
     page.wait_for_selector(".staff-sheet .executor", timeout=5000)
     page.locator(".staff-sheet .executor", has_text="Claude Code").click()
-    page.wait_for_selector("select#staff-model", timeout=5000)
+    page.wait_for_selector("#staff-model.dropdown-btn", timeout=5000)
     return model_select(page)
 
 
@@ -107,11 +113,11 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
     page = context.new_page()
     route(page, harnesses, team)
     page.goto(f"{BASE}/harnesses?token=t&lang={lang}")
-    page.wait_for_selector(".harness-table .harness-row", timeout=15000)
+    page.wait_for_selector(".harness-row", timeout=15000)
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
-    offer = page.locator(".harness-row-details .harness-offer")
+    offer = page.locator(".harness-details .harness-offer")
     expect(offer.locator(".sel-list [role=option]")).to_have_count(len(ALL))
-    got = page.eval_on_selector_all(".harness-row-details .harness-offer .sel-list [role=option]", "els => els.map(e => e.dataset.id)")
+    got = page.eval_on_selector_all(".harness-details .harness-offer .sel-list [role=option]", "els => els.map(e => e.dataset.id)")
     check.that(got == ALL, f"{lang}: the checklist lists {got}")
     check.that(ticked(page) == [], f"{lang}: with no choice the checklist starts ticked at {ticked(page)}")
     expect(offer.locator("[data-offer='save']")).to_be_disabled()
@@ -133,9 +139,9 @@ def desktop(browser, lang: str, check: Check) -> None:  # type: ignore[no-untype
 
     # Offer all: the choice goes, and the form lists every model again, ungrouped.
     page.goto(f"{BASE}/harnesses?token=t&lang={lang}")
-    page.wait_for_selector(".harness-table .harness-row", timeout=15000)
+    page.wait_for_selector(".harness-row", timeout=15000)
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
-    page.locator(".harness-row-details [data-offer='all']").click()
+    page.locator(".harness-details [data-offer='all']").click()
     expect(page.locator(".harness-row[data-harness='claude'] .harness-models")).to_have_attribute("data-chosen", "false", timeout=5000)
     check.that(harnesses.put[-1] == ("/api/harnesses/claude/models", {"env": "container", "models": None}), f"{lang}: Offer all sent {harnesses.put[-1]}")
     check.that(ticked(page) == [], f"{lang}: after Offer all the ticks are {ticked(page)}")
@@ -153,19 +159,20 @@ def touch(browser, lang: str, check: Check, viewport: dict[str, int], name: str)
     page.goto(f"{BASE}/harnesses?token=t&lang={lang}")
     page.wait_for_selector(".harness-row, .harness-card", timeout=15000)
     check.that(bool(page.evaluate("matchMedia('(pointer: coarse)').matches")), f"{lang} {name}: the page is not given a coarse pointer")
-    wide = page.locator(".harness-table").count() > 0
-    page.locator(".harness-row[data-harness='claude'] .harness-name" if wide else ".harness-card[data-harness='claude'] .harness-card-more").tap()
+    page.locator(".harness-row[data-harness='claude'] .harness-name").tap()
     rows = page.locator(".harness-offer .sel-list [role=option]")
     expect(rows).to_have_count(len(ALL), timeout=5000)
     heights = page.eval_on_selector_all(".harness-offer .sel-list [role=option]", "els => els.map(e => e.getBoundingClientRect().height)")
-    check.that(min(heights) >= 44, f"{lang} {name}: the ticks are {min(heights)} px high")
+    # A row laid out on a fractional line comes to 43.9999 px: the same target under a finger, so the
+    # floor is held to half a pixel rather than to the last bit of the layout's arithmetic.
+    check.that(min(heights) >= 43.5, f"{lang} {name}: the ticks are {min(heights)} px high")
     for model in PICKED:
         page.locator(f".harness-offer .sel-list [role=option][data-id='{model}']").tap()
     save = page.locator("[data-offer='save']")
     box = save.bounding_box()
     check.that(bool(box and box["height"] >= 32), f"{lang} {name}: Save is {box} high")
     save.tap()
-    models = page.locator(f"{'.harness-row' if wide else '.harness-card'}[data-harness='claude'] .harness-models")
+    models = page.locator(".harness-row[data-harness='claude'] .harness-models")
     expect(models).to_have_attribute("data-chosen", "true", timeout=5000)
     expect(models).to_contain_text(words["of"])
     check.that([b.get("models") for _, b in harnesses.put] == [PICKED], f"{lang} {name}: the screen sent {harnesses.put}")

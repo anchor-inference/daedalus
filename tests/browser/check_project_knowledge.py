@@ -130,7 +130,8 @@ def check(lang: str, width: int) -> None:
         section.get_by_text("Propose a fact" if lang == "en" else "Предложить факт", exact=True).click()
         claim = "The current project source requires explicit checking"
         section.get_by_label("Fact to check" if lang == "en" else "Факт для проверки").fill(claim)
-        section.get_by_label("Evidence source" if lang == "en" else "Источник подтверждения").select_option("file:proof")
+        section.get_by_label("Evidence source" if lang == "en" else "Источник подтверждения").click()
+        page.locator(".dropdown-list [role=option][data-value='file:proof']").click()
         page.reload()
         section = open_memory()
         section.get_by_text("Propose a fact" if lang == "en" else "Предложить факт", exact=True).click()

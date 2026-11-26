@@ -2,17 +2,18 @@
 // Opening a detail pushes history, so the browser's Back, Android's back gesture and Telegram's
 // BackButton all return to where the reader came from, and a reload lands on the same screen.
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { anchorHash, parseAnchor } from "./anchor";
 
 export const BASE = "/app";
 
-export type Screen = "agents" | "companion" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "canvas" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page";
+export type Screen = "agents" | "companion" | "inbox" | "board" | "terminals" | "harnesses" | "changes" | "schedules" | "calendar" | "canvas" | "services" | "memory" | "usage" | "health" | "settings" | "orchestration" | "browser" | "page" | "primitives";
 
 export const SCREENS: Screen[] = ["agents", "companion", "inbox", "board", "terminals", "harnesses", "changes", "schedules", "calendar", "canvas", "services", "memory", "usage", "health", "settings"];
-/** Orchestration is a mode of its own rather than a destination of the menu: its item on the rail
- *  (its tab on a phone) goes there, and so does everything that belongs to it. */
-const INNER: Screen[] = ["orchestration", "browser"];
+/** Orchestration is a mode of its own rather than a destination of the menu: the sidebar's mode
+ *  menu (the drawer's on a phone) goes there, and so does everything that belongs to it. The primitives page
+ *  is reached by its address only: it shows the parts the screens are drawn from. */
+const INNER: Screen[] = ["orchestration", "browser", "primitives"];
 
 /** Orchestration mode's home on a desktop: the main orchestrator's chat. */
 export const ORCHESTRATION = `${BASE}/orchestration`;
@@ -162,28 +163,21 @@ if ((window.history.state as HistoryState)?.d === undefined) {
  */
 export function navigate(path: string, opts: { replace?: boolean; keepHash?: boolean } = {}): void {
   path = canonical(path);
-  if (opts.replace && heldReplace?.(path)) return;
   if (opts.keepHash && !path.includes("#")) path += window.location.hash;
   // A path without a hash is compared without one: going where the reader already is does not take
   // away the message they were sent to.
   const current = window.location.pathname + window.location.search + (path.includes("#") ? window.location.hash : "");
   if (current === path) return;
-  if (opts.replace) window.history.replaceState({ d: depth }, "", path);
+  // A layer's entry (the phone's open drawer) is not a place: going somewhere from inside it takes
+  // its entry's place, so Back from the destination returns to the page under the layer instead of
+  // to the same page with the layer gone. Every row of the drawer is an ordinary link or button of
+  // the sidebar, so the rule lives here rather than in each of them.
+  if (opts.replace || inLayer()) window.history.replaceState({ d: depth }, "", path);
   else {
     depth += 1;
     window.history.pushState({ d: depth }, "", path);
   }
   emit();
-}
-
-/** While Settings is drawn over a screen, that screen goes on running, and some screens put their own
- *  selection into the address with `replace` (a list opening its first entry once it has loaded).
- *  Such a call is the screen's, not the reader's; it replaced Settings' address and closed the
- *  dialog under the reader's hands. The shell passes a taker that keeps it for the screen beneath and
- *  answers true; anything inside Settings it leaves to the address. */
-let heldReplace: ((path: string) => boolean) | null = null;
-export function holdReplacements(taker: ((path: string) => boolean) | null): void {
-  heldReplace = taker;
 }
 
 /**
@@ -245,13 +239,7 @@ export function markAnchor(seq: number): void {
   }
 }
 
-/** The route the screens under an overlay go on reading. Settings is drawn over the screen it was
- *  opened from, and that screen must keep seeing its own address: read live, a conversation lost
- *  its side panel (the panel's query) the moment Settings opened over it. */
-export const HeldRoute = createContext<Route | null>(null);
-
 export function useRoute(): Route {
-  const held = useContext(HeldRoute);
   const [route, setRoute] = useState<Route>(() => parse());
   useEffect(() => {
     const on = () => setRoute(parse());
@@ -260,7 +248,7 @@ export function useRoute(): Route {
       listeners.delete(on);
     };
   }, []);
-  return held ?? route;
+  return route;
 }
 
 /** Legacy addresses still reach the right screen: /app/#settings, /app/?startapp=session_<id>

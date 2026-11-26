@@ -9,7 +9,8 @@ import {
   dismissSettingNotice, FLASH_CLASS, NOTICE_EVENT, noticeFromEvent, raiseFromError, raiseSettingNotice, revealSetting, rowSelector,
   settingNotices, settingOfError, settingPath, settingRef, type SettingNotice,
 } from "./settinglink";
-import { localEntry, ToastQueue, URGENT_MS } from "./toasts";
+import { NoticeQueue } from "./ui/primitives";
+import { localEntry, settingGroup, toastDuration, URGENT_MS } from "./toasts";
 
 const SUMMARY = { page: "context", key: "compaction.preset" };
 
@@ -29,7 +30,7 @@ describe("the reference", () => {
 
   it("becomes the section's address naming the row", () => {
     expect(settingPath(SUMMARY)).toBe("/app/settings/context#compaction.preset");
-    expect(settingPath({ page: "providers", key: "providers.opencode.api_key" })).toBe("/app/settings/providers#providers.opencode.api_key");
+    expect(settingPath({ page: "models", key: "providers.opencode.api_key" })).toBe("/app/settings/models#providers.opencode.api_key");
     expect(settingPath({ page: "tasks", key: "vision.preset" })).toBe("/app/settings/tasks#vision.preset");
   });
 
@@ -126,16 +127,17 @@ describe("the toast of a setting", () => {
     expect(entry.id).toBe(-7);
     expect(entry.setting).toEqual(SUMMARY);
     expect(entry.link).toBe("/app/settings/context#compaction.preset");
-    expect(ToastQueue.duration(entry)).toBe(URGENT_MS);
+    expect(toastDuration(entry)).toBe(URGENT_MS);
   });
 
   it("replaces the host's toast about the same setting rather than stacking beside it", () => {
-    const q = new ToastQueue();
+    const q = new NoticeQueue<Notification>();
+    const put = (e: Notification, seq: number) => q.push(e.id, e, seq, toastDuration(e), settingGroup(e) ? (other) => settingGroup(other) === settingGroup(e) : undefined);
     const host: Notification = { ...localEntry(notice(1, "error")), id: 41, seen: false };
-    q.push(host, 1);
-    q.push(localEntry(notice(2, "error")), 2);
+    put(host, 1);
+    put(localEntry(notice(2, "error")), 2);
     expect(q.count).toBe(1);
-    q.push(localEntry(notice(3, "warning")), 3);
+    put(localEntry(notice(3, "warning")), 3);
     expect(q.count).toBe(2);
   });
 });

@@ -93,7 +93,7 @@ def scenario(language: str, width: int, coordinator: bool, staff_state: str, pre
         expect(authority_section).to_be_visible()
         expect(authority_section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия")).to_have_count(0)
         expect(authority_section.get_by_text("Prepare menu").first).to_be_visible()
-        expect(authority_section.locator("select.field")).to_have_count(1)
+        expect(authority_section.locator(".dropdown-btn")).to_have_count(1)
         approve = authority_section.get_by_role("button", name="Approve" if language == "en" else "Разрешить")
         continue_label = "Continue in project conversation" if language == "en" else "Продолжить в разговоре проекта"
         expect(authority_section.get_by_role("button", name=continue_label)).to_have_count(0)

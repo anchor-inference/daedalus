@@ -2,7 +2,8 @@
 
 At 1440 × 900, in English and Russian:
 
-- the tab is offered to a session that has a browser, and not to one that has none;
+- the panel's "+" menu offers the Browser to a session that has a browser, and not to one that has
+  none, and opening it from there gives it a tab;
 - frames arrive and are drawn, each acknowledged once drawn;
 - the agent's action moves the cursor to the element's centre, as the picture shows it, and frames
   the element with its name;
@@ -59,15 +60,21 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     group = bs.add("g1", scene="shop", owner_id=S1, acting=True)
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
 
-    # A session with no browser has no Browser tab.
+    # A session with no browser has no Browser among the tools its "+" menu offers.
     page = open_page(context, bs, stub, f"{BASE}/agents/{S2}?token=t&scheme=dark&lang={lang}")
     page.wait_for_selector(".panel .panel-tab", timeout=10000)
     page.wait_for_timeout(500)
-    if page.locator(".panel-tab[data-tab='browser']").count():
-        say("a session without a browser offers the Browser tab")
+    page.locator(".panel .panel-add").click()
+    page.wait_for_selector(".panel-tools [data-tool]", timeout=5000)
+    if page.locator(".panel-tools [data-tool='browser']").count():
+        say("a session without a browser offers the Browser tool")
     page.close()
 
+    # A session with one offers it, and opening it from the menu puts its tab in the strip.
     page = open_page(context, bs, stub, f"{BASE}/agents/{S1}?token=t&scheme=dark&lang={lang}")
+    page.wait_for_selector(".panel .panel-tab", timeout=10000)
+    page.locator(".panel .panel-add").click()
+    page.locator(".panel-tools [data-tool='browser']").click(timeout=10000)
     tab = page.locator(".panel-tab[data-tab='browser']")
     tab.wait_for(timeout=10000)
     # Its name, not its drawn word: a narrow strip draws an inactive tab as its icon alone, named by
@@ -256,7 +263,7 @@ def check(browser, scenes, lang: str, problems: list[str]) -> None:  # type: ign
     # The log: open it, and a row points the cursor at its element again.
     bs.set_control("g1", "agent")
     group.needs = None
-    page.locator(f"{ROOT} .bp-log-head").click()
+    # The panel's log is open from the start (the page at its own size leaves the rest of the pane to it).
     page.wait_for_selector(f"{ROOT} .bp-log.open .bp-log-row", timeout=5000)
     rows = page.locator(f"{ROOT} .bp-log-row").all_inner_texts()
     print(f"[{lang}] log: {rows}")

@@ -9,31 +9,36 @@ import { Dot } from "../ui/components";
 import { Icon, type IconName } from "../icons";
 import { t } from "../i18n";
 import { PrivateBadge } from "../privatechat";
-import { BottomSheet, IconButton, SheetRow, TopBar } from "../ui/phone";
+import { TopBar } from "../shell";
+import { IconButton, MenuRow, Sheet } from "../ui/primitives";
 import { ChatSearchBody } from "../chatsearch";
 
 export type SessionTile = { id: string; icon: IconName; label: string; count?: number | null; attn?: boolean; disabled?: boolean; onSelect: () => void };
 export type SessionRow = { icon: IconName; label: string; value?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void };
 
 /**
- * The bar: hamburger (or back), a two-line title button and at most two glyphs. The title opens the
- * session's details, where the full title, the model and the context are; the second line is the
- * live state while something happens and the model with its effort otherwise.
+ * The bar: hamburger (or back), a two-line title button and at most two glyphs. Over the title stands
+ * where the chat lives (its project, or the chat it is a helper of), as the desktop's header leads with
+ * it; under it, only while something happens, the live state. The model is not repeated here: the
+ * composer's chip names it beside the field it applies to. The title opens the session's details;
+ * the glyphs are a chip that needs the operator (the browser, a question) or else the panel, then ⋮.
  */
-export function SessionTopBar({ title, sub, back, onTitle, chip, onMenu, editing, shared, secret, bare }: { title: string; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean; /** No drawer to open: a live link's page has no app around the chat. */ bare?: boolean }) {
+export function SessionTopBar({ title, over, sub, back, onTitle, chip, onPanel, onMenu, editing, shared, secret, bare }: { title: string; over?: ReactNode; sub: ReactNode; back?: () => void; onTitle?: () => void; chip?: ReactNode; onPanel?: () => void; onMenu: () => void; editing?: ReactNode; shared?: "public" | "key" | null; secret?: boolean; /** No drawer to open: a live link's page has no app around the chat. */ bare?: boolean }) {
   // A chat anyone can open says so on the bar itself, not only inside the ⋮ sheet: the desktop's
-  // header chip has no room here, so it rides at the head of the second line.
+  // header chip has no room here, so it rides at the head of the line over the title.
   const share = shared ? <span className={`chip ph-share-tag ${shared === "public" ? "bad" : "attn"}`}>{t(shared === "public" ? "session.share.chip.public" : "session.share.chip.key")}</span> : null;
+  const marks = secret || share;
   return (
     <TopBar
       className="chat-head ph-chat-top"
       title={editing ?? <span className="chat-title">{title}</span>}
-      sub={editing ? undefined : <><PrivateBadge on={!!secret} />{share}{sub}</>}
+      over={editing || !(over || marks) ? undefined : <><PrivateBadge on={!!secret} />{share}{over}</>}
+      sub={editing ? undefined : sub}
       back={back}
       bare={bare}
       onTitle={editing ? undefined : onTitle}
       titleLabel={onTitle ? t("session.phone.title", { title }) : undefined}
-      actions={<>{chip}<IconButton icon="vdots" label={t("session.actions")} onClick={onMenu} popup="menu" /></>}
+      actions={<>{chip ?? (onPanel && <IconButton icon="panel" label={t("panel.toggle")} onClick={onPanel} className="ph-ib" />)}<IconButton icon="vdots" label={t("session.actions")} onClick={onMenu} popup="menu" className="ph-ib" /></>}
     />
   );
 }
@@ -49,7 +54,7 @@ export function SessionMenuSheet({ tiles, rows, onClose }: { tiles: SessionTile[
   const danger = rows.filter((row) => row.danger);
   const pick = (run: () => void) => { onClose(); run(); };
   return (
-    <BottomSheet onClose={onClose} className="ph-actions ph-session-menu" label={t("session.actions")}>
+    <Sheet onClose={onClose} className="ph-sheet menu-sheet ph-session-menu" ariaLabel={t("session.actions")}>
       <div className="ph-tiles four" role="group" aria-label={t("session.phone.tools")}>
         {tiles.map((tile) => (
           <button key={tile.id} type="button" className={`ph-tile ${tile.attn ? "attn" : ""}`} data-tile={tile.id} disabled={tile.disabled} onClick={() => pick(tile.onSelect)}>
@@ -59,11 +64,11 @@ export function SessionMenuSheet({ tiles, rows, onClose }: { tiles: SessionTile[
         ))}
       </div>
       <div role="menu">
-        {safe.map((row) => <SheetRow key={row.label} icon={row.icon} label={row.label} value={row.value} disabled={row.disabled} onClick={() => pick(row.onSelect)} />)}
+        {safe.map((row) => <MenuRow key={row.label} icon={row.icon} label={row.label} aside={row.value} disabled={row.disabled} onSelect={() => pick(row.onSelect)} />)}
         {danger.length > 0 && <div className="ph-msep" role="separator" />}
-        {danger.map((row) => <SheetRow key={row.label} icon={row.icon} label={row.label} disabled={row.disabled} danger onClick={() => pick(row.onSelect)} />)}
+        {danger.map((row) => <MenuRow key={row.label} icon={row.icon} label={row.label} disabled={row.disabled} danger onSelect={() => pick(row.onSelect)} />)}
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -77,9 +82,9 @@ export function SearchSheet({ sessionId, onPick, onClose }: { sessionId: string;
     return () => cancelAnimationFrame(frame);
   }, []);
   return (
-    <BottomSheet title={t("chatsearch.open")} onClose={onClose} className="ph-search-sheet">
+    <Sheet title={t("chatsearch.open")} onClose={onClose} className="ph-sheet ph-search-sheet">
       <ChatSearchBody sessionId={sessionId} onPick={(seq) => { onClose(); onPick(seq); }} />
-    </BottomSheet>
+    </Sheet>
   );
 }
 
@@ -87,10 +92,10 @@ export function SearchSheet({ sessionId, onPick, onClose }: { sessionId: string;
 export function RenameSheet({ title, onSave, onClose }: { title: string; onSave: (title: string) => void; onClose: () => void }) {
   const [value, setValue] = useState(title);
   return (
-    <BottomSheet
+    <Sheet
       title={t("session.rename")}
       onClose={onClose}
-      className="ph-rename"
+      className="ph-sheet ph-rename"
       footer={<div className="ph-foot-row">
         <button type="button" className="ph-btn" onClick={onClose}>{t("common.cancel")}</button>
         <button type="button" className="ph-btn primary" disabled={!value.trim()} onClick={() => onSave(value)}>{t("common.save")}</button>
@@ -99,6 +104,6 @@ export function RenameSheet({ title, onSave, onClose }: { title: string; onSave:
       <div className="ph-sheet-pad">
         <input className="ph-field" autoFocus value={value} onChange={(e) => setValue(e.target.value)} aria-label={t("session.rename")} onKeyDown={(e) => { if (e.key === "Enter") onSave(value); }} />
       </div>
-    </BottomSheet>
+    </Sheet>
   );
 }

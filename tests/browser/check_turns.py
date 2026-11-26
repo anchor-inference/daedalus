@@ -1,8 +1,8 @@
 """Drive the turn rendering in a real browser and refuse what does not behave.
 
 The turn's pure parts have unit tests (miniapp/src/turnview.test.ts); this is what only exists once
-the turn is drawn over the invented installation the screenshots use: the folded line names the
-work by family and opens into 28 px step rows with their durations, the file the turn sent is a card
+the turn is drawn over the invented installation the screenshots use: the folded line says how long
+and how many steps and opens into 28 px step rows with their durations and the kinds of work, the file the turn sent is a card
 under the answer and one click puts it in the panel's Preview tab, a step's file name
 opens the same way, the loop agent's wake-up is a folded system note and not a bubble, and the
 answer's row of actions copies the text.
@@ -55,21 +55,22 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     if not page.locator(".answer").count():
         problems.append("the answer is not on the screen")
 
-    # The folded line: how long, how many steps, and what kind of work.
+    # The folded line: how long and how many steps, and nothing else. The kinds of work ("Read 2
+    # files, wrote 1 file and 4 more") were on it once; they are the rows it opens into.
     head = page.locator(".thinking-head").first
     line = head.inner_text()
     print("folded line:", repr(line))
     if "Worked for" not in line or "8 steps" not in line:
         problems.append(f"the folded line does not say how long and how many steps ({line!r})")
-    if "Read 2 files" not in line or "and " not in line:
-        problems.append(f"the folded line does not sum the work by family ({line!r})")
+    if "Read 2 files" in line:
+        problems.append(f"the folded line still sums the work by family ({line!r})")
     if page.locator(".activity .act").count():
         problems.append("the steps are open before the line is clicked")
 
     head.click()
     page.wait_for_selector(".activity .act", timeout=5000)
-    if "Read 2 files" in head.inner_text():
-        problems.append("the family summary stays on the line once the steps are open")
+    if not page.locator(".activity .act", has_text="Read 2 files").count():
+        problems.append("the opened steps do not group the two reads as one row")
     rows = heights(page, ".activity .act:not(.head)")
     print("step rows:", rows)
     if len(rows) != 7 or any(h != 28 for h in rows):
@@ -112,8 +113,10 @@ def desktop(browser) -> list[str]:  # type: ignore[no-untyped-def]
     actions = page.locator(".turn").last.locator(".msg-actions").last
     labels = actions.locator("button").evaluate_all("(els) => els.map((el) => el.getAttribute('aria-label'))")
     print("answer actions:", labels)
-    if labels[:3] != ["Copy", "Copy a link to this turn", "Regenerate"] or "More actions" not in labels:
-        problems.append(f"the answer's actions are not copy · link · retry · more ({labels})")
+    # Copy, retry and fork lead, the three an answer always offers; the link follows, and the one
+    # undoing action waits behind the menu.
+    if labels[:4] != ["Copy", "Regenerate", "Fork a session from here", "Copy a link to this turn"] or "More actions" not in labels:
+        problems.append(f"the answer's actions are not copy · retry · fork · link · more ({labels})")
     actions.locator("button[aria-label='Copy']").click()
     page.wait_for_timeout(300)
     copied = page.evaluate("() => navigator.clipboard.readText()")

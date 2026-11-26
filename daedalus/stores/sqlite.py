@@ -476,10 +476,48 @@ class SqliteSessionStore(ISessionStore):
             )
         else:
             rows = await self._db.fetchall(f"SELECT seq, view, view_key, message FROM transcript WHERE {where} ORDER BY seq", tuple(params))
+        return await self._built_views(rows)
+
+    async def _built_views(self, rows: Sequence[Any]) -> list[dict[str, Any]]:
+        """The views of these rows, the stale ones rebuilt and written back."""
+        assert self._view is not None
         out, stale = await asyncio.to_thread(self._views_of, rows, self._view.key())
         if stale:
             await self._db.executemany("UPDATE transcript SET view = ?, view_key = ? WHERE seq = ?", stale)
         return out
+
+    FILE_MARKS = ("daedalus.attachments", "Attached files", "daedalus.media", "SendFile")
+    """What a message that carries a file has somewhere in its stored text: the host's record of the
+    operator's attachments, the list the model was given, an answer's inline media, a SendFile call."""
+
+    async def list_file_views(self, session_id: str) -> list[dict[str, Any]]:
+        """The views of the messages that may carry a file, oldest first: one scan of the session's stored
+        text for the marks above, and nothing is parsed for a row that has none of them. A row that
+        mentions SendFile in passing comes back too; the caller decides from the view what is a file."""
+        if self._view is None:
+            return []
+        where = " OR ".join("message LIKE ?" for _ in self.FILE_MARKS)
+        rows = await self._db.fetchall(
+            f"SELECT seq, view, view_key, message FROM transcript WHERE session_id = ? AND ({where}) ORDER BY seq",
+            (session_id, *(f"%{mark}%" for mark in self.FILE_MARKS)),
+        )
+        return await self._built_views(rows)
+
+    async def tool_result_views(self, session_id: str, call_ids: Sequence[str]) -> list[dict[str, Any]]:
+        """The views of the messages that answer these calls, found from the transcript keys alone (a result
+        row is keyed by its call), oldest first."""
+        views: list[dict[str, Any]] = []
+        if self._view is None:
+            return views
+        for start in range(0, len(call_ids), 100):  # stay under SQLite's bind-parameter limit
+            chunk = list(call_ids[start : start + 100])
+            where = " OR ".join("key LIKE ? ESCAPE '\\'" for _ in chunk)
+            rows = await self._db.fetchall(
+                f"SELECT seq, view, view_key, message FROM transcript WHERE session_id = ? AND ({where}) ORDER BY seq",
+                (session_id, *("%:" + _like_literal(call_id) for call_id in chunk)),
+            )
+            views.extend(await self._built_views(rows))
+        return sorted(views, key=lambda view: view["seq"])
 
     def _views_of(self, rows: Sequence[Any], current: str) -> tuple[list[dict[str, Any]], list[tuple[str, str, int]]]:
         """Read the stored views, and build the ones that are stale. Off the loop, because of the second.

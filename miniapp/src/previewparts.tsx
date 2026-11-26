@@ -2,6 +2,9 @@
 // generated file does not make the conversation expensive just because its panel is open.
 
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { FileDiffBody, FileDiffHeader, type DiffMode } from "./diffpane";
+import { Icon } from "./icons";
+import { Button } from "./ui/primitives";
 import { highlightLines, langOf, HIGHLIGHT_MAX_LINES } from "./highlight";
 import { jsonRows, parseJsonText, toggleRow } from "./jsontree";
 import { diffFileName, lineAnchor, parseDiff } from "./diff";
@@ -20,8 +23,8 @@ export function SourceView({ text, name, range }: { text: string; name: string; 
   useEffect(() => { first.current?.scrollIntoView({ block: "center" }); }, [at, text]);
   return <>
     <div className="source-tools">
-      <button className={`btn small ${wrap ? "on" : ""}`} aria-pressed={wrap} onClick={() => setWrap((v) => !v)}>{t("preview.wrap")}</button>
-      <form onSubmit={(e) => { e.preventDefault(); const n = Math.max(1, Math.min(lines.length, Number(jump) || 1)); setAt(n); setMark({ from: n, to: n }); }}><input className="field" type="number" min="1" max={lines.length} aria-label={t("preview.goto")} value={jump} onChange={(e) => setJump(e.target.value)} /><button className="btn small" type="submit">{t("preview.goto")}</button></form>
+      <Button size="sm" className={wrap ? "on" : ""} aria-pressed={wrap} onClick={() => setWrap((v) => !v)}>{t("preview.wrap")}</Button>
+      <form onSubmit={(e) => { e.preventDefault(); const n = Math.max(1, Math.min(lines.length, Number(jump) || 1)); setAt(n); setMark({ from: n, to: n }); }}><input className="field" type="number" min="1" max={lines.length} aria-label={t("preview.goto")} value={jump} onChange={(e) => setJump(e.target.value)} /><Button size="sm" type="submit">{t("preview.goto")}</Button></form>
       <span className="sub">{t("preview.lines.of", { from: start + 1, to: end, total: lines.length })}</span>
     </div>
     <div className={`filetext lined source-view ${wrap ? "wrap" : ""}`}>
@@ -39,7 +42,7 @@ export function JsonView({ text }: { text: string }) {
   const rows = jsonRows(parsed.value, state);
   return <div className="json-tree" role="tree" aria-label={t("preview.json")}>
     {rows.map((r) => <div key={r.id} className="json-row" role="treeitem" aria-level={r.depth + 1} aria-expanded={r.container ? r.open : undefined} style={{ paddingLeft: r.depth * 16 }}>
-      {r.container ? <button className="linkbtn" onClick={() => setState((s) => toggleRow(s, r.id))} aria-label={`${r.key || t("preview.json")} (${r.count})`}><span aria-hidden>{r.open ? "⌄" : "›"}</span> {r.key && `${JSON.stringify(r.key)}: `}{r.kind === "array" ? `[${r.count}]` : `{${r.count}}`} <span className="sub">{r.text}</span></button> : <span>{r.key && `${JSON.stringify(r.key)}: `}<span className={`json-${r.kind}`}>{r.text}</span></span>}
+      {r.container ? <button className={`linkbtn json-toggle ${r.open ? "open" : ""}`} onClick={() => setState((s) => toggleRow(s, r.id))} aria-label={`${r.key || t("preview.json")} (${r.count})`}><Icon name="chevron" size={14} /> {r.key && `${JSON.stringify(r.key)}: `}{r.kind === "array" ? `[${r.count}]` : `{${r.count}}`} <span className="sub">{r.text}</span></button> : <span>{r.key && `${JSON.stringify(r.key)}: `}<span className={`json-${r.kind}`}>{r.text}</span></span>}
     </div>)}
     {rows.length >= 5000 && <div className="sub">{t("preview.json.limit")}</div>}
   </div>;
@@ -71,8 +74,26 @@ export function DiffView({ text, onLine, file, notes }: { text: string; onLine?:
   </section>)}{!files.length && <pre className="filetext">{text}</pre>}</div>;
 }
 
+/** A unified patch, one file under another: each file's name and counts over its lines, with the
+ *  view the Changes screen offers (one column, or old beside new) for the whole patch. */
+export function PatchView({ text }: { text: string }) {
+  const files = useMemo(() => parseDiff(text), [text]);
+  const [mode, setMode] = useState<DiffMode>("unified");
+  if (!files.length) return <pre className="filetext">{text}</pre>;
+  return (
+    <div className="patch-view">
+      {files.map((file, i) => (
+        <section key={i} className="patch-file">
+          <FileDiffHeader file={file} mode={i === 0 ? mode : undefined} onMode={i === 0 ? setMode : undefined} />
+          <FileDiffBody file={file} mode={mode} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function ImageView({ url, name }: { url: string; name: string }) {
   const [actual, setActual] = useState(false);
   const [size, setSize] = useState("");
-  return <><div className="source-tools"><button className="btn small" aria-pressed={actual} onClick={() => setActual((v) => !v)}>{actual ? t("preview.fit") : "1:1"}</button><span className="sub">{size}</span></div><div className={`image-pan ${actual ? "actual" : ""}`}><img className="preview-image" src={url} alt={name} onLoad={(e) => setSize(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight} px`)} onClick={() => setActual((v) => !v)} /></div></>;
+  return <><div className="source-tools"><Button size="sm" aria-pressed={actual} onClick={() => setActual((v) => !v)}>{actual ? t("preview.fit") : "1:1"}</Button><span className="sub">{size}</span></div><div className={`image-pan ${actual ? "actual" : ""}`}><img className="preview-image" src={url} alt={name} onLoad={(e) => setSize(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight} px`)} onClick={() => setActual((v) => !v)} /></div></>;
 }

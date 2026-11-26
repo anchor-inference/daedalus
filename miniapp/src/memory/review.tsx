@@ -10,7 +10,7 @@ import { plural, t } from "../i18n";
 import { sessionPath } from "../router";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
-import { Sheet, toast } from "../ui/dialogs";
+import { Button, Sheet, toast } from "../ui/primitives";
 import { Segmented, Skeleton, go } from "../ui/index";
 import { REVIEW_BY, groupSuggestions, suggestionsFor, type ReviewBy, type SuggestionGroup } from "./model";
 import { undoToast } from "./undo";
@@ -60,8 +60,8 @@ function Row({ s, record, by, busy, onAct }: { s: MemorySuggestion; record: Memo
       {s.quote && <blockquote className="memory-review-quote" data-quote>{s.quote}</blockquote>}
       <div className="sub memory-review-why">{learnedWhy(s)}</div>
       <div className="memory-review-actions">
-        <button className="btn small ghost" data-action="dismiss-one" disabled={busy} onClick={() => onAct(s, "dismiss")}>{t("memory.suggest.dismiss.learned")}</button>
-        <button className="btn small primary" data-action="apply-one" disabled={busy} onClick={() => onAct(s, "apply")}>{t(`memory.suggest.apply.${applyKey(s)}`)}</button>
+        <Button variant="quiet" size="sm" data-action="dismiss-one" disabled={busy} onClick={() => onAct(s, "dismiss")}>{t("memory.suggest.dismiss.learned")}</Button>
+        <Button variant="primary" size="sm" data-action="apply-one" disabled={busy} onClick={() => onAct(s, "apply")}>{t(`memory.suggest.apply.${applyKey(s)}`)}</Button>
       </div>
     </li>
   );
@@ -74,8 +74,8 @@ function GroupHead({ group, busy, onAll }: { group: SuggestionGroup; busy: boole
       <span className="memory-badge" data-count={group.items.length}>{group.items.length}</span>
       <span className="grow" />
       <span className="memory-review-bulk">
-        <button className="btn small ghost" data-action="dismiss-all" disabled={busy} onClick={() => onAll(group, "dismiss")}>{t("memory.review.dismissall")}</button>
-        <button className="btn small" data-action="accept-all" disabled={busy} onClick={() => onAll(group, "apply")}>{t("memory.review.acceptall")}</button>
+        <Button variant="quiet" size="sm" data-action="dismiss-all" disabled={busy} onClick={() => onAll(group, "dismiss")}>{t("memory.review.dismissall")}</Button>
+        <Button size="sm" data-action="accept-all" disabled={busy} onClick={() => onAll(group, "apply")}>{t("memory.review.acceptall")}</Button>
       </span>
     </div>
   );
@@ -120,7 +120,7 @@ export function ReviewSheet({ entryId, onClose, onChanged }: { entryId?: string 
   });
 
   return (
-    <Sheet title={t("memory.review.title")} onClose={onClose} size="wide" className="memory-review">
+    <Sheet title={t("memory.review.title")} onClose={onClose} size="xl" className="memory-review">
       <div className="sub">{t("memory.review.sub")}</div>
       {!entryId && list.length > 0 && (
         <div className="memory-review-by">
@@ -140,20 +140,20 @@ export function ReviewSheet({ entryId, onClose, onChanged }: { entryId?: string 
       ))}
       <div className="sheet-foot">
         <span className="grow" />
-        <button className="btn" onClick={onClose}>{t("common.close")}</button>
+        <Button onClick={onClose}>{t("common.close")}</Button>
       </div>
     </Sheet>
   );
 }
 
-/** The line above the entries (or inside one entry) saying how many notes wait, which opens the review. */
+/** The quiet row above the entries (or inside one entry) saying how many notes wait; it opens the review. */
 export function ReviewBanner({ count, onOpen }: { count: number; onOpen: () => void }) {
   if (count <= 0) return null;
   return (
     <button className="memory-suggest-banner memory-review-banner" data-action="review" onClick={onOpen}>
-      <Icon name="bulb" size={16} /> <span>{plural("memory.review.banner", count)}</span>
-      <span className="grow" />
-      <span className="memory-badge">{count}</span>
+      <Icon name="bulb" size={16} />
+      <span className="memory-banner-text">{plural("memory.review.banner", count)}</span>
+      <span className="memory-banner-act">{t("memory.review.open")}<Icon name="forward" size={14} /></span>
     </button>
   );
 }

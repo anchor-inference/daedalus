@@ -215,6 +215,7 @@ def _task(row: Any) -> BoardTask:
         depends_on=depends,
         sent_back=_sent_back(row),
         returned=_returned(row),
+        origin_session_id=row["origin_session_id"],
     )
 
 
@@ -516,7 +517,7 @@ class Team:
                 payload["actor_id"] = actor_id
             if moved.assignee_staff_id:
                 payload["assignee_staff_id"] = moved.assignee_staff_id
-            await self.publish("task.moved", payload, project_id=moved.project_id)
+            await self.publish("task.moved", payload, project_id=moved.project_id, session_id=moved.origin_session_id)
         return moved
 
     async def hand_in_to(self, task: BoardTask, worktree: Worktree | None) -> str:
@@ -533,7 +534,7 @@ class Team:
         payload: dict[str, Any] = {"task_id": task.id, "title": task.title, "assignee_staff_id": staff_id or "", "actor": actor}
         if error:
             payload["error"] = error[:500]
-        await self.publish("task.assigned", payload, project_id=task.project_id)
+        await self.publish("task.assigned", payload, project_id=task.project_id, session_id=task.origin_session_id)
 
     # -- the launch queue's questions -----------------------------------------------------------------
 

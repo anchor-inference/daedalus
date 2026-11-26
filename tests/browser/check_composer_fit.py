@@ -1,22 +1,23 @@
 """The composer's toolbar holds every control it carries, side by side, on a phone and in a narrow pane.
 
 With the agent's language translated, a long model name, an effort and the dictation configured, the
-toolbar carries "+", the toggles chip, the language chip, the model pill with its effort, the context
-ring, the microphone and the circle. When the language chip arrived the row stopped fitting a phone: the
-controls slid over one another, the effort lay on the microphone and the model was cut to "clau…".
+toolbar carries "+", the access chip, the model chip with its effort, the context, the microphone and
+the circle. When a language chip of its own joined the row it stopped fitting a phone: the controls slid
+over one another, the effort lay on the microphone and the model was cut to "clau…".
 
-On a phone the language is now a row of the "+" sheet and the effort sits under the model's name inside
-its pill. This walks the open toolbar at 360, 390 and 430 px in English and in Russian and refuses:
+The language is a row of the access chip's menu at every size; on a phone the chip is its shield alone and
+the effort sits under the model's name inside its pill. This walks the open toolbar at 360, 390 and 430 px
+in English and in Russian and refuses:
 
 - two controls whose boxes overlap, or a control whose contents spill out of it;
 - a control outside the composer's pill;
 - a circle that is not whole, not the phone's size, or not at the row's end;
 - a model name cut below a recognisable prefix, or an effort that is missing or cut;
-- a language chip in the phone's row, or a "+" sheet without the language row that opens the choice.
+- the language's pair on the phone's chip, or an access menu without the language row that opens the choice.
 
 A wide desktop window, a desktop composer narrowed by the side panel and the two panes of the dual view
-are walked with the same claims, plus the desktop's own: there the language chip is in the row, with its
-pair in words ("EN ⇄ RU") where the composer is wide and the agent's code alone ("EN") in a narrow pane.
+are walked with the same claims, plus the desktop's own: the access chip says the pair ("EN ⇄ RU") where
+the composer is wide, and gives up its words for its shield in a narrow pane.
 
     APP_URL=http://127.0.0.1:<port>/app python tests/browser/check_composer_fit.py
 
@@ -34,7 +35,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_composer as composer  # noqa: E402
-from api_stub import DEFAULT_APP, GATES, expect_app, reveal_composer, session_translation  # noqa: E402
+from api_stub import DEFAULT_APP, GATES, expect_app, session_translation  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -44,7 +45,7 @@ SHOTS = Path(os.environ["SHOTS"]) if os.environ.get("SHOTS") else None
 LONG_MODEL = "claude-sonnet-4-5-20250929-extended"
 # The fewest characters of the name that still tell one model from another ("claude-son").
 RECOGNISABLE = 10
-LANGUAGE_ROW = {"en": "Language the agent works in", "ru": "Язык, на котором работает агент"}
+LANGUAGE_ROW = {"en": "Agent language", "ru": "Язык агента"}
 
 FACTS = """(composer) => {
   const box = composer.querySelector('.composer-box');
@@ -66,7 +67,7 @@ FACTS = """(composer) => {
   }
   const label = composer.querySelector('.model-select .model-label');
   const effort = composer.querySelector('.model-select .model-effort');
-  const chip = composer.querySelector('.agentlang-chip');
+  const chip = composer.querySelector('.composer-access .access-lang');
   const send = composer.querySelector('.roundbtn.primary');
   // How much of the name is in view: the share of its width the pill shows, in characters.
   const shown = label ? Math.floor(label.textContent.replace('…', '').length * Math.min(1, label.clientWidth / Math.max(1, label.scrollWidth))) : 0;
@@ -80,7 +81,8 @@ FACTS = """(composer) => {
     chip: chip && chip.getClientRects().length ? chip.innerText.trim() : null,
     send: send ? rect(send) : null,
     last: controls.length ? name(controls[controls.length - 1]) : null,
-    round: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ctl-round')) || 0,
+    // The phone's send circle is 40 px drawn in its 44 px place, as the approved phone frame draws it.
+    round: 40,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     doc: document.documentElement.scrollWidth - window.innerWidth,
   };
@@ -112,7 +114,7 @@ def judge(facts: dict, where: str, phone: bool, narrow: bool) -> list[str]:
     problems: list[str] = []
     box, controls, send = facts["box"], facts["controls"], facts["send"]
     names = [c["name"].split(".") for c in controls]
-    for wanted in ("plus", "composer-mode", "model-select", "ctx-ring", "mic", "primary"):
+    for wanted in ("plus", "composer-access", "model-select", "ctx-ring", "mic", "primary"):
         if not any(wanted in n for n in names):
             problems.append(f"{where}: no {wanted} in the row ({[c['name'] for c in controls]})")
     problems += [f"{where}: {line}" for line in overlaps(controls)]
@@ -137,28 +139,27 @@ def judge(facts: dict, where: str, phone: bool, narrow: bool) -> list[str]:
     if not facts["effort"] or facts["effortCut"]:
         problems.append(f"{where}: the effort is missing or cut ({facts['effort']!r})")
     if phone and facts["chip"] is not None:
-        problems.append(f"{where}: the language chip is in the phone's row ({facts['chip']!r})")
-    # A narrow pane keeps the agent's code alone; its title and menu still name the pair.
-    if not phone and facts["chip"] != ("EN" if narrow else "EN ⇄ RU"):
-        problems.append(f"{where}: the desktop's language chip reads {facts['chip']!r}")
+        problems.append(f"{where}: the language's pair is on the phone's chip ({facts['chip']!r})")
+    # A narrow pane keeps the access chip's shield alone; its title and menu still name the pair.
+    if not phone and facts["chip"] != (None if narrow else "EN ⇄ RU"):
+        problems.append(f"{where}: the desktop's access chip reads {facts['chip']!r} for the language")
     return problems
 
 
 def language_row(page: Page, lang: str, where: str) -> list[str]:
-    """The phone's language: a row of the "+" sheet naming the pair, which opens the languages."""
-    page.locator(".composer .iconbtn.plus").tap()
-    row = page.locator(".ph-plus-sheet [data-action='language']")
+    """The phone's language: a row of the access chip's sheet naming the pair, which opens the languages."""
+    page.locator(".composer .composer-access").tap()
+    row = page.locator(".sheet .access-menu [data-action='language']")
     expect(row).to_be_visible()
     problems: list[str] = []
     if LANGUAGE_ROW[lang] not in row.inner_text() or "EN ⇄ RU" not in row.inner_text():
-        problems.append(f"{where}: the + sheet's language row reads {row.inner_text()!r}")
+        problems.append(f"{where}: the access sheet's language row reads {row.inner_text()!r}")
     if SHOTS is not None:
         page.wait_for_timeout(300)  # the sheet slides up
-        page.screenshot(path=str(SHOTS / f"plus-sheet-{lang}.png"))
+        page.screenshot(path=str(SHOTS / f"access-sheet-{lang}.png"))
     row.tap()
-    sheet = page.locator(".mode-sheet")
+    sheet = page.locator(".sheet .agentlang-menu")
     expect(sheet.locator(".agentlang-row[data-lang='en']")).to_have_attribute("aria-checked", "true")
-    expect(page.locator(".ph-plus-sheet")).to_have_count(0)
     if SHOTS is not None:
         page.wait_for_timeout(300)
         page.screenshot(path=str(SHOTS / f"language-sheet-{lang}.png"))
@@ -177,7 +178,6 @@ def walk(browser, lang: str, width: int, phone: bool, panel: bool = False, dual:
     page.wait_for_selector(".composer .roundbtn.primary", state="attached", timeout=15000)
     page.wait_for_selector(".composer .model-select", state="attached", timeout=15000)
     page.wait_for_timeout(300)
-    reveal_composer(page)
     problems: list[str] = []
     composers = page.locator(".composer:has(.composer-row)")
     for n in range(composers.count()):
@@ -199,7 +199,7 @@ def walk(browser, lang: str, width: int, phone: bool, panel: bool = False, dual:
         try:
             problems += language_row(page, lang, where)
         except AssertionError as missing:
-            problems.append(f"{where}: the language is not reachable from the + sheet: {str(missing).splitlines()[0]}")
+            problems.append(f"{where}: the language is not reachable from the access sheet: {str(missing).splitlines()[0]}")
     context.close()
     return problems
 

@@ -1,16 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFS, FONT_CATALOG, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById, usualProse } from "./appearance";
+import { DARK_ACCENTS, DEFAULT_PREFS, FONT_CATALOG, LIGHT_ACCENTS, THEMES, appearanceTokens, contrast, fontUrlAllowed, googleStylesheet, isThemeId, readPrefs, resolvedTheme, themeById, usualProse } from "./appearance";
 
 const dark = { scheme: "dark" as const, prefersDark: true };
 const light = { scheme: "light" as const, prefersDark: false };
 
 describe("themes", () => {
-  it("keeps text readable on every theme", () => {
+  it("keeps every text step readable on every surface of every theme", () => {
+    // 4.5:1 for the text, the secondary and the meta on the frame, the page, a card, what floats and
+    // the solid fill's first step; the translucent hover and selection only lighten or darken these.
     for (const theme of THEMES) {
-      expect(contrast(theme.fg, theme.side), theme.id).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(theme.fg, theme.surface), theme.id).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(theme.fg2, theme.side), theme.id).toBeGreaterThanOrEqual(4.5);
-      if (theme.send.startsWith("#")) expect(contrast(theme.sendInk, theme.send), theme.id).toBeGreaterThanOrEqual(4.5);
+      for (const ink of [theme.fg, theme.fg2, theme.fg3]) {
+        for (const ground of [theme.side, theme.wash, theme.card, theme.surface, theme.surface2, theme.surface3, theme.inset]) {
+          expect(contrast(ink, ground), `${theme.id}: ${ink} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it("keeps the accents readable on every surface and their labels readable on them", () => {
+    for (const theme of THEMES) {
+      const accents = theme.light ? LIGHT_ACCENTS : DARK_ACCENTS;
+      for (const colour of [accents.accent, accents.live, accents.attention]) {
+        for (const ground of [theme.side, theme.wash, theme.card, theme.surface]) {
+          expect(contrast(colour, ground), `${theme.id}: ${colour} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+    for (const accents of [DARK_ACCENTS, LIGHT_ACCENTS]) {
+      expect(contrast(accents.primaryInk, accents.primary)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(accents.primaryInk, accents.primaryHover)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(accents.accentInk, accents.accent)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("is six neutral frames that never write an accent of their own", () => {
+    // A theme that recoloured violet, or painted a gradient, broke the one meaning each accent has.
+    expect(THEMES.map((theme) => theme.id)).toEqual(["ink", "paper", "sazha", "grafit", "slanets", "pepel"]);
+    for (const theme of THEMES) {
+      for (const [key, value] of Object.entries(theme)) if (key !== "id" && key !== "light") expect(value, `${theme.id}.${key}`).toMatch(/^#[0-9a-f]{6}$/);
+      const tokens = appearanceTokens({ ...DEFAULT_PREFS, follow: false, theme: theme.id, colors: {} }, dark);
+      const accents = theme.light ? LIGHT_ACCENTS : DARK_ACCENTS;
+      expect(tokens["--accent"]).toBe(accents.accent);
+      expect(tokens["--primary"]).toBe(accents.primary);
+      expect(tokens["--ok"]).toBe(accents.live);
+      expect(tokens["--bad"]).toBe(accents.attention);
     }
   });
 
@@ -18,26 +51,29 @@ describe("themes", () => {
     const prefs = { ...DEFAULT_PREFS, colors: {} };
     expect(resolvedTheme(prefs, dark).id).toBe("ink");
     expect(resolvedTheme(prefs, light).id).toBe("paper");
-    expect(resolvedTheme({ ...prefs, follow: false, theme: "baltika" }, dark).id).toBe("baltika");
+    expect(resolvedTheme({ ...prefs, follow: false, theme: "slanets" }, dark).id).toBe("slanets");
     expect(themeById("nope").id).toBe("ink");
-    expect(isThemeId("malibu")).toBe(true);
+    expect(isThemeId("grafit")).toBe(true);
+    expect(isThemeId("malibu")).toBe(false);
   });
 
-  it("lets a colour override replace the theme, and keeps the terminal dark when asked", () => {
-    const prefs = { ...DEFAULT_PREFS, follow: false, theme: "serebro" as const, colors: { bg: "#112233" } };
+  it("lets a colour override replace the theme's frame, and keeps the terminal dark when asked", () => {
+    const prefs = { ...DEFAULT_PREFS, follow: false, theme: "paper" as const, colors: { bg: "#112233" } };
     const tokens = appearanceTokens(prefs, light);
     expect(tokens["--bg"]).toBe("#112233");
     expect(tokens["--ansi-0"]).toMatch(/^#[0-9a-f]{6}$/i);
     const forced = appearanceTokens({ ...prefs, colors: {}, code: "dark" }, light);
-    expect(forced["--term-bg"]).toBe("#060606");
-    expect(forced["--term-fg"]).toBe("#f5f5f5");
+    expect(forced["--term-bg"]).toBe("#101010");
+    expect(forced["--term-fg"]).toBe("#ededed");
     expect(Object.keys(forced).filter((name) => name.startsWith("--ansi-"))).toHaveLength(16);
   });
 
   it("leaves the type scale alone at the usual step and moves it otherwise", () => {
     expect(appearanceTokens(DEFAULT_PREFS, dark)["--fs-14"]).toBeUndefined();
     expect(appearanceTokens({ ...DEFAULT_PREFS, scale: "lg" }, dark)["--fs-14"]).toBe("15.4px");
-    expect(appearanceTokens({ ...DEFAULT_PREFS, column: "narrow" }, dark)["--chat-w"]).toBe("760px");
+    expect(appearanceTokens({ ...DEFAULT_PREFS, scale: "sm" }, dark)["--fs-12"]).toBe("11px");
+    expect(appearanceTokens({ ...DEFAULT_PREFS, column: "narrow" }, dark)["--chat-w"]).toBe("680px");
+    expect(appearanceTokens({ ...DEFAULT_PREFS, column: "wide" }, dark)["--chat-w"]).toBe("920px");
     expect(appearanceTokens(DEFAULT_PREFS, dark)["--chat-w"]).toBeUndefined();
   });
 
@@ -51,26 +87,21 @@ describe("themes", () => {
     expect(FONT_CATALOG.some((face) => face.local)).toBe(true);
   });
 
-  it("drops a stored theme it does not know", () => {
+  it("drops a stored theme it does not know, a deleted one included, and an accent override", () => {
     const kept = new Map<string, string>();
     vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
-    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "cheek", follow: false, colors: { bg: "red" } }));
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "cheek", follow: false, colors: { bg: "red", accent: "#ff0000", send: "#00ff00", fg: "#eeeeee" } }));
     const prefs = readPrefs();
     expect(prefs.theme).toBe("ink");
     expect(prefs.follow).toBe(false);
-    expect(prefs.colors.bg).toBeUndefined();
-  });
-
-  it("moves the old default pair onto the new one once, and leaves a theme chosen by name alone", () => {
-    const kept = new Map<string, string>();
-    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
-    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "claude", dark: "claude", light: "serebro", scale: "lg" }));
+    expect(prefs.colors).toEqual({ fg: "#eeeeee" });
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "malibu", dark: "glub", light: "zakat", scale: "lg" }));
     expect(readPrefs()).toMatchObject({ theme: "ink", dark: "ink", light: "paper", scale: "lg" });
-    localStorage.setItem("daedalus.appearance", JSON.stringify({ theme: "malibu", dark: "grafit", light: "zakat" }));
-    expect(readPrefs()).toMatchObject({ theme: "malibu", dark: "grafit", light: "zakat" });
-    // Chosen again after the move, the old default is a choice like any other.
-    localStorage.setItem("daedalus.appearance", JSON.stringify({ look: 2, theme: "claude", dark: "claude", light: "serebro" }));
-    expect(readPrefs()).toMatchObject({ theme: "claude", dark: "claude", light: "serebro" });
+    // A theme stored on the wrong side of the pair would paint the dark scheme light.
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ dark: "paper", light: "grafit" }));
+    expect(readPrefs()).toMatchObject({ dark: "ink", light: "paper" });
+    localStorage.setItem("daedalus.appearance", JSON.stringify({ dark: "pepel" }));
+    expect(readPrefs().dark).toBe("pepel");
   });
 
   it("sets answer text to any whole size from 12 to 22 px, independent of the interface step", () => {

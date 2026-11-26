@@ -32,7 +32,7 @@ vi.mock("./FreeModels", () => ({ FreeModels: () => null }));
 
 import { announceProviderKeys } from "../api";
 import { AddModel } from "./AddModel";
-import { providerReady } from "./Settings";
+import { providerReady } from "./ModelsSection";
 
 const openrouter = (held: boolean) => ({
   id: "openrouter", kind: "openrouter", name: "", base_url: "http://127.0.0.1:3201/openrouter", billing: "metered",

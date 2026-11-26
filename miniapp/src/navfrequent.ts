@@ -1,10 +1,7 @@
-// What the More launcher puts under "Frequent": the destinations the operator pinned there, in the
-// order they pinned them, then the ones this browser has seen opened most over the last month, then,
-// while there is not enough history yet, the places the rail does not already show.
-//
-// Pins stay put and come first because a learned order alone made the tiles jump about from one week
-// to the next, which is the one thing a row of tiles is not allowed to do; the learned part fills
-// what is left so a fresh installation is not a row of empty slots.
+// What the More launcher puts under "Frequent": the destinations this browser has seen opened most
+// over the last month, then, while there is not enough history yet, the places the sidebar does not
+// already show, so a fresh installation is not a row of empty slots. What the operator wants held in
+// place is pinned to the sidebar, which is the host's configuration and not this file's business.
 //
 // Kept in this browser on purpose: it is a habit of one screen (a phone opens other things than the
 // desktop does), and it is not worth a round trip to the host and a field in the configuration.
@@ -18,10 +15,10 @@ export const WINDOW_DAYS = 30;
 /** How many ids the history keeps, so a long-lived browser does not grow it without bound. */
 export const MAX_IDS = 200;
 
-/** Visits per id per day (days since the epoch), and the pinned ids in the order they were pinned. */
-export type FrequentState = { visits: Record<string, Record<string, number>>; pins: string[] };
+/** Visits per id per day (days since the epoch). */
+export type FrequentState = { visits: Record<string, Record<string, number>> };
 
-export const EMPTY: FrequentState = { visits: {}, pins: [] };
+export const EMPTY: FrequentState = { visits: {} };
 
 const DAY = 86_400_000;
 
@@ -58,40 +55,28 @@ export function prune(state: FrequentState, now: number): FrequentState {
   }
   const ids = Object.keys(visits);
   if (ids.length > MAX_IDS) {
-    // The least used go first; what is pinned is not in this list and is never lost.
+    // The least used go first.
     ids.sort((a, b) => score(visits[a], now) - score(visits[b], now) || lastDay(visits[a]) - lastDay(visits[b]));
     for (const id of ids.slice(0, ids.length - MAX_IDS)) delete visits[id];
   }
-  return { visits, pins: state.pins };
+  return { visits };
 }
 
 export function recordVisit(state: FrequentState, id: string, now: number): FrequentState {
   const day = String(dayOf(now));
   const days = state.visits[id] ?? {};
-  return prune({ visits: { ...state.visits, [id]: { ...days, [day]: (days[day] ?? 0) + 1 } }, pins: state.pins }, now);
+  return prune({ visits: { ...state.visits, [id]: { ...days, [day]: (days[day] ?? 0) + 1 } } }, now);
 }
 
-export function isPinned(state: FrequentState, id: string): boolean {
-  return state.pins.includes(id);
-}
-
-/** Pinned goes to the end of the pins, so the newest pin takes the next free tile rather than
- *  pushing the others along; unpinned leaves the rest where they were. */
-export function togglePin(state: FrequentState, id: string): FrequentState {
-  return { visits: state.visits, pins: isPinned(state, id) ? state.pins.filter((p) => p !== id) : [...state.pins, id] };
-}
-
-/** The ids for the tiles, at most `limit`, from `candidates` only (what is shown: hidden items are
- *  never offered). Pinned first, then the learned ones by score (the more recent visit breaks a tie,
- *  then the candidates' own order), then `fallback` in its order. A pin past `limit` is kept but not
- *  drawn, so unpinning one brings it back. */
+/** The ids for the chips, at most `limit`, from `candidates` only (what is shown: hidden items are
+ *  never offered). The learned ones by score first (the more recent visit breaks a tie, then the
+ *  candidates' own order), then `fallback` in its order. */
 export function frequent(state: FrequentState, candidates: string[], now: number, limit: number, fallback: string[] = []): string[] {
   const allowed = new Set(candidates);
   const out: string[] = [];
   const add = (id: string) => {
     if (out.length < limit && allowed.has(id) && !out.includes(id)) out.push(id);
   };
-  state.pins.forEach(add);
   const order = new Map(candidates.map((id, i) => [id, i]));
   candidates
     .map((id) => ({ id, score: score(state.visits[id], now), last: lastDay(state.visits[id]) }))
@@ -109,7 +94,7 @@ export function parse(text: string | null): FrequentState {
   try {
     const raw = JSON.parse(text) as unknown;
     if (!raw || typeof raw !== "object") return EMPTY;
-    const { visits, pins } = raw as { visits?: unknown; pins?: unknown };
+    const { visits } = raw as { visits?: unknown };
     const cleanVisits: FrequentState["visits"] = {};
     if (visits && typeof visits === "object") {
       for (const [id, days] of Object.entries(visits as Record<string, unknown>)) {
@@ -118,8 +103,7 @@ export function parse(text: string | null): FrequentState {
         if (Object.keys(kept).length) cleanVisits[id] = kept;
       }
     }
-    const cleanPins = Array.isArray(pins) ? [...new Set(pins.filter((p): p is string => typeof p === "string" && !!p))] : [];
-    return { visits: cleanVisits, pins: cleanPins };
+    return { visits: cleanVisits };
   } catch {
     return EMPTY;
   }
@@ -171,10 +155,6 @@ function subscribe(listener: () => void): () => void {
 
 export function useFrequentState(): FrequentState {
   return useSyncExternalStore(subscribe, readFrequent, readFrequent);
-}
-
-export function pin(id: string): void {
-  write(togglePin(readFrequent(), id));
 }
 
 /** Counts the place the route stands on once per arrival, and only when `known` says it is a

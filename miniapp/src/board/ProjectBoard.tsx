@@ -3,17 +3,17 @@
 // list, because five columns on a phone are five slivers nobody can read. The component takes the
 // project by id and nothing else, so the project's focus panel and its phone tab can mount it as it is.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, type Project } from "../api";
 import { Skeleton, copyText } from "../ui/components";
 import { SelectionList } from "../ui/selection";
-import { OverflowMenu, Sheet, type MenuItem } from "../ui/dialogs";
+import { Button, IconButton, OverflowMenu, Select, Sheet, type MenuItem } from "../ui/primitives";
 import { useEvent, useStreamUp } from "../events";
 import { absTime, relTime } from "../format";
 import { Icon, type IconName } from "../icons";
 import { plural, t } from "../i18n";
 import { navigate, pathFor, projectHome, projectPagePath, projectSessionPath, useRoute } from "../router";
-import { PageHeader, useMedia } from "../shell";
+import { Page, PageHeader, useMedia } from "../shell";
 import { invalidate, useOffline, useQuery } from "../store";
 import { HarnessBadge, StaffAvatar } from "../team/parts";
 import { LifecycleCancel } from "../project/LifecycleCancel";
@@ -40,6 +40,7 @@ import "./taskdialog.css";
 import { Harness, statusTone } from "../team/team";
 import { confirmAsync, errorText } from "../ui";
 import { closeItems } from "./operatorClose";
+import { priorityLabel, shortId } from "./tasks";
 import {
   Arranged,
   BRIEF_FIELDS,
@@ -181,7 +182,7 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
       {embedded ? (
         <div className="pboard-bar">
           <span className="sub grow truncate">{subtitle}</span>
-          <button className="iconbtn small" onClick={() => setCreating(true)} title={t("pboard.new")} aria-label={t("pboard.new")}><Icon name="plus" size={16} /></button>
+          <IconButton icon="plus" size={28} label={t("pboard.new")} onClick={() => setCreating(true)} />
         </div>
       ) : (
       <PageHeader
@@ -190,16 +191,15 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
         back={back === undefined ? pathFor("agents") : back ?? undefined}
         actions={
           <>
-            <button className="iconbtn" onClick={() => navigate(projectPagePath(projectId, "team"))} title={t("pboard.team")} aria-label={t("pboard.team")}><Icon name="bots" /></button>
-            <button className="iconbtn primary" onClick={() => setCreating(true)} title={t("pboard.new")} aria-label={t("pboard.new")}><Icon name="plus" /></button>
+            <IconButton icon="bots" label={t("pboard.team")} onClick={() => navigate(projectPagePath(projectId, "team"))} />
+            <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>{t("pboard.new")}</Button>
           </>
         }
-      >
-        {listChips}
-      </PageHeader>
+        filters={listChips}
+      />
       )}
       {embedded && listChips}
-      <div className={`screen wide pboard ${wide ? "is-wide" : "is-list"} ${embedded ? "embedded" : ""}`}>
+      <BoardBody embedded={embedded} className={`pboard ${wide ? "is-wide" : "is-list"}`}>
         <UnknownStops key={projectId} projectId={projectId} />
         <UncertainLaunches key={projectId} projectId={projectId} />
         {loading && !data && !error && <Skeleton rows={4} />}
@@ -222,14 +222,14 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
           <div className="pboard-cols">
             {(["needs", "doing", "review", "queue"] as Column[]).map((column) => (
               <section key={column} className={`pboard-col ${column}`} aria-label={t(`pboard.col.${column}`)}>
-                <div className="section-title">{t(`pboard.col.${column}`)} <span className="n">{columnCount(column, arranged)}</span></div>
+                <ColumnHead column={column} count={columnCount(column, arranged)} />
                 {items(column)}
-                {arranged[column].length === 0 && <div className="pboard-none">{t(`pboard.none.${column}`)}</div>}
+                {arranged[column].length === 0 && <div className="pboard-none kanban-empty">{t(`pboard.none.${column}`)}</div>}
               </section>
             ))}
             <section className="pboard-col done" aria-label={t("pboard.col.done")}>
               <button className="section-title pboard-fold" aria-expanded={showDone} onClick={() => setShowDone(!showDone)}>
-                <Icon name="chevron" size={14} /> {t("pboard.col.done")} <span className="n">{columnCount("done", arranged, data.counts)}</span>
+                <Icon name="chevron" size={14} /> <span className="kanban-name">{t("pboard.col.done")}</span> <span className="kanban-n">{columnCount("done", arranged, data.counts)}</span>
               </button>
               {showDone && items("done")}
             </section>
@@ -239,23 +239,39 @@ export function ProjectBoard({ projectId, toast, selected, selectedResult, layou
           <div className="pboard-list">
             {sections(filter, arranged).map((column) => (
               <section key={column} className={`pboard-section ${column}`} aria-label={t(`pboard.col.${column}`)}>
-                <div className="section-title">{t(`pboard.col.${column}`)} <span className="n">{columnCount(column, arranged, column === "done" ? data.counts : undefined)}</span></div>
+                <ColumnHead column={column} count={columnCount(column, arranged, column === "done" ? data.counts : undefined)} />
                 {items(column)}
-                {arranged[column].length === 0 && <div className="pboard-none">{t(`pboard.none.${column}`)}</div>}
+                {arranged[column].length === 0 && <div className="pboard-none kanban-empty">{t(`pboard.none.${column}`)}</div>}
               </section>
             ))}
             {filter === null && columnCount("done", arranged, data.counts) > 0 && (
               <button className="section-title pboard-fold" onClick={() => pickChip("done")}>
-                <Icon name="chevron" size={14} /> {t("pboard.col.done")} <span className="n">{columnCount("done", arranged, data.counts)}</span>
+                <Icon name="chevron" size={14} /> <span className="kanban-name">{t("pboard.col.done")}</span> <span className="kanban-n">{columnCount("done", arranged, data.counts)}</span>
               </button>
             )}
           </div>
         )}
-      </div>
+      </BoardBody>
       {creating && data && <TaskSheet projectId={projectId} data={data} onClose={() => setCreating(false)} onDone={reload} toast={toast} onImport={() => { setCreating(false); setImporting(true); }} />}
       {importing && <IssueImport projectId={projectId} onClose={() => setImporting(false)} onDone={reload} toast={toast} />}
       {open && data && <TaskSheet key={open.id} projectId={projectId} data={data} task={open} resultReference={resultReference} onClose={closeTask} onDone={reload} toast={toast} />}
     </>
+  );
+}
+
+/** The page's own body is the full-width page; in the panel the board keeps the panel's padding. */
+function BoardBody({ embedded, className, children }: { embedded: boolean; className: string; children: ReactNode }) {
+  if (embedded) return <div className={`screen ${className} embedded`}>{children}</div>;
+  return <Page width="full" className={className}>{children}</Page>;
+}
+
+/** A column's name and count, the Board page's 36 px head. */
+function ColumnHead({ column, count }: { column: Column; count: number }) {
+  return (
+    <div className="section-title kanban-head">
+      <span className="kanban-name">{t(`pboard.col.${column}`)}</span>
+      <span className="kanban-n">{count}</span>
+    </div>
   );
 }
 
@@ -268,23 +284,26 @@ function Who({ name, color, harness }: { name: string; color: string; harness?: 
   );
 }
 
+/** A request waiting on the operator, drawn as a card of the board: what is asked in the card's title,
+ *  who asks in the orange line the Board gives everything that waits on the operator. */
 function NeedCard({ need, projectId }: { need: NeedsYou; projectId: string }) {
   const who = need.staff ? t("pboard.need.from", { kind: t(`pboard.need.kind.${need.kind}`), name: need.staff.name }) : t("pboard.need.orchestrator", { kind: t(`pboard.need.kind.${need.kind}`) });
   return (
-    <div className="pcard need">
-      <div className="pcard-title clamp-3">{need.text}</div>
-      {need.task_title && <div className="pcard-line faint truncate">{need.task_title}</div>}
-      <div className="pcard-meta">
-        {need.staff ? <Who name={need.staff.name} color={need.staff.color} /> : <Icon name="question" size={14} />}
+    <div className="pcard task-card need">
+      <div className="pcard-title task-card-title">{need.text}</div>
+      <div className="task-card-state attention">
+        <span className="kanban-dot" aria-hidden />
         <span className="truncate">{who} · <span title={absTime(need.created_at)}>{relTime(need.created_at)}</span></span>
       </div>
+      {need.task_title && <div className="pcard-line task-card-chat truncate"><Icon name="board" size={12} /><span className="truncate">{need.task_title}</span></div>}
       {need.suggestion && <div className="pcard-line sub">{t("pboard.need.suggestion", { text: need.suggestion })}</div>}
       {/* The short id and the answer get a row of their own, so a narrow column never squeezes who asked to nothing. */}
-      <div className="pcard-meta">
+      <div className="pcard-meta task-card-meta">
+        {need.staff && <Who name={need.staff.name} color={need.staff.color} />}
         <code className="pcard-short" title={t("pboard.need.short")}>{need.short_id}</code>
         <span className="grow" />
         {need.session_id && (
-          <button className="btn small warn" onClick={() => navigate(answerPath(projectId, need))}>{t("pboard.need.answer")}</button>
+          <Button size="sm" className="warn" onClick={() => navigate(answerPath(projectId, need))}>{t("pboard.need.answer")}</Button>
         )}
       </div>
     </div>
@@ -298,31 +317,35 @@ function answerPath(projectId: string, need: NeedsYou): string {
   return projectSessionPath(projectId, need.session_id!);
 }
 
+/** The card's state line, coloured as the Board colours it: cyan while its member works, orange while
+ *  the member waits on a question or a permission, quiet for the rest. */
 function StatusText({ task, titles }: { task: ProjectTask; titles: Record<string, { title: string; status: TaskStatus }> }) {
   const line = statusLine(task, titles);
   if (line.kind === "working") {
+    const tone = statusTone(line.status);
     return (
-      // The words sit in a span of their own: `.status` is a flex row, and an ellipsis never applies to
-      // a flex container's text, so a narrow tablet column cut "needs permission · 4d" to "needs permissic".
-      <span className={`status ${statusTone(line.status)} pcard-status`} title={line.waiting || undefined}>
-        <span className="dot" aria-hidden />
+      // The words sit in a span of their own: an ellipsis never applies to a flex container's text, so
+      // a narrow tablet column cut "needs permission · 4d" to "needs permissic".
+      <div className={`task-card-state pcard-status ${tone === "running" ? "live" : tone === "waiting" || tone === "failed" ? "attention" : ""}`} title={line.waiting || undefined}>
+        <span className="kanban-dot" aria-hidden />
         <span className="truncate">
           {t(`team.status.${line.status}`)}
           {line.since && <> · {relTime(line.since)}</>}
         </span>
-      </span>
+      </div>
     );
   }
-  if (line.kind === "after") return <span className="truncate">{line.more ? t("pboard.after.more", { title: line.title, n: line.more }) : t("pboard.after", { title: line.title })}</span>;
-  if (line.kind === "waiting") return <span className="truncate">{t("pboard.waiting", { name: line.name })}</span>;
+  if (line.kind === "after") return <div className="task-card-line truncate">{line.more ? t("pboard.after.more", { title: line.title, n: line.more }) : t("pboard.after", { title: line.title })}</div>;
+  if (line.kind === "waiting") return <div className="task-card-line truncate">{t("pboard.waiting", { name: line.name })}</div>;
   return null;
 }
 
 function TaskCard({ task, titles, onOpen }: { task: ProjectTask; titles: Record<string, { title: string; status: TaskStatus }>; onOpen: () => void }) {
   const done = task.checklist.filter((c) => c.done).length;
+  const finished = task.status === "done" || task.status === "dropped";
   return (
     <div
-      className={`pcard p${Math.min(task.priority, 4)} ${task.status}`}
+      className={`pcard task-card p${Math.min(task.priority, 4)} ${task.status} ${finished ? "finished" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -335,31 +358,32 @@ function TaskCard({ task, titles, onOpen }: { task: ProjectTask; titles: Record<
       }}
     >
       <div className="pcard-head">
-        <span className="pcard-title clamp-3">{task.title}</span>
-        {task.priority <= 2 && <span className={`chip tiny ${task.priority === 1 ? "bad" : "attn"}`}>P{task.priority}</span>}
+        <span className="pcard-title task-card-title">{task.title}</span>
         {task.issue && <IssueChip issue={task.issue} />}
       </div>
-      {task.checklist.length > 0 && (
-        <div className="task-check">
-          <div className={`bar ${done === task.checklist.length ? "ok" : ""}`} style={{ ["--v" as string]: Math.round((100 * done) / task.checklist.length) }}><i /></div>
-          <span className="num sub">{done}/{task.checklist.length}</span>
-        </div>
-      )}
+      <StatusText task={task} titles={titles} />
       {task.status === "review" && task.branch && (
         <div className="pcard-review">
           <code className="pcard-branch truncate">{task.branch}</code>
           {task.merge_state === "conflict" && <span className="chip tiny bad">{t("pboard.review.state.conflict")}</span>}
         </div>
       )}
-      <div className="pcard-meta">
+      {task.checklist.length > 0 && (
+        <div className="task-check">
+          <div className={`bar ${done === task.checklist.length ? "ok" : ""}`} style={{ ["--v" as string]: Math.round((100 * done) / task.checklist.length) }}><i /></div>
+          <span className="num sub">{done}/{task.checklist.length}</span>
+        </div>
+      )}
+      <div className="pcard-meta task-card-meta">
         {task.assignee && <Who name={task.assignee.name} color={task.assignee.color} harness={task.assignee.harness} />}
-        <StatusText task={task} titles={titles} />
         <span className="grow" />
         <AcceptanceChip task={task} />
-        {task.status === "done" || task.status === "dropped" ? (
+        {finished ? (
           <span className="faint" title={absTime(task.updated_at)}>{task.status === "dropped" ? t("board.col.dropped") : relTime(task.updated_at)}</span>
         ) : null}
-        {task.status === "review" && <span className="sub">{t("result.openReview")}</span>}
+        {task.status === "review" && <span className="pcard-open">{t("result.openReview")}</span>}
+        {/* The host's default priority is three; the others are marked, the first two in orange. */}
+        {task.priority !== 3 && <span className={`task-card-prio p${task.priority}`}><Icon name="flag" size={12} />P{task.priority}</span>}
       </div>
     </div>
   );
@@ -491,8 +515,9 @@ function RequirementsSection({ requirements }: { requirements: Requirement[] }) 
 /** The rare tools of a task, each opened from its menu in the place of the task's text. */
 type Tool = "lifecycle" | "comparison" | "handoff" | "workflow" | "context" | "manual" | "diagnostics";
 
-/** The chip tone of a task's column, so review and a block stand out from the work flowing past them. */
-const STATUS_TONE: Record<TaskStatus, string> = { todo: "", doing: "accent", review: "attn", done: "ok", blocked: "bad", dropped: "quiet" };
+/** The dot of a task's column, as the Board draws it: cyan while it is worked on, orange where it waits
+ *  on someone (review, a block), grey for the rest. */
+const STATUS_TONE: Record<TaskStatus, string> = { todo: "", doing: "live", review: "attention", done: "", blocked: "attention", dropped: "" };
 
 /**
  * Creating a task and changing one. A new task is a form, since everything in it is still to be
@@ -785,11 +810,12 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       {canStart ? t("pboard.assignee.nobody") : <>{t("pboard.assignee.none")} <button className="linkbtn" onClick={() => navigate(projectPagePath(projectId, "team"))}>{t("pboard.team.hire")}</button></>}
     </div>
   ) : (
-    <select id="ptask-assignee" className="field ptask-select" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-      <option value="">{t("pboard.assignee.nobody")}</option>
-      {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-      {gone && <option value={gone.id}>{t("pboard.assignee.gone", { name: gone.name })}</option>}
-    </select>
+    <Select id="ptask-assignee" label={t("pboard.assignee")} size="md" value={assignee} onChange={setAssignee} className="task-select ptask-select"
+      options={[
+        { id: "", label: t("pboard.assignee.nobody") },
+        ...team.map((m) => ({ id: m.id, label: m.name })),
+        ...(gone ? [{ id: gone.id, label: t("pboard.assignee.gone", { name: gone.name }) }] : []),
+      ]} />
   );
   const missingNote = assignee && missing.length > 0 && (
     <div className="sub attn">{t("pboard.brief.missing", { parts: missing.map((field) => t(`pboard.brief.${field}`)).join(", ") })}</div>
@@ -797,12 +823,15 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const resumeControl = offersResume && resumeOpen && (
     <div className="ptask-resume">
       <label className="field" htmlFor="ptask-resume">{t("pboard.resume.label")}</label>
-      <select id="ptask-resume" className="field ptask-select" value={resumeFrom} onChange={(event) => setResumeFrom(event.target.value)}>
-        <option value="">{t("pboard.resume.fresh")}</option>
-        {resumeSessions.map((session) => <option key={session.id} value={session.id} disabled={!session.can_resume}>
-          {session.started_at.slice(0, 16).replace("T", " ")} · {session.owner_name} · {session.task_title || t("goal.card.untitled")} {session.can_resume ? "" : `· ${t(`pboard.resume.reason.${session.resume_reason}`)}`}
-        </option>)}
-      </select>
+      <Select id="ptask-resume" label={t("pboard.resume.label")} size="md" value={resumeFrom} onChange={setResumeFrom} className="ptask-select wide"
+        options={[
+          { id: "", label: t("pboard.resume.fresh") },
+          ...resumeSessions.map((session) => ({
+            id: session.id, disabled: !session.can_resume,
+            label: `${session.started_at.slice(0, 16).replace("T", " ")} · ${session.owner_name} · ${session.task_title || t("goal.card.untitled")}`,
+            hint: session.can_resume ? undefined : t(`pboard.resume.reason.${session.resume_reason}`),
+          })),
+        ]} />
       <div className="sub">{t("pboard.resume.hint")}</div>
       {resumeMore && <button className="linkbtn" type="button" onClick={olderSessions}>{t("pboard.resume.older")}</button>}
       {resumeError && <div className="sub attn">{resumeError}</div>}
@@ -826,11 +855,9 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     </div>
   );
   const priorityControl = (
-    <div className="segmented inline ptask-priority" role="radiogroup" aria-label={t("board.priority")}>
-      {[1, 2, 3, 4, 5].map((p) => (
-        <button key={p} type="button" role="radio" aria-checked={priority === p} className={priority === p ? "on" : ""} onClick={() => setPriority(p)}>P{p}</button>
-      ))}
-    </div>
+    <Select id="ptask-priority" label={t("board.priority")} size="md" value={String(priority)} onChange={(value) => setPriority(Number(value))}
+      className={`task-select ptask-select ${priority <= 2 ? "high" : ""}`}
+      options={[1, 2, 3, 4, 5].map((n) => ({ id: String(n), label: priorityLabel(n) }))} />
   );
   const folderName = (id: string) => folders.find((folder) => folder.id === id)?.label || folders.find((folder) => folder.id === id)?.path || t("pboard.folder.pinned");
   const folderControl = <>
@@ -838,11 +865,13 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
     {projects.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
     {task && comparisons.error && <div className="result-warning">{t("pboard.folder.unavailable")}</div>}
     {folderBlocked && <div className="result-warning">{t("pboard.folder.blocked")}</div>}
-    <select id="ptask-folder" className="field ptask-select" aria-label={t("pboard.folder.choose")} value={folderId} disabled={busy || offline || !!projects.error || !projects.data || folderBlocked} onChange={(event) => setFolderId(event.target.value)}>
-      {!task?.folder_id && <option value="">{t("pboard.folder.none")}</option>}
-      {task?.folder_id && !folders.some((folder) => folder.id === task.folder_id) && <option value={task.folder_id}>{t("pboard.folder.pinned")}</option>}
-      {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.label || folder.path}{folder.readonly ? ` · ${t("pboard.folder.readonly")}` : ""}</option>)}
-    </select>
+    <Select id="ptask-folder" label={t("pboard.folder.choose")} size="md" value={folderId} onChange={setFolderId} className="ptask-select wide"
+      disabled={busy || offline || !!projects.error || !projects.data || folderBlocked}
+      options={[
+        ...(!task?.folder_id ? [{ id: "", label: t("pboard.folder.none") }] : []),
+        ...(task?.folder_id && !folders.some((folder) => folder.id === task.folder_id) ? [{ id: task.folder_id, label: t("pboard.folder.pinned") }] : []),
+        ...folders.map((folder) => ({ id: folder.id, label: folder.label || folder.path, hint: folder.readonly ? t("pboard.folder.readonly") : undefined })),
+      ]} />
   </>;
   const launchNotice = task && launchEffectId && <div className="result-warning" role="status">
     {t(launchStatus.key)}
@@ -940,15 +969,9 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditing((open) => { const next = new Set(open); next.delete("title"); return next; }); } }} />
   ) : (
     <div className="ptask-title-row">
-      <h3 className="ptask-title">{title.trim() || task.title}</h3>
-      <button type="button" className="iconbtn small ptask-edit" onClick={() => edit("title")} aria-label={t("ptask.edit.title")} title={t("ptask.edit.title")}><Icon name="pen" size={14} /></button>
-    </div>
-  );
-  const meta = (
-    <div className="ptask-meta">
-      <span className={`chip ${STATUS_TONE[task.status]}`}>{t(`board.col.${task.status}`)}</span>
+      <h3 className="ptask-title task-pane-title">{title.trim() || task.title}</h3>
       {task.issue && <IssueChip issue={task.issue} />}
-      <span className="sub" title={absTime(task.updated_at)}>{t("board.updated", { t: relTime(task.updated_at) })}</span>
+      <button type="button" className="iconbtn small ptask-edit" onClick={() => edit("title")} aria-label={t("ptask.edit.title")} title={t("ptask.edit.title")}><Icon name="pen" size={14} /></button>
     </div>
   );
 
@@ -967,15 +990,15 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         {waitingOn.length > 0 && <span className="ptask-waits">{t("ptask.state.waits", { titles: waitingOn.map((id) => t("ptask.state.quoted", { title: titles[id].title })).join(", ") })}</span>}
       </div>
       {asked.map((need) => (
-        <div key={need.id} className="ptask-needs" role="status">
-          <Icon name="question" size={16} />
+        <div key={need.id} className="ptask-needs task-pane-need" role="status">
+          <span className="kanban-dot attention" aria-hidden="true" />
           <span className="grow">{need.staff ? t("pboard.need.from", { kind: t(`pboard.need.kind.${need.kind}`), name: need.staff.name }) : t("pboard.need.orchestrator", { kind: t(`pboard.need.kind.${need.kind}`) })}: {need.text}</span>
           {need.session_id && <button type="button" className="btn small warn" onClick={() => navigate(answerPath(projectId, need))}>{t("pboard.need.answer")}</button>}
         </div>
       ))}
       {task.status === "review" && (
-        <div className="ptask-needs" role="status">
-          <Icon name="eye" size={16} />
+        <div className="ptask-needs task-pane-need" role="status">
+          <span className="kanban-dot attention" aria-hidden="true" />
           <span className="grow">{t("ptask.state.review")}</span>
           {!phone && <button type="button" className="btn small warn" onClick={() => resultAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>{t("result.openReview")}</button>}
         </div>
@@ -1048,15 +1071,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   const props = (
     <div className="ptask-props">
       <Prop label={t("ptask.prop.status")}>
-        <span className={`chip ${STATUS_TONE[task.status]}`}>{t(`board.col.${task.status}`)}</span>
-        {NEXT[task.status].length > 0 && (
-          <div className="pboard-moves" role="group" aria-label={t("board.moveto")}>
-            <span className="sub">{t("board.moveto")}</span>
-            {NEXT[task.status].map((status) => (
-              <button key={status} type="button" className="btn small" disabled={writeBlocked} onClick={() => void move(status)}>{t(`board.col.${status}`)}</button>
-            ))}
-          </div>
-        )}
+        <span className="task-kv-status"><span className={`kanban-dot ${STATUS_TONE[task.status]}`} aria-hidden="true" />{t(`board.col.${task.status}`)}</span>
       </Prop>
       <Prop label={t("pboard.assignee")} htmlFor={team.length === 0 && !gone ? undefined : "ptask-assignee"}>{assigneeControl}</Prop>
       <Prop label={t("board.priority")}>{priorityControl}</Prop>
@@ -1066,6 +1081,18 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         {folderOpen ? folderControl : <span className={`ptask-folder ${folderId ? "" : "faint"}`}>{folderId ? folderName(folderId) : t("ptask.folder.unset")}</span>}
       </Prop>
       {task.branch && <Prop label={t("ptask.prop.branch")}><code className="pcard-branch">{task.branch}</code></Prop>}
+      <Prop label={t("board.kv.changed")}><span className="task-kv-quiet" title={absTime(task.updated_at)}>{relTime(task.updated_at)}</span></Prop>
+    </div>
+  );
+  // The moves the host allows from where the task stands, the pane's "Move to" block.
+  const moves = NEXT[task.status].length > 0 && (
+    <div className="task-block">
+      <span className="task-sec">{t("board.moveto")}</span>
+      <div className="pboard-moves task-moves" role="group" aria-label={t("board.moveto")}>
+        {NEXT[task.status].map((status) => (
+          <button key={status} type="button" className="btn task-move" disabled={writeBlocked} onClick={() => void move(status)}>{t(`board.col.${status}`)}</button>
+        ))}
+      </div>
     </div>
   );
   // The one thing to do next, by where the task stands.
@@ -1119,6 +1146,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
           {briefPart}
           {requirementsPart}
           {props}
+          {moves}
           {action}
           {notesPart}
           <TaskExplorations task={task} />
@@ -1131,9 +1159,12 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
   return (
     <Sheet ariaLabel={task.title} onClose={onClose} className="pboard-sheet ptask"
       head={<>
-        <div className="ptask-head">{meta}{titleBlock}</div>
+        <span className="task-pane-kind">{t("board.pane")}</span>
+        <span className="task-pane-code mono">{shortId(task.id)}</span>
+        <span className="grow" />
         <OverflowMenu small label={t("board.actions")} items={menuItems} />
       </>}>
+      {titleBlock}
       {state}
       <div className="ptask-grid">
         <div className="ptask-main">
@@ -1149,6 +1180,7 @@ export function TaskSheet({ projectId, data, task, resultReference, onClose, onD
         </div>
         <aside className="ptask-side" aria-label={t("ptask.side")}>
           {props}
+          {moves}
           {action}
         </aside>
       </div>

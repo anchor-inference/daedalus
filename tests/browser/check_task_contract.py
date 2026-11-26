@@ -66,7 +66,7 @@ def cards(page: Page, lang: str, width: int) -> None:
     serve(page, focus)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
     # A desktop's cards, or the rows of a phone's list under its chips.
-    card_of = ".pcard" if width >= 1024 else ".ph-row"
+    card_of = ".pcard" if width >= 1024 else ".list-row"
     expect(page.locator(card_of, has_text=invented["task.photos"])).to_be_visible()
     # Work in progress carries no acceptance, even with requirements on it.
     expect(page.locator(".pcard-accept")).to_have_count(0)
@@ -82,7 +82,7 @@ def cards(page: Page, lang: str, width: int) -> None:
     for task in (("task.menu", "task.prices") if width >= 1024 else ()):
         card = page.locator(".pcard", has_text=invented[task])
         rows = card.evaluate("(c) => [...c.children].filter((e) => e.querySelector('.pcard-accept') || e.classList.contains('pcard-accept')).map((e) => e.className)")
-        assert rows == ["pcard-meta"], f"{where}: the acceptance chip of {task} is in {rows}"
+        assert len(rows) == 1 and "pcard-meta" in rows[0].split(), f"{where}: the acceptance chip of {task} is in {rows}"
     no_sideways(page, f"{where} board")
 
 

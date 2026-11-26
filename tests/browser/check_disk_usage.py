@@ -203,7 +203,7 @@ def run() -> int:
 
             page.route("**/api/**", recorder(requests))
             page.goto(f"{BASE}/agents?token=t&lang={language}")
-            page.locator(".project-chip").click()
+            page.locator("[data-action='all-projects']").click()
             page.locator(".projects-row", has_text="Bakery site").get_by_role("button", name=words["settings"]).click()
             fold = page.locator("details.project-disk")
             assert not any("/api/disk/project" in r for r in requests), requests

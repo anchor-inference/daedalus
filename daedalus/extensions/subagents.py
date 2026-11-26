@@ -440,7 +440,7 @@ class Subagents:
                     thinking_enabled=overrides.get("thinking_enabled"),
                     reasoning_effort=overrides.get("reasoning_effort"),
                 )
-        # The leader's word first, then Settings → Subagents; neither leaves the model's own (or the leader's).
+        # The leader's word first, then Settings → Models for tasks; neither leaves the model's own (or the leader's).
         effort = effort if effort is not None else settings_effort(manager.config.subagents.models.effort)
         if effort is not None:
             await set_effort(manager, cid, effort)
@@ -497,7 +497,7 @@ class Subagents:
             raise RuntimeError("the leader has no project")
         models = manager.quick_models(leader.metadata)
         if not models:
-            raise ValueError("no quick model is chosen for this session; the operator picks them in Settings → Tasks → Quick agent models, or in this chat's details")
+            raise ValueError("no quick model is chosen for this session; the operator picks them in Settings → Models for tasks → Quick agent models, or in this chat's details")
         preset = (model or "").strip() or models[0]
         if preset not in models:
             raise ValueError(f"model {preset!r} is not a quick model here; choose one of: {', '.join(models)}")

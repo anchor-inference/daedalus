@@ -8,8 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, telegram } from "../api";
 import type { NotificationPreferences, NotificationPreferencesView, NotifyCell, NotifyChannel, Project } from "../api";
-import { Switch, timeAgo } from "../ui/components";
-import { NumInput, Row } from "../settingsrow";
+import { timeAgo } from "../ui/components";
+import { NumInput, Row, SetBlock, SetGroup } from "../settingsrow";
 import { clock, shortDateTime } from "../format";
 import { plural, t } from "../i18n";
 import { categoryLabel } from "../notifications";
@@ -18,6 +18,8 @@ import { currentEndpoint, type PushDevice } from "../push";
 import { setPopupsShown, usePopupsShown } from "../popups";
 import { PushCard } from "../pushui";
 import { useMedia } from "../ui/index";
+import { Badge, Button, Segmented, Select, Switch, confirmDialog } from "../ui/primitives";
+import { Icon } from "../icons";
 import { invalidate, useQuery } from "../store";
 import { errorText } from "../ui";
 
@@ -110,37 +112,39 @@ function Matrix({ prefs, categories, onCell }: { prefs: NotificationPreferences;
   const [open, setOpen] = useState<string | null>(null);
   const cellOf = (category: string, channel: NotifyChannel): NotifyCell => prefs.matrix[category]?.[channel] ?? "off";
   const legend = (
-    <div className="nmatrix-legend sub">
+    <SetBlock className="nmatrix-legend">
       {CELLS.map((c) => (
-        <span key={c}>
+        <span key={c} className="set-hint">
           <span className="ncell static" data-cell={c}>{t(`nset.cell.${c}`)}</span> {t(`nset.legend.${c}`)}
         </span>
       ))}
-    </div>
+    </SetBlock>
   );
   if (wide) {
     return (
       <>
-        <table className="nmatrix">
-          <thead>
-            <tr>
-              <th scope="col">{t("nset.matrix.kind")}</th>
-              {CHANNELS.map((ch) => <th key={ch} scope="col">{t(`nset.channel.${ch}`)}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {categories.map((category) => (
-              <tr key={category} data-category={category}>
-                <th scope="row">{categoryName(category)}</th>
-                {CHANNELS.map((ch) => (
-                  <td key={ch} data-channel={ch}>
-                    <CellButton cell={cellOf(category, ch)} label={`${categoryName(category)} · ${t(`nset.channel.${ch}`)}`} onClick={() => onCell(category, ch, nextCell(cellOf(category, ch)))} />
-                  </td>
-                ))}
+        <SetBlock className="nmatrix-block">
+          <table className="nmatrix">
+            <thead>
+              <tr>
+                <th scope="col">{t("nset.matrix.kind")}</th>
+                {CHANNELS.map((ch) => <th key={ch} scope="col">{t(`nset.channel.${ch}`)}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {categories.map((category) => (
+                <tr key={category} data-category={category}>
+                  <th scope="row">{categoryName(category)}</th>
+                  {CHANNELS.map((ch) => (
+                    <td key={ch} data-channel={ch}>
+                      <CellButton cell={cellOf(category, ch)} label={`${categoryName(category)} · ${t(`nset.channel.${ch}`)}`} onClick={() => onCell(category, ch, nextCell(cellOf(category, ch)))} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </SetBlock>
         {legend}
       </>
     );
@@ -148,37 +152,33 @@ function Matrix({ prefs, categories, onCell }: { prefs: NotificationPreferences;
   // A phone has no room for four columns: each kind is a row that opens into one line per channel.
   return (
     <>
-      <div className="nrows">
-        {categories.map((category) => {
-          const on = CHANNELS.filter((ch) => cellOf(category, ch) !== "off").map((ch) => t(`nset.channel.${ch}`) + (cellOf(category, ch) === "urgent" ? ` (${t("nset.cell.urgent").toLowerCase()})` : ""));
-          const expanded = open === category;
-          return (
-            <div key={category} className={`nrow ${expanded ? "open" : ""}`} data-category={category}>
-              <button className="nrow-head" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : category)}>
-                <span className="nrow-text">
-                  <b>{categoryName(category)}</b>
-                  <span className="sub">{on.length ? on.join(" · ") : t("nset.row.none")}</span>
-                </span>
-                <span className="chev">›</span>
-              </button>
-              {expanded && CHANNELS.map((ch) => (
-                <div key={ch} className="nrow-line" data-channel={ch}>
-                  <span>{t(`nset.channel.${ch}`)}</span>
-                  <div className="segmented inline" role="radiogroup" aria-label={`${categoryName(category)} · ${t(`nset.channel.${ch}`)}`}>
-                    {CELLS.map((c) => (
-                      <button key={c} role="radio" aria-checked={cellOf(category, ch) === c} className={cellOf(category, ch) === c ? "on" : ""} onClick={() => onCell(category, ch, c)}>
-                        {/* The short word, as the matrix pill and the legend name the same state; the
-                            long "Urgent only" stays in the pill's title and the aria label. */}
-                        {t(`nset.cell.${c}`)}
-                      </button>
-                    ))}
+      <SetBlock className="nmatrix-block">
+        <div className="nrows">
+          {categories.map((category) => {
+            const on = CHANNELS.filter((ch) => cellOf(category, ch) !== "off").map((ch) => t(`nset.channel.${ch}`) + (cellOf(category, ch) === "urgent" ? ` (${t("nset.cell.urgent").toLowerCase()})` : ""));
+            const expanded = open === category;
+            return (
+              <div key={category} className={`nrow ${expanded ? "open" : ""}`} data-category={category}>
+                <button className="nrow-head" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : category)}>
+                  <span className="nrow-text">
+                    <b>{categoryName(category)}</b>
+                    <span className="set-hint">{on.length ? on.join(" · ") : t("nset.row.none")}</span>
+                  </span>
+                  <Icon name="chevron" size={14} />
+                </button>
+                {expanded && CHANNELS.map((ch) => (
+                  <div key={ch} className="nrow-line" data-channel={ch}>
+                    <span>{t(`nset.channel.${ch}`)}</span>
+                    {/* The short word, as the matrix pill and the legend name the same state; the long
+                        "Urgent only" stays in the pill's title and the aria label. */}
+                    <Segmented label={`${categoryName(category)} · ${t(`nset.channel.${ch}`)}`} value={cellOf(category, ch)} onChange={(c) => onCell(category, ch, c)} options={CELLS.map((c) => ({ id: c, label: t(`nset.cell.${c}`) }))} />
                   </div>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </SetBlock>
       {legend}
     </>
   );
@@ -200,9 +200,7 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
     if (joined) change((p) => ({ ...p, quiet_hours: joined }));
   }
   return (
-    <div className="card">
-      <div className="section-title">{t("nset.quiet.title")}</div>
-      <div className="sub">{t("nset.quiet.sub")}</div>
+    <SetGroup title={t("nset.quiet.title")} help={t("nset.quiet.sub")}>
       <Row title={t("nset.quiet.toggle")} data-setting="notifications.quiet_hours" desc={<>{ends ? `${t("nset.quiet.urgent")} ` : ""}{zone ? t("nset.quiet.zone", { zone }) : t("nset.quiet.nozone")}</>}>
         <Switch checked={!!ends} onChange={(on) => change((p) => ({ ...p, quiet_hours: on ? joinQuietHours(draft.from, draft.to) || `${QUIET_DEFAULT.from}-${QUIET_DEFAULT.to}` : "" }))} label={t("nset.quiet.toggle")} />
       </Row>
@@ -210,11 +208,11 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
         <Row title={t("nset.quiet.when")} desc={same ? <span className="push-error">{t("nset.quiet.same")}</span> : undefined}>
           <span className="quiet-hours">
             <label>
-              <span className="sub">{t("nset.quiet.from")}</span>
+              <span className="set-hint">{t("nset.quiet.from")}</span>
               <input className="field" type="time" value={draft.from} onChange={(e) => set("from", e.target.value)} />
             </label>
             <label>
-              <span className="sub">{t("nset.quiet.to")}</span>
+              <span className="set-hint">{t("nset.quiet.to")}</span>
               <input className="field" type="time" value={draft.to} onChange={(e) => set("to", e.target.value)} />
             </label>
           </span>
@@ -223,21 +221,20 @@ function QuietHours({ prefs, zone, change }: { prefs: NotificationPreferences; z
       <Row title={t("nset.finished.label")} htmlFor="finished-after" desc={t("nset.finished.sub")} stack data-setting="notifications.finished_min_seconds">
         <NumInput id="finished-after" label={t("nset.finished.label")} value={prefs.finished_min_seconds} min={0} step={5} unit={t("nset.finished.unit")} onSave={(v) => Math.round(v) !== prefs.finished_min_seconds && change((p) => ({ ...p, finished_min_seconds: Math.round(v) }))} />
       </Row>
-    </div>
+    </SetGroup>
   );
 }
 
 function Answering({ prefs, change }: { prefs: NotificationPreferences; change: (edit: (p: NotificationPreferences) => NotificationPreferences) => void }) {
   return (
-    <div className="card">
-      <div className="section-title">{t("nset.answer.title")}</div>
+    <SetGroup title={t("nset.answer.title")}>
       <Row title={t("nset.quick")} desc={t("nset.quick.sub")} data-setting="notifications.quick_actions">
         <Switch checked={prefs.quick_actions} onChange={(quick_actions) => change((p) => ({ ...p, quick_actions }))} label={t("nset.quick")} />
       </Row>
       <Row title={t("nset.cover")} desc={t("nset.cover.sub")} data-setting="notifications.telegram_covers_push">
         <Switch checked={prefs.telegram_covers_push} onChange={(telegram_covers_push) => change((p) => ({ ...p, telegram_covers_push }))} label={t("nset.cover")} />
       </Row>
-    </div>
+    </SetGroup>
   );
 }
 
@@ -246,12 +243,11 @@ function Answering({ prefs, change }: { prefs: NotificationPreferences; change: 
 function PopupsCard() {
   const on = usePopupsShown();
   return (
-    <div className="card" data-popups-card>
-      <div className="section-title">{t("nset.popups.title")}</div>
+    <SetGroup title={t("nset.popups.title")} data-popups-card="">
       <Row title={t("nset.popups")} desc={t("nset.popups.sub")} data-setting="notifications.popups">
         <Switch checked={on} onChange={setPopupsShown} label={t("nset.popups")} />
       </Row>
-    </div>
+    </SetGroup>
   );
 }
 
@@ -269,38 +265,34 @@ function MutedProjects({ prefs, change }: { prefs: NotificationPreferences; chan
     return () => window.clearInterval(timer);
   }, []);
   const list = (projects.data ?? []).filter((p) => !p.system);
+  type Choice = "on" | "muted" | (typeof MUTE_ENDS)[number];
+  const mute = (projectId: string, choice: Choice) => {
+    if (choice === "muted") return;
+    change((p) => withMute(p, projectId, choice === "on" ? null : muteUntil(choice, new Date()), new Date()));
+  };
   return (
-    <div className="card" data-setting="notifications.muted_projects">
-      <div className="section-title">{t("nset.mute.title")}</div>
-      <div className="sub">{t("nset.mute.sub")}</div>
-      {projects.data && list.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("nset.mute.none")}</div>}
-      <div className="mlist">
-        {list.map((project) => {
-          const state = muteState(prefs, project.id, now);
-          return (
-            <div key={project.id} className="mrow nmute" data-project={project.id} data-muted={state.muted}>
-              <div className="mline noradio">
-                <div className="mmain">
-                  <span className="mtitle">{project.name}</span>
-                  <span className="mmeta">{state.muted ? (state.until ? t("nset.mute.until", { time: muteEnd(state.until, now) }) : t("nset.mute.forever")) : t("nset.mute.off")}</span>
-                </div>
-                <div className="mactions">
-                  {state.muted ? (
-                    <button className="btn small" onClick={() => change((p) => withMute(p, project.id, null, new Date()))}>{t("nset.mute.unmute")}</button>
-                  ) : (
-                    <div className="segmented inline" role="group" aria-label={t("nset.mute.group", { name: project.name })}>
-                      {MUTE_ENDS.map((end) => (
-                        <button key={end} onClick={() => change((p) => withMute(p, project.id, muteUntil(end, new Date()), new Date()))}>{t(`nset.mute.${end}`)}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <SetGroup title={t("nset.mute.title")} help={t("nset.mute.sub")} data-setting="notifications.muted_projects">
+      {projects.data && list.length === 0 && <SetBlock><span className="set-hint">{t("nset.mute.none")}</span></SetBlock>}
+      {list.map((project) => {
+        const state = muteState(prefs, project.id, now);
+        const muted = state.muted ? (state.until ? t("nset.mute.until", { time: muteEnd(state.until, now) }) : t("nset.mute.forever")) : t("nset.mute.off");
+        return (
+          <Row key={project.id} className="nmute" title={project.name} data-project={project.id} data-muted={String(state.muted)}>
+            <Select<Choice>
+              className="set-value"
+              label={t("nset.mute.group", { name: project.name })}
+              value={state.muted ? "muted" : "on"}
+              onChange={(choice) => mute(project.id, choice)}
+              options={[
+                state.muted ? { id: "muted" as const, label: muted, disabled: true } : { id: "on" as const, label: muted },
+                ...(state.muted ? [{ id: "on" as const, label: t("nset.mute.unmute") }] : []),
+                ...MUTE_ENDS.map((end) => ({ id: end, label: t(`nset.mute.${end}`) })),
+              ]}
+            />
+          </Row>
+        );
+      })}
+    </SetGroup>
   );
 }
 
@@ -317,6 +309,8 @@ function Devices({ toast }: { toast: (text: string) => void }) {
     void currentEndpoint().then(setMine);
   }, [devices.data]);
   async function remove(device: PushDevice) {
+    const name = device.device || shortAgent(device.user_agent) || t("nset.devices.unnamed");
+    if (!(await confirmDialog({ title: t("nset.devices.remove.title", { name }), body: t("nset.devices.remove.body"), action: t("common.remove"), danger: true }))) return;
     try {
       await api.delete(`/api/push/subscriptions/${device.id}`);
     } catch (e) {
@@ -327,44 +321,33 @@ function Devices({ toast }: { toast: (text: string) => void }) {
   }
   const list = devices.data?.subscriptions ?? [];
   return (
-    <div className="card" data-setting="notifications.devices">
-      <div className="section-title">{t("nset.devices.title")}</div>
-      <div className="sub">{t("nset.devices.sub")}</div>
-      {devices.error && <div className="sub push-error">{devices.error}</div>}
-      {devices.data && list.length === 0 && <div className="sub" style={{ marginTop: 8 }}>{t("push.test.nodevice")}</div>}
-      <div className="mlist">
-        {list.map((d) => {
-          const own = mine !== null && d.endpoint === mine;
-          return (
-            <div key={d.id} className="mrow ndevice" data-device={d.id}>
-              <div className="mline noradio">
-                <div className="mmain">
-                  <span className="mtitle">
-                    {d.device || shortAgent(d.user_agent) || t("nset.devices.unnamed")}
-                    {own && <span className="chip accent">{t("push.device")}</span>}
-                  </span>
-                  <span className="mmeta" title={d.user_agent}>
-                    {[
-                      d.last_ok_at ? t("nset.devices.lastok", { t: timeAgo(d.last_ok_at) }) : t("nset.devices.never"),
-                      d.failures > 0 ? plural("nset.devices.failures", d.failures) : "",
-                      shortAgent(d.user_agent),
-                    ].filter(Boolean).join(" · ")}
-                  </span>
-                  {d.failures > 0 && d.last_error && <span className="mmeta push-error">{d.last_error}</span>}
-                </div>
-                <div className="mactions">
-                  {own ? (
-                    <span className="sub">{t("nset.devices.thishint")}</span>
-                  ) : (
-                    <button className="btn small" onClick={() => void remove(d)}>{t("common.remove")}</button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <SetGroup title={t("nset.devices.title")} help={t("nset.devices.sub")} data-setting="notifications.devices">
+      {devices.error && <SetBlock><span className="push-error">{devices.error}</span></SetBlock>}
+      {devices.data && list.length === 0 && <SetBlock><span className="set-hint">{t("push.test.nodevice")}</span></SetBlock>}
+      {list.map((d) => {
+        const own = mine !== null && d.endpoint === mine;
+        return (
+          <Row
+            key={d.id}
+            className="ndevice"
+            data-device={String(d.id)}
+            title={<span className="mtitle">{d.device || shortAgent(d.user_agent) || t("nset.devices.unnamed")}{own && <Badge tone="accent">{t("push.device")}</Badge>}</span>}
+            desc={<>
+              <span title={d.user_agent}>
+                {[
+                  d.last_ok_at ? t("nset.devices.lastok", { t: timeAgo(d.last_ok_at) }) : t("nset.devices.never"),
+                  d.failures > 0 ? plural("nset.devices.failures", d.failures) : "",
+                  shortAgent(d.user_agent),
+                ].filter(Boolean).join(" · ")}
+              </span>
+              {d.failures > 0 && d.last_error && <span className="push-error"> {d.last_error}</span>}
+            </>}
+          >
+            {own ? <span className="set-hint">{t("nset.devices.thishint")}</span> : <Button size="sm" onClick={() => void remove(d)}>{t("common.remove")}</Button>}
+          </Row>
+        );
+      })}
+    </SetGroup>
   );
 }
 
@@ -383,18 +366,18 @@ function TestCard({ toast }: { toast: (text: string) => void }) {
     }
   }
   return (
-    <div className="card" data-setting="notifications.test">
-      <div className="section-title">{t("push.test")}</div>
-      <div className="sub">{t("push.test.sub")}</div>
-      <div className="btnrow">
-        <button className="btn small" disabled={testing} onClick={() => void test()}>{t("push.test.send")}</button>
-      </div>
+    <SetGroup data-setting="notifications.test">
+      <Row title={t("push.test")} desc={t("push.test.sub")}>
+        <Button size="sm" busy={testing} onClick={() => void test()}>{t("push.test.send")}</Button>
+      </Row>
       {lines && (
-        <ul className="push-test-result">
-          {lines.map((line, i) => <li key={i}>{line}</li>)}
-        </ul>
+        <SetBlock>
+          <ul className="push-test-result">
+            {lines.map((line, i) => <li key={i}>{line}</li>)}
+          </ul>
+        </SetBlock>
       )}
-    </div>
+    </SetGroup>
   );
 }
 
@@ -406,17 +389,15 @@ export function NotificationSettings({ toast }: { toast: (text: string) => void 
       <PopupsCard />
       {view ? (
         <>
-          <div className="card nmatrix-card" data-setting="notifications.matrix">
-            <div className="section-title">{t("nset.matrix.title")}</div>
-            <div className="sub">{t("nset.matrix.sub")}</div>
+          <SetGroup title={t("nset.matrix.title")} help={t("nset.matrix.sub")} data-setting="notifications.matrix">
             <Matrix prefs={view.preferences} categories={view.categories} onCell={(category, channel, cell) => change((p) => withCell(p, category, channel, cell))} />
-          </div>
+          </SetGroup>
           <QuietHours prefs={view.preferences} zone={view.zone} change={change} />
           <Answering prefs={view.preferences} change={change} />
           <MutedProjects prefs={view.preferences} change={change} />
         </>
       ) : (
-        <div className="card"><div className="sub">{error || t("common.loading")}</div></div>
+        <SetGroup><SetBlock><span className="set-hint">{error || t("common.loading")}</span></SetBlock></SetGroup>
       )}
       {/* Inside Telegram the bot is the push, and the app asks the host nothing about push there. */}
       {!telegram()?.initData && <Devices toast={toast} />}

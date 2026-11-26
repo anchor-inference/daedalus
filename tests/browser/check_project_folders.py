@@ -224,9 +224,9 @@ def scenario(page: Page, lang: str, unhandled: Unhandled, name: str) -> None:
     expect(choice).to_be_visible()
     # The site, the docs, the unmounted assets folder and the host folder, which a Daedalus agent now
     # works in through the host terminal daemon.
-    expect(choice.locator(".ph-mrow")).to_have_count(4)
+    expect(choice.locator(".menu-row")).to_have_count(4)
     # Unmounted, and the host folder while this installation has no host terminal daemon.
-    expect(choice.locator(".ph-mrow[disabled]")).to_have_count(2)
+    expect(choice.locator(".menu-row[disabled]")).to_have_count(2)
     if "/" in choice.inner_text():
         raise AssertionError(f"the folder choice shows a path: {choice.inner_text()!r}")
     if SHOTS:

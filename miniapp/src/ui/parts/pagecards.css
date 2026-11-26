@@ -1,0 +1,39 @@
+/* ── the blocks of a page that reports: a label over a card of rows ───────────────────────────
+   Usage, Health, Services and Harnesses are read, not filled in, so they share one vocabulary with
+   the settings sections: a 28 px label, a card with a 1 px line and a 12 px radius, rows of 44 (56 for
+   a row that leads a group). A state is a dot and its word, never a dot alone; the word is cyan when
+   the thing works, orange when it needs the operator, and grey when it is simply not running. */
+.pg-label { display: flex; align-items: center; gap: 12px; min-height: 28px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.pg-label:not(:first-child) { margin-top: 20px; }
+.pg-label > :first-child { flex: 1; min-width: 0; }
+.pg-label-note { font-weight: 400; }
+.pg-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.pg-row { display: flex; align-items: center; gap: 12px; min-height: var(--card-row-h); padding: 0 16px; box-sizing: border-box; font-size: var(--fs-14); }
+.pg-row + .pg-row { border-top: 1px solid var(--line); }
+.pg-row-title { flex: 1; min-width: 0; }
+
+/* A state as a dot and its word. `live` works, `attention` needs the operator, `idle` is off. */
+.pg-state { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); white-space: nowrap; }
+.pg-state .dot { width: var(--dot); height: var(--dot); animation: none; }
+.pg-state.live { color: var(--live); }
+.pg-state.live .dot { background: var(--live); }
+.pg-state.attention { color: var(--attention); }
+.pg-state.attention .dot { background: var(--attention); }
+.pg-state.idle .dot { background: var(--fg-3); }
+
+/* The key and value lines of a pane: the name in grey at the left, the value after it. */
+.pg-facts { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.pg-fact { display: flex; align-items: baseline; gap: 16px; min-height: 38px; padding: 8px 14px; box-sizing: border-box; font-size: var(--fs-14); }
+.pg-fact + .pg-fact { border-top: 1px solid var(--line); }
+.pg-fact-key { width: 140px; flex: none; font-size: var(--fs-13); color: var(--fg-2); }
+.pg-fact-value { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pg-fact-value.mono { font-family: var(--mono); font-size: var(--fs-mono); }
+
+@media (max-width: 1023px) {
+  /* The page's filters stand under its bar, level with the 16 px gutter every phone page keeps. */
+  .pagehead > .segmented.inline { margin: 4px var(--gutter) 8px; }
+  .screen.page-list.usage, .screen.page-list.health { padding-inline: var(--gutter); }
+  .pg-row { min-height: var(--set-row-h); }
+  .pg-fact { flex-direction: column; gap: 2px; }
+  .pg-fact-key { width: auto; }
+}

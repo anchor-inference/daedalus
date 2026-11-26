@@ -34,21 +34,27 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import (  # noqa: E402
     ATTACHED_PRESENTATION,
+    CALENDAR,
     DEFAULT_APP,
     FILE_TEXT,
     FOCUS_WORDS,
     GATES,
+    INBOX_PDF,
+    INBOX_SHOT,
+    PROPOSALS,
     VISION_DEFAULT,
     BoardStub,
     FocusStub,
     HarnessesStub,
     MainStub,
     MemoryStub,
+    PublicAddressStub,
     TeamStub,
     Unhandled,
     agent_usage,
     attached_media,
     attached_route,
+    attachment_entry,
     attachment_route,
     create_session,
     expect_app,
@@ -61,6 +67,7 @@ from api_stub import (  # noqa: E402
     session_tasks,
     session_tool_groups,
     terminal_agent,
+    terminal_load,
     worktree_route,
 )
 from schedule_stub import ScheduleStub  # noqa: E402
@@ -195,6 +202,12 @@ ANSWER = """The menu page is live and checked on a phone.
 - `menu.html` — the seasonal section reads from `data/menu.json`, so the owner edits one file
 - prices are formatted from the same JSON; no more hand-typed `€` in the markup
 - the hero image is 46 KB now (was 1.9 MB), same crop
+
+```javascript
+const price = (cents) =>
+  new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" })
+    .format(cents / 100);
+```
 
 **Checks**
 
@@ -332,6 +345,23 @@ def blocked_turn() -> list[dict]:
     ]
 
 
+ASK_KEY = "a5c0ffee0042"
+
+
+def asked_turn() -> list[dict]:
+    """The bakery chat waiting on the operator's word: the agent wants to copy the built site onto the
+    shop's server, a command outside the project's folders, and the policy asks (the host's words for
+    the question, which the app reads its card from)."""
+    deploy = {"command": "rsync -az dist/ deploy@shop:/var/www/menu/"}
+    said = (f"Refused: needs the operator's approval: {word('ask.reason')} (rule egress.allowlist). Approval key: {ASK_KEY}. "
+            "End your turn now; the operator answers on the card.")
+    return [
+        {"role": "user", "seq": 413, "text": word("ask.ask"), "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(minutes=2)},
+        {"role": "assistant", "seq": 414, "text": "", "thinking": "", "tool_calls": [{"id": "toolu_deploy", "name": "Exec", "arguments": deploy}], "tool_results": [], "created_at": ago(minutes=1, seconds=40)},
+        {"role": "tool", "seq": 415, "text": "", "thinking": "", "tool_calls": [], "tool_results": [{"id": "toolu_deploy", "content": said, "is_error": True}], "created_at": ago(minutes=1, seconds=38)},
+    ]
+
+
 def detail(id_: str) -> dict:
     s = next(x for x in SESSIONS if x["id"] == id_)
     messages = MESSAGES if id_ == S1 else MESSAGES_S2 if id_ == S2 else MESSAGES_S3 if id_ == S3 else subagent_messages(id_) if s["metadata"].get("subagent_of") == S1 else [{"role": "user", "seq": 1, "text": "Start.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}, {"role": "assistant", "seq": 2, "text": "Started. Waiting for the sheet.", "thinking": "", "tool_calls": [], "tool_results": [], "created_at": ago(hours=1)}]
@@ -349,12 +379,19 @@ def detail(id_: str) -> dict:
     blocked = id_ == S1 and getattr(stub, "blocked", False)
     if blocked:
         messages = [*messages, *blocked_turn()]
+    # The composer's approval card (``approval``): a deploy outside the project, waiting on the operator.
+    asked = id_ == S1 and getattr(stub, "approval", False) and not blocked
+    if asked:
+        messages = [*messages, *asked_turn()]
     helper = bool(s["metadata"].get("subagent_of"))
     running = (id_ == S1 and getattr(stub, "running", False)) or (helper and s["status"] == "running")
     status = "running" if running else "waiting" if id_ == S4 else "failed" if helper and s["status"] == "failed" else "idle"
     return {
         "id": id_, "title": s["title"], "status": status, "run_id": "r-modes" if running else None, "compacting": None,
-        "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [],
+        # When the run began (the host reads it live) and the branch of the folder; the second chat shares the first's.
+        # Every chat's folder is a repository: the changes stub answers each with the same listing.
+        "run_started_at": ago(minutes=7) if running else None, "branch": "main" if id_ in (S1, S2) else None, "repository": True,
+        "yagni": yagni, "open_approvals": [BLOCK_KEY] if blocked else [ASK_KEY] if asked else [],
         "workspace": workspace, "workspace_name": workspace.rsplit("/", 1)[-1], "workspace_own": s["workspace_own"],
         "project": project,
         "workspace_sessions": [{"id": S2, "title": "Bakery site: photos"}] if id_ == S1 else [{"id": S1, "title": "Bakery site"}] if id_ == S2 else [],
@@ -471,6 +508,63 @@ BOARD = [
     {"id": "51c8aa", "title": "Gallery: six square photos", "status": "done", "priority": 3, "acceptance": "Six photos in photos/gallery, 800×800.", "checklist": [{"text": "pick", "done": True}, {"text": "crop", "done": True}], "depends_on": [], "session_id": S2, "origin_session_id": S2, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=12)},
 ]
 
+BOARD += [
+    {"id": "a6f0d2", "title": "Seasonal items first on the menu page", "status": "doing", "priority": 3, "acceptance": "", "checklist": [{"text": "read the owner's sheet", "done": True}, {"text": "seasonal items on top", "done": True}, {"text": "prices from the sheet", "done": False}, {"text": "check on a phone", "done": False}], "depends_on": [], "session_id": S2, "origin_session_id": S2, "notes": "", "created_at": ago(hours=3), "updated_at": ago(minutes=4)},
+    {"id": "d17b90", "title": "Copy the build to the shop's server", "status": "doing", "priority": 3, "acceptance": "The form opens on the site and a test order reaches the sheet.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=1), "updated_at": ago(minutes=6)},
+    {"id": "5e2c77", "title": "Taste the new rye loaf before it goes on the menu", "status": "todo", "priority": 3, "acceptance": "", "checklist": [], "depends_on": ["7f2a1c"], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(hours=6), "updated_at": ago(hours=6)},
+    {"id": "b48e13", "title": "Square crops for the gallery thumbnails", "status": "todo", "priority": 4, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S2, "notes": "", "created_at": ago(days=1), "updated_at": ago(hours=20)},
+    {"id": "2f6b81", "title": "Show an error when an order does not go through", "status": "review", "priority": 3, "acceptance": "A failed order shows a line the buyer can read, and the order is not lost.", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=35)},
+    {"id": "8a1e55", "title": "Read the order form and the owner's sheet", "status": "done", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": S1, "origin_session_id": S1, "notes": "", "created_at": ago(hours=2), "updated_at": ago(minutes=58)},
+    {"id": "0c93fa", "title": "Old holiday banner", "status": "dropped", "priority": 3, "acceptance": "", "checklist": [], "depends_on": [], "session_id": None, "origin_session_id": S1, "notes": "", "created_at": ago(days=2), "updated_at": ago(days=1)},
+]
+
+_PROJECT_OF = {S1: P1, S2: P1, S3: P3}
+for _card in BOARD:
+    # The host puts the date, whether it is late, who keeps the card, its project and why it waits on
+    # the operator on every listing; the cards say nothing of them unless a picture needs it.
+    _card.setdefault("due_at", None)
+    _card.setdefault("overdue", False)
+    _card.setdefault("assignee_operator", False)
+    _card.setdefault("assignee", None)
+    _card.setdefault("entity_revision", 3)
+    _card.setdefault("needs_you", "review" if _card["status"] == "review" else None)
+    _card["project_id"] = _PROJECT_OF.get(_card["origin_session_id"] or "")
+    _card["project_name"] = next((p["name"] for p in PROJECTS if p["id"] == _card["project_id"]), None)
+BOARD[0]["due_at"] = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+BOARD[0]["brief"] = {"objective": "The order form writes to a file today. Each order should become a row in the owner's sheet, and the buyer should see that it went through.", "deliverable": "The form's handler and a confirmation page", "boundaries": "The sheet's columns stay as the owner made them", "done_when": ""}
+BOARD[3]["due_at"] = (datetime.now(UTC) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+BOARD[3]["overdue"] = True
+BOARD[3]["needs_you"] = "question"
+BOARD[3]["brief"] = {"objective": "Three customers asked what delivery costs next month. The answers wait for the courier's new rates, which only the operator can get.", "deliverable": "A reply to each of the three in the support inbox", "boundaries": "", "done_when": "Each customer has a reply"}
+BOARD[3]["checklist"] = [{"text": "draft the three replies", "done": True}, {"text": "put the new rates in", "done": False}, {"text": "send them", "done": False}]
+# The courier rates are the operator's own to find: nobody else will take the card.
+BOARD[4].update(assignee_operator=True, assignee={"kind": "operator"}, needs_you="assigned", due_at=(datetime.now(UTC) + timedelta(days=3)).strftime("%Y-%m-%dT23:59:59Z"))
+BOARD[5]["finished_by"] = {"session_id": S2, "title": "Bakery site: photos", "note": "Six photos cropped to 800×800 and saved in photos/gallery; the originals are kept beside them.", "at": ago(minutes=12)}
+BOARD[7]["needs_you"] = "approval"
+BOARD[8].update(assignee_operator=True, assignee={"kind": "operator"}, needs_you="assigned")
+
+# A card's stored events, oldest first, as ``GET /api/board/{id}/events`` lists them.
+BOARD_HISTORY = {
+    "7f2a1c": [
+        {"seq": 1, "type": "task.created", "at": ago(hours=2), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": None, "to": None, "text": "Created in todo"},
+        {"seq": 2, "type": "task.changed", "at": ago(hours=2), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Due", "due_at": BOARD[0]["due_at"]},
+        {"seq": 3, "type": "task.moved", "at": ago(minutes=40), "actor": {"kind": "agent", "id": f"session:{S1}", "name": "Bakery site"}, "from": "todo", "to": "doing", "text": "todo → doing"},
+        {"seq": 4, "type": "task.changed", "at": ago(minutes=20), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Priority P3 → P2", "field": "priority", "change": {"from": 3, "to": 2}},
+    ],
+    "9d0b12": [
+        {"seq": 11, "type": "task.created", "at": ago(hours=5), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Created in todo"},
+        {"seq": 12, "type": "task.moved", "at": ago(hours=4), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": "todo", "to": "blocked", "text": "todo → blocked"},
+        {"seq": 13, "type": "task.changed", "at": ago(hours=1), "actor": {"kind": "agent", "id": f"session:{S3}", "name": "Support inbox"}, "from": None, "to": None, "text": "Edited"},
+    ],
+    # A card older than the host's history table: its lines were rebuilt from what the card still
+    # carried, the creation without its column, and the pane says that earlier history was not recorded.
+    "51c8aa": [
+        {"seq": 21, "type": "task.created", "at": ago(days=12), "actor": {"kind": "system", "id": None, "name": None}, "from": None, "to": None, "text": "Created", "operation": None, "backfilled": True},
+        {"seq": 22, "type": "task.accepted", "at": ago(minutes=12), "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": None, "text": "Result accepted", "operation": None, "backfilled": True},
+    ],
+}
+BOARD[5]["created_at"] = ago(days=12)
+
 
 def notification(id: int, at: str, kind: str, category: str, level: str, tone: str, title: str, body: str, session_id: str | None, seen: bool, count: int = 1, *, project: str | None = None, actions: list | None = None, ref: str | None = None) -> dict:
     return {
@@ -482,9 +576,17 @@ def notification(id: int, at: str, kind: str, category: str, level: str, tone: s
 
 
 def buttons(*pairs: tuple[str, str, str]) -> list[dict]:
-    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick."""
-    return [{"id": i, "label": label, "style": style, "quick": i != "open"} for i, label, style in pairs]
+    """A request's buttons as the host words them (``id``, label, style); everything but Open is quick.
 
+    An answer says what it does, as the host's own producers write it; Open says nothing and has no key.
+    """
+    return [{"id": i, "label": label, "style": style, "quick": i != "open", **({"description": ABOUT[i.split(":")[0]]} if i.split(":")[0] in ABOUT else {})} for i, label, style in pairs]
+
+
+ABOUT = {
+    "en": {"allow": "Allows this one action, once, and the agent carries on.", "deny": "Keeps it refused; nothing runs.", "answer": "Answers the question with this option, and the run goes on."},
+    "ru": {"allow": "Разрешает это одно действие, один раз, и агент продолжает работу.", "deny": "Оставляет отказ в силе, ничего не выполняется.", "answer": "Отвечает на вопрос этим вариантом, и запуск продолжается."},
+}[LANG]
 
 # The host writes these in the operator's language; the Russian run gets the Russian words it would.
 NOTICE_WORDS = {
@@ -519,6 +621,8 @@ def notifications_view(view: str) -> list[dict]:
         return [e for e in INBOX if not e["seen"] and e["level"] != "quiet"]
     if view == "problems":
         return [e for e in INBOX if e["tone"] in ("warning", "error")]
+    if view == "done":
+        return [e for e in INBOX if e["category"] == "run_finished"]
     return INBOX
 
 
@@ -531,7 +635,6 @@ def notify_frames(*entries: dict) -> str:
         frames.append(f"id: {n}\nevent: notify\ndata: {json.dumps(event)}\n\n")
     return "".join(frames)
 
-PROPOSALS = [{"id": "p57", "repo": "daedalus", "branch": "bot/websearch-retry", "pr_number": 57, "pr_url": "https://github.com/example/daedalus/pull/57", "title": "WebSearch: retry a backend that timed out once before falling back", "summary": "A backend that answers 504 once is tried again after a second; only a second failure falls through to the next backend. Unit test added.", "status": "pending", "reason": None, "created_at": ago(minutes=20)}]
 
 # The Schedules screen's host: the realistic set of schedule_stub.py (long instructions, five cron
 # shapes, a failed run, a paused schedule, a finished one-off) in the picture's language. Its proposal
@@ -589,14 +692,14 @@ SETTINGS = {
     # Settings → Models: nothing known about any model's health yet, so no mark (check_model_health.py draws them).
     "model_health": {},
     # Settings → Navigation: the layout the app ships with.
-    "navigation": {"rail": [], "more": [], "drawer": [], "hidden": [], "icons": {}},
+    "navigation": {"pinned": [], "more": [], "hidden": [], "icons": {}},
     # Settings → Rules: the shipped levels with publishing raised to a question, so the grid shows a choice moved.
     "action_rules": {"levels": {"message": "auto", "publish": "ask", "payment": "ask", "delete": "auto", "external_write": "auto", "self_change": "auto"}, "review": ["message", "publish", "payment"], "review_preset": "", "review_timeout_seconds": 20.0, "injection_model": False, "injection_preset": ""},
     "model": {"preset": "deepseek-flash", "chain": ["deepseek-flash", "gpt-5.6-luna"], "auto_fallback": False, "fallback_to_session": True},
     "presets": {
-        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
-        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
-        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
+        "deepseek-flash": {"provider": "deepseek", "model": "deepseek-flash", "label": "DeepSeek Flash", "thinking": True, "reasoning_effort": "medium", "images": False, "favourite": True, "context_window": 128000, "context_window_source": "table", "max_output_tokens": 16384},
+        "claude-opus-5": {"provider": "claude", "model": "claude-opus-5", "label": "Claude Opus 5", "thinking": True, "reasoning_effort": "high", "images": True, "favourite": True, "context_window": 1000000, "context_window_source": "provider", "max_output_tokens": 32000},
+        "gpt-5.6-luna": {"provider": "opencode", "model": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "thinking": True, "reasoning_effort": "medium", "images": True, "favourite": True, "context_window": 200000, "context_window_source": "manual", "max_output_tokens": 32000},
         "qwen-local": {"provider": "vllm", "model": "Qwen3.8", "label": "Local Qwen3.8", "thinking": False, "reasoning_effort": "", "images": False, "context_window": 65536, "context_window_source": "provider", "max_output_tokens": 4096},
     },
     "on_demand_defaults": {"deepseek-flash": True, "claude-opus-5": True, "gpt-5.6-luna": True, "qwen-local": False},
@@ -619,7 +722,23 @@ SETTINGS = {
         "gpt-5.6-luna": {"provider": None, "catalog": 272000, "table": None, "error": None},
         "qwen-local": {"provider": 65536, "catalog": None, "table": None, "error": None},
     },
-    "providers": {}, "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
+    # Settings → Models and providers: the four endpoints the models run on. Claude is a subscription
+    # signed in through the key proxy, DeepSeek a key the proxy holds, OpenCode Go a prepaid plan whose
+    # key has not been given yet, and a vLLM server on this machine that needs no key.
+    "providers": {
+        "claude": {"kind": "claude", "base_url": "http://keyproxy:3200/claude", "timeout_seconds": 900, "billing": "subscription"},
+        "deepseek": {"kind": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "timeout_seconds": 600, "api_key_set": True},
+        "opencode": {"kind": "opencode", "name": "OpenCode Go", "base_url": "http://keyproxy:3200/opencode", "billing": "subscription", "timeout_seconds": 900},
+        "vllm": {"kind": "vllm", "name": "Local vLLM", "base_url": "http://127.0.0.1:8000/v1", "timeout_seconds": 600},
+    },
+    "provider_keys": {
+        "claude": {"via_proxy": True, "key_held": True, "key_kind": "cli_login", "ready": True},
+        "deepseek": {"via_proxy": True, "key_held": True, "key_kind": "api_key", "ready": True},
+        "opencode": {"via_proxy": True, "key_held": False, "key_kind": "api_key", "ready": False},
+        "vllm": {"via_proxy": False, "key_held": True, "key_kind": "endpoint", "ready": True},
+    },
+    "provider_kinds": ["claude", "deepseek", "openrouter", "opencode", "vllm", "llamacpp", "openai_compat"],
+    "prompt": {"rules": ""}, "vision": {"preset": "gpt-5.6-luna", "max_output_tokens": 800},
     "orchestrator": {"preset": "", "effort": "", "strongest": "claude-opus-5"},
     "asr": {"provider": "", "url": "", "api_key": "", "model": "", "language": "auto", "timeout_seconds": 60, "max_seconds": 120, "autosend": False},
     "tools": {"web": {"fetch_timeout_seconds": 30, "proxy": "", "user_agent": "", "fetch_max_chars": 40000, "search": {"backend": "searxng", "fallback": ["duckduckgo"], "results": 8, "timeout_seconds": 20, "searxng": {"url": "", "engines": "", "categories": "", "safesearch": 0}, "duckduckgo": {"url": "", "region": ""}, "serper": {"base_url": "", "gl": "", "hl": ""}, "keenable": {"base_url": "", "snippet_max_length": 0}, "tavily": {"base_url": "", "depth": ""}, "exa": {"base_url": "", "type": ""}, "perplexity": {"base_url": ""}}}, "exec": {"max_output_chars": 20000, "background_after_seconds": 120}},
@@ -882,6 +1001,40 @@ COMPONENTS = {
 # ---- the stub API -------------------------------------------------------------------------
 
 
+# Settings -> Public address is the native application's alone, so the section's own picture is taken as
+# one: the address stub answers while the page is the section's, and every other picture stays a server's.
+PUBLIC_ADDRESS = PublicAddressStub()
+
+_SETTINGS_BROWSER: list = []
+USER_CHROME = {"chrome": "c1", "connected": True, "profile_id": "c1", "profile_name": "Work", "ext_version": "0.1.0", "chrome_version": "141.0.7390.54", "platform": "linux",
+               "transport": "native", "since": "2026-10-20T09:00:00Z", "last_seen": "2026-10-20T09:59:58Z", "groups": 0, "tabs": 2}
+USER_CHROME_CARD = {
+    "configured": True, "enabled": True, "daemon": True, "reason": "", "detail": "", "relay": {"connected": True, "chromes": [USER_CHROME]}, "native": True,
+    "launcher": {"connector": {"registered": True}, "extension": {"path": "/data/browser-extension", "ready": True, "version": "0.1.0"}},
+    "launcher_error": "", "devices": [], "server_url": "", "consent": "The agent will work in your own Chrome, signed in as you. Every new site asks you first.",
+}
+
+
+def settings_browser():  # type: ignore[no-untyped-def]
+    """The agent's browser as Settings -> Environments, Browser and Browser safety read it: one running
+    browser, two profiles, and three site notes. Built on first use, since it needs the browser stub's
+    imaging libraries, which no other picture does."""
+    if not _SETTINGS_BROWSER:
+        from browser_stub import BrowserStub
+
+        bs = BrowserStub({})
+        bs.running = [{"env": "container", "id": "b1a2b3c4", "profile": f"project-{P1}", "started_at": ago(minutes=12), "rss_bytes": 318 << 20, "cpu_percent": 3.1, "tabs": 2,
+                       "memory_basis": "cgroup", "groups": [{"id": "g1", "owner": {"kind": "session", "id": S1, "label": "Bakery site"}, "url": "https://shop.example.com/", "title": "Rye flour"}]}]
+        bs.profiles = [
+            {"id": f"project-{P1}", "env": "container", "scope": "project", "project_id": P1, "session_id": None, "staff_id": None, "created_at": ago(days=6), "last_used_at": ago(minutes=2), "size_bytes": 21 << 20, "running": True},
+            {"id": "session-old", "env": "container", "scope": "session", "project_id": None, "session_id": "old", "staff_id": None, "created_at": ago(days=9), "last_used_at": ago(days=8), "size_bytes": 4 << 20, "running": False},
+        ]
+        bs.notes = [
+            {"id": "n1", "project_id": P1, "project": "Bakery", "host": "shop.example.com", "text": "Search answers only to Enter; the magnifier button does nothing.", "status": "proposed", "by": "agent:s1", "proposed_at": 1790600000, "approved_at": 0},
+            {"id": "n2", "project_id": "", "project": "", "host": "docs.example.org", "text": "The API reference is under Guides, not under Docs.", "status": "active", "by": "agent:s2", "proposed_at": 1790500000, "approved_at": 1790500600},
+        ]
+        _SETTINGS_BROWSER.append(bs)
+    return _SETTINGS_BROWSER[0]
 TEAM = _team()
 # The team page is a page of the project's focus mode, whose column also reads the project's board.
 TEAM_BOARD = BoardStub(next(p for p in PROJECTS if p["id"] == P1))
@@ -891,16 +1044,53 @@ def respond(route, body, *, content_type: str = "application/json", status: int 
     route.fulfill(status=status, content_type=content_type, body=body if isinstance(body, (bytes, str)) else json.dumps(body))
 
 
+def seed_secrets() -> None:
+    """What Settings → Security lists in the pictures: three secrets and a saved sign-in, once per run.
+
+    A store a check has filled already is left as it is."""
+    from api_stub import SECRETS
+
+    if SECRETS.items or SECRETS.logins or getattr(SECRETS, "pictured", False):
+        return
+    SECRETS.pictured = True  # type: ignore[attr-defined]
+    SECRETS.projects = [{"id": "p1", "name": "Home network"}]
+    SECRETS.seed("router_admin", scope_id="s1", scope_title="Router setup", note="ISP router web admin", used=(datetime.now(UTC) - timedelta(hours=5)).isoformat(), uses=3, by="BrowserAct")
+    SECRETS.seed("nas_ssh", scope="project", scope_id="p1", scope_title="Home network", note="NAS admin over SSH")
+    SECRETS.seed("release_token", scope_id="s2", scope_title="Release notes")
+    SECRETS.logins = [{"id": "l1", "site": "router.local", "name": "router.local", "created_at": "2026-10-28T09:00:00Z", "updated_at": "2026-10-28T09:00:00Z",
+                       "last_used_at": (datetime.now(UTC) - timedelta(days=2)).isoformat(), "uses": 4, "readable": True}]
+
+
 def stub(route) -> None:  # type: ignore[no-untyped-def]
     request = route.request
     url = request.url
     path = url.split("?", 1)[0]
     rel = path[path.index("/api/") :]
     params = parse_qs(urlsplit(url).query)
+    if rel == "/api/public-address" and request.method == "GET" and "/settings/address" in request.headers.get("referer", ""):
+        return respond(route, PUBLIC_ADDRESS.view)
+    if "/settings/" in request.headers.get("referer", "") and (rel.startswith("/api/browsers") or rel in ("/api/browser/user", "/api/workloads/load")):
+        if rel == "/api/browser/user":
+            return respond(route, USER_CHROME_CARD)
+        if rel == "/api/workloads/load":
+            from browser_stub import browser_load
+
+            return respond(route, {"terminals": terminal_load(), "browsers": browser_load(running=1), "together": None})
+        return settings_browser().route(route)
     if rel == "/api/pet/react" and request.method == "POST":
         return respond(route, {"line": "I'm here.", "emotion": "joy", "action": "wave", "prop": ""})
     # A worktree's pane and an attached document answer before the shared file routes, which would
     # otherwise take a worktree's search for the workspace's.
+    if request.method == "GET" and rel == f"/api/sessions/{S1}/policy/similar/{ASK_KEY}":
+        # What the approval card offers for the deploy: calls like it, for the bakery project.
+        return respond(route, {"similar": {"tool": "Exec", "rule": "egress.allowlist", "kind": "prefix", "value": "rsync", "hosts": ["shop"], "label": "rsync* (shop)"}, "server": None,
+                               "project": {"available": True, "project": {"id": PROJECTS[0]["id"], "name": PROJECTS[0]["name"]}}})
+    if request.method == "GET" and rel == f"/api/sessions/{S1}/attachments":
+        # The first chat's attachments: its operator's pictures and document, and a file the agent sent.
+        return respond(route, {"attachments": [
+            attachment_entry(S1, INBOX_SHOT, seq=2, at=ago(minutes=40)), attachment_entry(S1, INBOX_PDF, seq=2, at=ago(minutes=40)),
+            attachment_entry(S1, "weekly-report.csv", source="agent", seq=9, size=2048, mime="text/csv", at=ago(minutes=12), url=f"/api/sessions/{S1}/sent/toolu_send/download?path=weekly-report.csv"),
+        ]})
     served = worktree_route(rel, params) or attached_route(rel, params) or attachment_route(rel, params)
     if served is not None:
         return respond(route, served[1], content_type=served[0])
@@ -918,6 +1108,21 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, harnesses[1], status=harnesses[0])
     # The installation-wide Board lists BOARD below. The team's board also answers GET /api/board, and
     # asked first it answered with its own empty list, so the Board picture came out with no cards.
+    if request.method == "GET" and rel.startswith("/api/board/") and rel.endswith("/events"):
+        card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
+        if card is not None:
+            kept = BOARD_HISTORY.get(card["id"])
+            return respond(route, kept if kept is not None else [{"seq": 1, "type": "task.created", "at": card["created_at"], "actor": {"kind": "operator", "id": "operator:1", "name": None}, "from": None, "to": card["status"], "text": f"Created in {card['status']}"}])
+    if request.method == "PUT" and rel.startswith("/api/board/"):
+        # The host's word on a move, nothing stored: a card the operator keeps cannot start while what it
+        # waits for is unfinished, which is the refusal the pictures show.
+        card = next((t for t in BOARD if t["id"] == rel.split("/")[3]), None)
+        if card is not None:
+            posted = json.loads(request.post_data or "{}")
+            waits = any(other["status"] not in ("done", "dropped") for other in BOARD if other["id"] in card["depends_on"])
+            if posted.get("status") == "doing" and waits:
+                return respond(route, {"detail": "this task still has unfinished dependencies"}, status=409)
+            return respond(route, {"command": {"task_id": card["id"], "entity_revision": card["entity_revision"]}, "task": card})
     whole_board = rel == "/api/board" and request.method == "GET"
     team = TEAM.answer(request.method, rel, urlsplit(url).query, None) or (None if whole_board else TEAM_BOARD.answer(request.method, rel, urlsplit(url).query, None))
     if team is not None:
@@ -928,6 +1133,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         resolution = "answered" if action.startswith("answer") else action
         return respond(route, {"resolution": resolution, "notification": entry and {**entry, "resolved": resolution, "needs_you": False, "seen": True}})
     if request.method == "POST" and rel == "/api/notifications/seen":
+        return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
+    if request.method == "POST" and rel == "/api/notifications/unseen":
         return respond(route, {"marked": 0, "summary": INBOX_SUMMARY})
     if request.method == "POST" and rel.startswith("/api/sessions/") and rel.endswith("/command"):
         # A slash command answers with the chat's text, or — when a scene sets one — refuses as the
@@ -984,6 +1191,23 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     # Its quick agent's models, and the quick agents a running call looks for its helper among.
     if rel.startswith("/api/sessions/") and rel.endswith(("/quick-models", "/quick-agents")) and fulfil_shared(route):
         return None
+    # Settings → Models and providers: a provider's connection test, and Approvals' standing project rules,
+    # are the shared host's answers.
+    if rel.startswith("/api/providers/") and rel.endswith("/test") and fulfil_shared(route):
+        return None
+    if rel.startswith("/api/projects/") and "/approval-rules" in rel and fulfil_shared(route):
+        return None
+    if rel.startswith(("/api/calendar", "/api/planner")):
+        # A recipe's ``calendar_empty`` flag draws the planner with nothing on it.
+        CALENDAR.empty = bool(getattr(stub, "calendar_empty", False))
+        if fulfil_shared(route):
+            return None
+    if rel.startswith("/api/proposals"):
+        # A recipe's ``proposals_empty`` flag answers the list with nothing, and so does the empty inbox's scene:
+        # a waiting proposal is an inbox entry too.
+        PROPOSALS.empty = bool(getattr(stub, "proposals_empty", False) or getattr(stub, "inbox_empty", False))
+        if fulfil_shared(route):
+            return None
     if request.method != "GET":
         return respond(route, {"ok": True})
     if rel == "/api/events" and getattr(stub, "events", ""):
@@ -1014,6 +1238,8 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, {"user_id": 1, "via": "token"})
     if rel == "/api/auth/config":
         return respond(route, {"telegram": None, "pairing": True, "second_factor": bool(getattr(stub, "second_factor", False))})
+    if rel == "/api/secrets" or rel.startswith("/api/secrets/"):
+        seed_secrets()
     if rel == "/api/auth/totp":
         # On, with two recovery codes spent: the state the Security picture is of.
         return respond(route, {"enabled": True, "enrolling": False, "recovery_left": 8, "enabled_at": "2026-10-01T09:30:00+00:00"})
@@ -1025,6 +1251,13 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return respond(route, INTEGRATIONS)
     if rel == "/api/services":
         return respond(route, SERVICES_ALL)
+    if rel == "/api/sessions/search":
+        # The host's search by words and by meaning: a name or a project holding the words, and a few
+        # words that mean a chat without being in its name ("budget" is the expense tracker).
+        word = params.get("q", [""])[0].strip().lower()
+        by_meaning = {"budget": S6, "bread": S1, "invoice": S10}
+        found = [s | {"match": {"score": 1.0, "snippet": f"...{word}..."}} for s in SESSIONS if word and (word in s["title"].lower() or word in s["project"].lower() or by_meaning.get(word) == s["id"])]
+        return respond(route, {**listing("all"), "sessions": found, "semantic": True, "reason": "ready", "partial": False, "indexing": False})
     if rel.startswith("/api/sessions/"):
         parts = rel.split("/")
         sid = parts[3]
@@ -1070,6 +1303,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
             return respond(route, session_tool_groups())
         if tail.startswith(("tool-results/", "widgets/")) and fulfil_shared(route):
             return None
+        # The chat's working-tree changes, the panel's Changes tool: the shared host's two files on order-form.
+        if (tail.startswith("changes") or tail == "commit") and fulfil_shared(route):
+            return None
         return respond(route, {})
     if rel == "/api/usage/speed" and fulfil_shared(route):
         return None
@@ -1087,15 +1323,23 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         if answered is not None:
             return respond(route, answered[1], status=answered[0])
     if rel == "/api/board":
-        return respond(route, BOARD)
+        # ``session=`` is one chat's own board: the tasks that chat created; ``project=`` one project's.
+        chat = params.get("session", [""])[0]
+        project = params.get("project", [""])[0]
+        # A helper works on its leader's board: the host answers a helper's id with the leader's family.
+        leader = next((s["metadata"].get("subagent_of") for s in SESSIONS if s["id"] == chat), None) or chat
+        family = {leader, *(s["id"] for s in SESSIONS if s["metadata"].get("subagent_of") == leader)}
+        listed = [t for t in BOARD if (not chat or t["origin_session_id"] in family) and (not project or t["project_id"] == project)]
+        if params.get("include_done", ["0"])[0] != "1":
+            listed = [t for t in listed if t["status"] not in ("done", "dropped")]
+        return respond(route, listed)
     if rel == "/api/notifications/summary":
-        return respond(route, INBOX_SUMMARY)
+        return respond(route, {"unseen": 0, "needs_you": 0} if getattr(stub, "inbox_empty", False) else INBOX_SUMMARY)
     if rel == "/api/notifications":
+        # ``inbox_empty`` is a scene: a centre with nothing in it, for the empty state's picture.
+        if getattr(stub, "inbox_empty", False):
+            return respond(route, {"entries": [], "next_before": None, "summary": {"unseen": 0, "needs_you": 0}})
         return respond(route, {"entries": notifications_view(params.get("view", ["all"])[0]), "next_before": None, "summary": INBOX_SUMMARY})
-    if rel == "/api/proposals":
-        return respond(route, PROPOSALS)
-    if rel == "/api/proposals/p57/diff":
-        return respond(route, {"diff": "diff --git a/daedalus/search.py b/daedalus/search.py\n--- a/daedalus/search.py\n+++ b/daedalus/search.py\n@@ -41,2 +41,4 @@\n-    return await backend.search(query)\n+    try:\n+        return await backend.search(query)\n+    except TimeoutError:\n+        return await backend.search(query)\n"})
     if rel == "/api/schedules" or rel.startswith("/api/recurring/"):
         answered = SCHEDULE_HOST.answer(route.request.method, rel, json.loads(route.request.post_data or "{}") if route.request.method in ("POST", "PATCH") else None)
         if answered is not None:
@@ -1258,7 +1502,8 @@ WORDS = {
            "agent.name": "Night watch", "agent.task": "Every morning, read the night's log of the shop and tell me about new errors. Count them like this:",
            "settings.find": "subagent", "markup.note": "bigger",
            "block.ask": "Check the menu at a phone's width as well.", "block.reason": "the operator asked to check the menu, not to publish it",
-           "block.said": "The auto-review stopped the push; the card under this has Allow anyway if you want it out."},
+           "block.said": "The auto-review stopped the push; the card under this has Allow anyway if you want it out.",
+           "ask.ask": "Put the new menu on the shop's site.", "ask.reason": "a host outside the allowlist: shop"},
     "ru": {"steps": "8 шагов", "panel": "Панель", "access": "Доступ", "actions": "Действия с сессией", "details": "Сведения", "role": "Пишет страницу доставки",
            "permission": "ждёт разрешения · 1 мин", "answer": "Ответить", "checkout": "Оформление заказа", "q.note": "как прошлой весной",
            "queued": "Потом добавь в подвал часы работы из календаря магазина.", "steered": "На странице архива оставь старые цены.",
@@ -1266,7 +1511,8 @@ WORDS = {
            "agent.name": "Ночной дозор", "agent.task": "Каждое утро читай ночной лог магазина и сообщай о новых ошибках. Считай их так:",
            "settings.find": "субагент", "markup.note": "крупнее",
            "block.ask": "Проверь меню ещё и на ширине телефона.", "block.reason": "оператор просил проверить меню, а не публиковать его",
-           "block.said": "Автопроверка остановила публикацию; на карточке ниже есть «Разрешить всё равно», если она всё-таки нужна."},
+           "block.said": "Автопроверка остановила публикацию; на карточке ниже есть «Разрешить всё равно», если она всё-таки нужна.",
+           "ask.ask": "Выложи новое меню на сайт магазина.", "ask.reason": "адрес вне разрешённого списка: shop"},
 }
 
 
@@ -1361,9 +1607,20 @@ def expand_steps(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
+def open_tool(page: Page, tab: str, scope: str = ".panel") -> None:
+    """A tool of the panel on screen: its tab when it is open, else the "+" menu's row for it."""
+    tab_button = page.locator(f"{scope} .panel-tab[data-tab='{tab}']")
+    if tab_button.count():
+        tab_button.first.click()
+    else:
+        page.locator(f"{scope} .panel-add").first.click()
+        page.locator(f".panel-tools [data-tool='{tab}']").first.click()
+    page.wait_for_selector(f"{scope} .panel-tab.on[data-tab='{tab}']", timeout=5000)
+
+
 def open_panel_files(page: Page) -> None:
     """The panel on its Files tab: the workspace browser beside the conversation."""
-    page.locator(".panel-tab[data-tab='files']").click()
+    open_tool(page, "files")
     page.wait_for_selector(".panel-files .filerow", timeout=5000)
 
 
@@ -1381,17 +1638,16 @@ def phone_tool(page: Page, tile: str) -> None:
 
 
 def open_phone_panel(page: Page) -> None:
-    """On a phone the tabs open as a full sheet from the session's action menu."""
-    phone_tool(page, "details")
-    page.wait_for_selector(".panel-sheet .panel-tab", timeout=5000)
-    page.locator(".panel-sheet .panel-tab[data-tab='files']").click()
+    """On a phone the tools open as a full sheet from the session's action menu."""
+    phone_tool(page, "files")
+    page.wait_for_selector(".panel-sheet .panel-tab.on[data-tab='files']", timeout=5000)
     page.wait_for_selector(".panel-sheet .filerow", timeout=5000)
 
 
 def open_inspector(page: Page, section: str, scope: str = ".panel") -> None:
-    """Details is an inspector now: one line a section, and a press opens that section in place."""
-    page.locator(f"{scope} .panel-tab[data-tab='details']").first.click()
-    page.locator(f"{scope} [data-prop='{section}']").click()
+    """Details is an inspector: the facts, then one line a setting, and a press opens that setting in place."""
+    open_tool(page, "details", scope)
+    page.locator(f"{scope} [data-prop='{section}']").first.click()
 
 
 def open_tool_groups(page: Page) -> None:
@@ -1435,16 +1691,16 @@ def pick_a_model(page: Page) -> None:
 
 
 def open_drawer(page: Page) -> None:
-    """The phone's drawer: the two modes as a switch, the destinations, the projects and the recents."""
+    """The phone's drawer: the desktop's sidebar — its head, pinned rows, projects and chats, foot."""
     page.locator(".ph-menu:visible").first.click()
-    page.wait_for_selector(".ph-drawer-root.open .ph-nrow", timeout=5000)
+    page.wait_for_selector(".ph-drawer-root.open .sidebar .sb-nav", timeout=5000)
     page.wait_for_timeout(400)
 
 
 def open_more(page: Page) -> None:
     """The drawer's More sheet on a phone: the same launcher as the desktop's, as a sheet."""
     open_drawer(page)
-    page.locator(".ph-drawer-root.open [data-nav='more']").click()
+    page.locator(".ph-drawer-root.open [data-nav='menu']").click()
     page.wait_for_selector(".ph-more-sheet", timeout=5000)
     page.wait_for_timeout(300)
 
@@ -1462,10 +1718,10 @@ def scroll_to_accounts(page: Page) -> None:
 def scroll_to_voices(page: Page) -> None:
     """The settings body scrolls inside itself, so a full-page shot would still show only the top of it.
 
-    The synthesis picker is the last card in the Voice section; bringing it into view is what makes
-    the picture about the voices rather than about the recogniser above them.
+    The voice catalogue is the second group of the Voice section; bringing its rows into view is what
+    makes the picture about the voices rather than about the companion above them.
     """
-    page.locator(".stt-list").last.scroll_into_view_if_needed()
+    page.locator(".cat-row").last.scroll_into_view_if_needed()
     page.wait_for_timeout(400)
 
 
@@ -1494,29 +1750,29 @@ def open_phone_new_project(page: Page) -> None:
 
 def open_projects(page: Page) -> None:
     """The projects page beside the list already grouped by project: the folders in the column, the table in the conversation's place."""
-    # A picture before this one folds the sidebar, and folded there is only the rail: unfold it first.
+    # A picture before this one folds the sidebar, and folded there is only the corner's button: unfold it first.
     if not page.locator("nav.sidebar").count():
-        page.locator(".rail .rail-home.folded").click()
-    page.locator(".sidebar .project-chip").click()
-    page.wait_for_selector(".projects-row:not(.head)", timeout=5000)
+        page.locator(".sidebar-unfold").click()
+    page.locator(".sidebar [data-action='all-projects']").click()
+    page.wait_for_selector(".projects-row", timeout=5000)
 
 
 def open_hire(page: Page) -> None:
     # The team's header also links to the board; hiring is its primary action.
-    page.locator(".pagehead-actions .iconbtn.primary").click()
+    page.locator(".pagehead-actions .btn.primary").click()
     page.wait_for_selector(".staff-sheet .executor")
     page.locator("#staff-name").fill("Mira")
     page.locator("#staff-role").fill(word("role"))
 
 
 def open_menu(page: Page) -> None:
-    """The More launcher from the rail's foot: its search, the Frequent tiles and every destination with its count — over the conversation."""
-    page.locator(".rail [data-rail='menu']").click()
+    """The More launcher from the sidebar's More row: its search, the Frequent tiles and every destination with its count — over the conversation."""
+    page.locator(".sb-pinned-nav [data-nav='menu']").click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
 
 
 def fold_sidebar(page: Page) -> None:
-    """The sidebar folded away: the rail alone beside the conversation, its Home turned into the way to unfold."""
+    """The sidebar folded away: the conversation has the window, and a button in its corner brings the sidebar back."""
     page.keyboard.press("Control+\\")
     page.wait_for_timeout(400)
 
@@ -1687,7 +1943,7 @@ def agents_shots() -> int:
                 page.route("**/api/**", stub)
                 # A phone's folders are the Chats page's project sections (open unless closed by hand).
                 if mobile:
-                    shot(page, f"{prefix}{state}", "agents?view=chats", wait=".ph-row")
+                    shot(page, f"{prefix}{state}", "agents?view=chats", wait=".list-row")
                 else:
                     shot(page, f"{prefix}{state}", "agents", wait=".sb-row")
                 context.close()
@@ -1702,7 +1958,7 @@ def workspace_shots(page: Page) -> None:
         ("session-preview-code", "src/main.py", ".source-view"),
         ("session-preview-html", "site/index.html", ".html-frame"),
         ("session-preview-json", "data/sample.json", ".json-tree"),
-        ("session-preview-diff", "change.diff", ".diff-view"),
+        ("session-preview-diff", "change.diff", ".patch-view"),
     ]:
         shot(page, name, f"agents/{S1}?panel=preview&path={quote(path)}", wait=selector, settle=500)
 
@@ -1713,7 +1969,11 @@ def workspace_shots(page: Page) -> None:
         p.wait_for_selector(".panel-body.split .source-view")
 
     page.set_viewport_size({"width": 2560, "height": 1400})
+    # The tree stands beside the file only in a panel 720 px wide or more, which the default (at most
+    # 520) never is: the picture is of a panel the operator dragged wide.
+    page.evaluate("() => localStorage.setItem('daedalus.width.panel', '1100')")
     shot(page, "session-explorer-wide", f"agents/{S1}?panel=files", wait=".explorer-tree [data-path='src']", before=open_code_tree)
+    page.evaluate("() => localStorage.removeItem('daedalus.width.panel')")
     page.set_viewport_size(DESK)
 
 
@@ -1902,18 +2162,29 @@ def themed(page: Page) -> None:
 
 
 def terminals_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
-    """The Terminals screen: cards by project with the load bar in the header (desktop), or its list (phone)."""
+    """The Terminals page: the list beside two live panes, the tests and the dev server (desktop), or the
+    cards by project (phone)."""
     from terminal_stub import load_answer
 
     term = terminals_fleet()
     term.load = load_answer(total_gb=62, used_gb=21, terminals_gb=2.1, likely_mb=640)
+    if not prefix:
+        term.terms["m2devsrv0000"].busy = True
+        dock_tests(term, "m1tests00000")
+        term.emit("m2devsrv0000", DOCK_DEV)
     page = context.new_page()
     page.route("**/api/**", stub)
     term.install(page)
     themed(page)
-    page.goto(f"{BASE}/terminals?view=overview&token=t&scheme=dark&lang={LANG}")
-    page.wait_for_selector(".term-card .term-card-line, .ph-tcard .ph-tcard-term", timeout=15000)
-    page.wait_for_timeout(700)
+    if prefix:
+        page.goto(f"{BASE}/terminals?token=t&scheme=dark&lang={LANG}")
+        page.wait_for_selector(".ph-tcard .ph-tcard-term", timeout=15000)
+    else:
+        page.add_init_script("try { localStorage.setItem('daedalus.term.renderer', 'dom'); } catch (e) {}")
+        page.goto(f"{BASE}/terminals/m1tests00000?layout=2&panes=m1tests00000,m2devsrv0000&token=t&scheme=dark&lang={LANG}")
+        page.wait_for_selector(".tp-list .tp-row", timeout=15000)
+        page.wait_for_selector(".term-view[data-state='live']", timeout=15000)
+    page.wait_for_timeout(1200)
     page.screenshot(path=str(OUT / f"{prefix}terminals.png"))
     print(f"wrote {prefix}terminals")
     page.close()
@@ -1931,7 +2202,7 @@ WS_OPENCODE = (
 
 
 def terminals_workspace_shots(context, prefix: str = "") -> None:  # type: ignore[no-untyped-def]
-    """The Workspace: four live panes in a 2 × 2 grid with mixed states — tests that failed, a dev
+    """The page with four live panes in a 2 × 2 grid with mixed states — tests that failed, a dev
     server, a staff member working and one waiting for permission (desktop); the same four as one pane
     at a time with the switcher (phone)."""
     term = terminals_fleet()
@@ -1974,10 +2245,25 @@ def run_terminals() -> int:
     return UNHANDLED.report()
 
 
-def open_bell(page: Page) -> None:
-    """The bell's popover over the agents: what needs you, with its buttons, and the day's feed."""
-    page.locator(".sidebar .bell").click()
-    page.wait_for_selector(".bell-pop .needs-you .notice-row", timeout=5000)
+INBOX_READY = ".inbox-split, .ph-page"
+
+
+def open_inbox_entry(page: Page, notice: int) -> None:
+    """The entry's row pressed: its reading pane beside the list, with the buttons that answer it."""
+    page.locator(f".inbox-row[data-notice='{notice}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='n{notice}']", timeout=5000)
+
+
+def open_inbox_proposal(page: Page, proposal: str) -> None:
+    page.locator(f".inbox-row[data-proposal='{proposal}']").click()
+    page.wait_for_selector(f".inbox-pane[data-item='p{proposal}']", timeout=5000)
+
+
+def open_inbox_tab(page: Page, tab: str) -> None:
+    """One of the header's views: all, needs, problems or done."""
+    page.locator(f".inbox-tabs [data-tab='{tab}']").click()
+    page.wait_for_selector(f".inbox-tabs [data-tab='{tab}'].on", timeout=5000)
+    page.wait_for_timeout(300)
 
 
 def raise_toasts(page: Page) -> None:
@@ -1988,7 +2274,7 @@ def raise_toasts(page: Page) -> None:
 
 
 def run_notifications() -> int:
-    """The bell, the toasts and the Inbox as the centre, on a desktop and on a phone."""
+    """The toasts and the Inbox as the centre, on a desktop and on a phone."""
     OUT.mkdir(parents=True, exist_ok=True)
     finished = next(e for e in INBOX if e["id"] == 31)
     with sync_playwright() as p:
@@ -1996,8 +2282,13 @@ def run_notifications() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "bell", "agents", before=open_bell, settle=500)
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
+        shot(page, "inbox-question", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_entry(p, QUESTION["id"]), settle=500)
+        shot(page, "inbox-proposal", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_proposal(p, PROPOSALS.rows[0]["id"]), settle=500)
+        shot(page, "inbox-problems", "inbox", wait=INBOX_READY, before=lambda p: open_inbox_tab(p, "problems"), settle=500)
+        stub.inbox_empty = True  # type: ignore[attr-defined]
+        shot(page, "inbox-empty", "inbox", wait=".inbox-empty", settle=500)
+        stub.inbox_empty = False  # type: ignore[attr-defined]
         stub.events = notify_frames(finished, QUESTION, PERMISSION)  # type: ignore[attr-defined]
         shot(page, "toasts", f"agents/{S1}", wait=".chat-scroll .timeline", before=raise_toasts, settle=300)
         stub.events = ""  # type: ignore[attr-defined]
@@ -2080,7 +2371,7 @@ def run_focus() -> int:
         pid = focus.projects[0]["id"]
         shot(page, "project-focus", f"project/{pid}?panel=board", wait=".chat.in-project .event-card", before=open_focus_brief, settle=700)
         shot(page, "project-journal", f"project/{pid}/journal", wait=".journal-entry", settle=500)
-        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-head", settle=700)
+        shot(page, "project-staff", f"project/{pid}/s/sess-lev?panel=brief", wait=".staff-who", settle=700)
         asking = FocusStub.bakery(LANG)
         asking.questions_of_bakery(LANG)
         page = desk.new_page()
@@ -2260,8 +2551,8 @@ def phone_project_shots(context) -> None:  # type: ignore[no-untyped-def]
     page = context.new_page()
     page.route("**/api/**", focus_stub(focus))
     pid = focus.projects[0]["id"]
-    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .ph-btn", settle=700)
-    shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .ph-row", settle=700)
+    shot(page, "phone-project", f"project/{pid}/team", wait=".needs-card .needs-row .btn", settle=700)
+    shot(page, "phone-board", f"project/{pid}/board", wait=".ph-board .list-row", settle=700)
     shot(page, "phone-orchestrator", f"project/{pid}", wait=".chat.in-project .event-card", settle=900)
     page.close()
 
@@ -2290,9 +2581,9 @@ def staff_stand(context, *, browse: bool = False, aside: int | None = None):  # 
 
 
 def open_harness_rows(page: Page) -> None:
-    """Claude Code's row unfolded to its agents, as M7 draws it."""
+    """Claude Code's row opened beside the list: its agents with where each is defined."""
     page.locator(".harness-row[data-harness='claude'] .harness-name").click()
-    page.wait_for_selector(".harness-row-details .harness-agent", timeout=5000)
+    page.wait_for_selector(".harness-details .harness-agent", timeout=5000)
 
 
 def run_harnesses() -> int:
@@ -2303,12 +2594,12 @@ def run_harnesses() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "harnesses", "harnesses", wait=".harness-table .harness-row", before=open_harness_rows, settle=500)
+        shot(page, "harnesses", "harnesses", wait=".harness-row", before=open_harness_rows, settle=500)
         desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page = phone.new_page()
         page.route("**/api/**", stub)
-        shot(page, "phone-harnesses", "harnesses", wait=".harness-cards .harness-card", settle=500)
+        shot(page, "phone-harnesses", "harnesses", wait=".harness-row", settle=500)
         phone.close()
         browser.close()
     return UNHANDLED.report()
@@ -2358,7 +2649,7 @@ def run_staff() -> int:
             desk.close()
         phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
         page, pid = staff_stand(phone)
-        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ph-ask .ph-btn", settle=900)
+        shot(page, "phone-staff-feed", f"project/{pid}/staff/st-ira", wait=".staff-request .ph-ask .btn", settle=900)
         phone.close()
         browser.close()
     return UNHANDLED.report()
@@ -2379,7 +2670,7 @@ def pins_shots(browser) -> None:  # type: ignore[no-untyped-def]
         page = phone.new_page()
         page.route("**/api/**", stub)
         shot(page, "phone-drawer-pins", "agents", wait=".ph-home", before=open_drawer)
-        shot(page, "phone-chats-pins", "agents?view=chats", wait="[data-pinned] .ph-row")
+        shot(page, "phone-chats-pins", "agents?view=chats", wait="[data-pinned] .list-row")
         phone.close()
     finally:
         PINS.clear()
@@ -2442,14 +2733,14 @@ def run() -> int:
         shot(page, "team", f"project/{P1}/team", wait=".staff-row")
         shot(page, "team-hire", f"project/{P1}/team", wait=".staff-row", before=open_hire, settle=700)
         # The start canvas under a folded sidebar has neither a list nor a chat, so waiting for
-        # either timed out here and stopped every picture after this one; the rail is there either
-        # way, and the switcher opens from the sidebar it unfolds.
-        shot(page, "projects", "agents", wait=".rail", before=open_projects)
-        shot(page, "new-project", "agents", wait=".rail", before=open_new_project, settle=600)
+        # either timed out here and stopped every picture after this one; the sidebar or its corner's
+        # button is there either way, and the projects open from the sidebar it unfolds.
+        shot(page, "projects", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_projects)
+        shot(page, "new-project", "agents", wait="nav.sidebar, .sidebar-unfold", before=open_new_project, settle=600)
         shot(page, "voice", "companion")
-        shot(page, "voice-settings", "settings/voice", wait=".stt-list .stt-card", before=scroll_to_voices, settle=700)
+        shot(page, "voice-settings", "settings/voice", wait=".cat-row", before=scroll_to_voices, settle=700)
         shot(page, "board", "board")
-        shot(page, "inbox", "inbox")
+        shot(page, "inbox", "inbox", wait=INBOX_READY)
         shot(page, "cron", "schedules")
         shot(page, "services", "services")
         shot(page, "usage", "usage", settle=1500)
@@ -2457,8 +2748,8 @@ def run() -> int:
         shot(page, "memory", "memory")
         # Settings is a popup over the screen it was opened from, on its first section; it has no
         # `.screen` of its own to wait for.
-        shot(page, "settings", "settings", wait=".settings-stage")
-        shot(page, "components", "settings/components", wait=".comp-grid .comp-card", settle=500)
+        shot(page, "settings", "settings", wait=".settings-page")
+        shot(page, "components", "settings/components", wait=".comp-item .comp-row", settle=500)
         shot(page, "settings-notifications", "settings/notifications", wait=".nmatrix", settle=600)
         # Terminals and the browser are one Environments page; the picture keeps its name for the docs.
         shot(page, "settings-terminals", "settings/environments", wait=".loadbar-track", settle=600)
@@ -2499,9 +2790,9 @@ def run() -> int:
         shot(page, "phone-health", "health", settle=900)
         shot(page, "phone-more", "agents", before=open_more)
         shot(page, "phone-drawer", "agents", wait=".ph-home", before=open_drawer)
-        shot(page, "phone-chats", "agents?view=chats", wait=".ph-row")
+        shot(page, "phone-chats", "agents?view=chats", wait=".list-row")
         shot(page, "phone-new-project", "agents", wait=".ph-page", before=open_phone_new_project, settle=600)
-        shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .ph-row")
+        shot(page, "phone-team", f"project/{P1}/team", wait="[data-staff] .list-row")
         shot(page, "phone-settings-notifications", "settings/notifications", wait=".nrows .nrow", before=open_first_kind, settle=500)
         shot(page, "phone-settings-tools", "settings/tools", wait=".tgroups .tgroup", settle=500)
         shot(page, "phone-session-tool-groups", f"agents/{S1}", wait=".chat-scroll .timeline", before=open_phone_tool_groups, settle=300)
@@ -2556,7 +2847,7 @@ def run_notes() -> int:
         page.evaluate("document.querySelectorAll('.ne-read .note-img').forEach((el) => el.classList.add('loaded'))")
 
     def chat_tab(page: Page) -> None:
-        page.locator(".notes-subtab[data-scope='chat']").click()
+        page.locator(".notes-subtabs .tab[data-tab='chat']").click()
 
     def shelf(page: Page) -> None:
         page.locator(".notes-shelf-toggle").click()
@@ -2570,7 +2861,7 @@ def run_notes() -> int:
         page.locator(".ne-field").press("Control+End")
         page.keyboard.press("Enter")
         page.keyboard.type("Menu photos on the home page" if LANG != "ru" else "Фото меню на главной")
-        page.wait_for_selector(".ne-conflict", timeout=5000)
+        page.wait_for_selector(".dialog.wide .ne-diff", timeout=5000)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=CHROMIUM)
@@ -2657,7 +2948,7 @@ def run_canvas() -> int:
             page = desk.new_page()
             page.route("**/api/**", answer)
             open_board(page)
-            page.get_by_role("button", name="Комментарий" if ru else "Comment").click()
+            page.get_by_role("radio", name="Комментарий" if ru else "Comment").click()
             frame = page.locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             inner = page.frame_locator(".cv-node[data-node='menu'] iframe.cv-frame-page")
             hero = inner.locator("#hero").evaluate("(node) => { const box = node.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; }")
@@ -2665,7 +2956,7 @@ def run_canvas() -> int:
             assert box is not None
             scale = box["width"] / frame.evaluate("(node) => node.offsetWidth")
             page.mouse.click(box["x"] + hero["x"] * scale, box["y"] + hero["y"] * scale)
-            note = page.locator(".cv-pick-note")
+            note = page.locator(".cv-pick")
             note.wait_for(timeout=5000)
             note.locator("textarea").fill("Крупнее и теплее" if ru else "Larger, and a warmer brown")
             note.get_by_role("button", name="Добавить" if ru else "Add").click()
@@ -2673,7 +2964,7 @@ def run_canvas() -> int:
             if toggle.count():
                 toggle.click()
             page.locator(".cv-comment textarea").fill("Сделай заголовок как на вывеске" if ru else "Make the heading look like the shop sign")
-            # Off the rail, whose tooltips would otherwise sit in the picture.
+            # Off the sidebar, whose tooltips would otherwise sit in the picture.
             page.mouse.move(1300, 840)
             page.wait_for_timeout(700)
             page.screenshot(path=str(OUT / "canvas.png"))
@@ -2725,9 +3016,9 @@ def run_features() -> int:
         shot(page, "agent-link", f"agents/{S1}", wait=".chat-scroll .timeline", before=agent_link, settle=700)
 
         def find_setting(pg: Page) -> None:
-            pg.locator(".settings-dialog input[type='search'], .settings-dialog input").first.fill(word("settings.find"))
+            pg.locator(".settings-page .settings-search").first.fill(word("settings.find"))
 
-        shot(page, "settings-search", "settings", wait=".settings-stage", before=find_setting, settle=900)
+        shot(page, "settings-search", "settings", wait=".settings-page", before=find_setting, settle=900)
 
         def new_agent(pg: Page) -> None:
             pg.locator(".start-agent-name").fill(word("agent.name"))
@@ -2787,10 +3078,10 @@ def run_features() -> int:
             try_on_host(card)
             card.locator("[data-mcp-server='files']").evaluate("(row) => row.scrollIntoView({ block: 'start' })")
 
-        shot(page, "settings-mcp", "settings/mcp", wait=".settings-stage", before=mcp_settings, settle=700)
+        shot(page, "settings-mcp", "settings/mcp", wait=".settings-page", before=mcp_settings, settle=700)
 
         def review_block(pg: Page) -> None:
-            pg.wait_for_selector('.composer .dock.approval[data-kind="blocked"]', timeout=10000)
+            pg.wait_for_selector('.composer .approval-card[data-kind="blocked"]', timeout=10000)
 
         stub.blocked = True  # type: ignore[attr-defined]
         try:
@@ -2805,10 +3096,11 @@ def run_features() -> int:
 
 
 def run_selfdev() -> int:
-    """Capture the current Changes screen over the same invented proposal as the Inbox."""
-    def open_diff(page: Page) -> None:
-        page.locator(".proposal-sheet [role=tab]").nth(1).click()
-        page.wait_for_selector(".proposal-sheet pre.diff")
+    """Capture the Changes screen over the invented proposals: the list, a change set open for review
+    in both views, a two-thousand-line diff, a decided one and an empty list."""
+    def split(page: Page) -> None:
+        page.get_by_role("radio", name="Split" if LANG == "en" else "Рядом").click()
+        page.wait_for_selector(".dp-body.split")
 
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -2816,9 +3108,17 @@ def run_selfdev() -> int:
         desk = browser.new_context(viewport=DESK, device_scale_factor=2, color_scheme="dark")
         page = desk.new_page()
         page.route("**/api/**", stub)
-        shot(page, "changes", "changes", wait=".proposal.erow")
-        shot(page, "changes-summary", "changes/p57", wait=".proposal-sheet")
-        shot(page, "changes-diff", "changes/p57", wait=".proposal-sheet", before=open_diff)
+        shot(page, "changes-list", "changes", wait=".proposal.erow")
+        shot(page, "changes", "changes/p57", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-large", "changes/p58", wait=".review .dp-line, .review .dp-pair")
+        shot(page, "changes-decided", "changes/p55", wait=".review .dp-line, .review .dp-pair")
+        # The layout is remembered in the browser, so the split view goes last of the ones that read lines.
+        shot(page, "changes-split", "changes/p57", wait=".review .dp-line, .review .dp-pair", before=split)
+        stub.proposals_empty = True  # type: ignore[attr-defined]
+        try:
+            shot(page, "changes-empty", "changes", wait=".empty")
+        finally:
+            stub.proposals_empty = False  # type: ignore[attr-defined]
         desk.close()
         browser.close()
     return UNHANDLED.report()
@@ -2879,9 +3179,9 @@ def run_imports() -> int:
         desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', 'details'); } catch (e) {}")
         page = desk.new_page()
         page.route("**/api/**", route)
-        shot(page, "import-explorer", "agents", wait=".rail", before=explorer, settle=600)
-        shot(page, "import-large", "agents", wait=".rail", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
-        shot(page, "import-progress", "agents", wait=".rail", before=progress, settle=400)
+        shot(page, "import-explorer", "agents", wait="nav.sidebar, .sidebar-unfold", before=explorer, settle=600)
+        shot(page, "import-large", "agents", wait="nav.sidebar, .sidebar-unfold", before=lambda pg: explorer(pg, "7be05d41"), settle=600)
+        shot(page, "import-progress", "agents", wait="nav.sidebar, .sidebar-unfold", before=progress, settle=400)
         imports.hold = None
         shot(page, "import-session", f"agents/{IMPORTED_ID}", wait=".imp-banner", settle=900)
         desk.close()
@@ -2932,7 +3232,6 @@ def run_browser() -> int:
         page.goto(f"{BASE}/agents/{S1}?panel=browser&token=t&scheme=dark&lang={LANG}")
         page.wait_for_selector(".panel .bp .bv[data-state='live']", timeout=15000)
         wait_frames(page, ".panel .bp", 1)
-        page.locator(".panel .bp-log-head").click()
         page.wait_for_timeout(500)
         bs.act("g1", "type", "search", name="Search", element="the shop's search field", text_len=15, text="whole rye flour")
         page.wait_for_timeout(280)
@@ -3017,17 +3316,17 @@ def run_browser() -> int:
 
 
 def open_toggles(page: Page) -> None:
-    """The composer's toggles chip, opened: the YAGNI and autopilot switches."""
-    if not page.locator(".composer .composer-mode").is_visible():
+    """The composer's access chip, opened: full access, YAGNI and autopilot, and the agent's language."""
+    if not page.locator(".composer .composer-access").is_visible():
         open_phone_composer(page)
-    page.locator(".composer .composer-mode").click()
-    page.wait_for_selector(".mode-menu .mode-row, .mode-sheet .mode-row", timeout=5000)
+    page.locator(".composer .composer-access").click()
+    page.wait_for_selector(".menu.access-menu .menu-row", timeout=5000)
 
 
 def open_phone_composer(page: Page) -> None:
     # The phone hides its toolbar until there is a draft, so an empty field makes an invisible chip.
     page.locator(".composer .composer-field").fill("Write the delivery page.")
-    page.wait_for_selector(".composer .composer-mode:visible")
+    page.wait_for_selector(".composer .composer-access:visible")
 
 
 def queued_messages() -> list[dict]:
@@ -3038,7 +3337,7 @@ def queued_messages() -> list[dict]:
 
 
 def run_modes() -> int:
-    """The toggles chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
+    """The access chip and its menu, with YAGNI on, on a desktop and on a phone, and the card a message
     written during a run waits in (``ONLY=modes``)."""
     OUT.mkdir(parents=True, exist_ok=True)
     stub.yagni = True  # type: ignore[attr-defined]
@@ -3049,7 +3348,7 @@ def run_modes() -> int:
             desk.add_init_script("try { localStorage.setItem('daedalus.session.panel', '0'); } catch (e) {}")
             page = desk.new_page()
             page.route("**/api/**", stub)
-            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-mode", before=open_toggles)
+            shot(page, "composer-modes", f"agents/{S1}", wait=".composer .composer-access", before=open_toggles)
             desk.close()
             phone = browser.new_context(viewport=PHONE, device_scale_factor=3, color_scheme="dark", is_mobile=True, has_touch=True)
             page = phone.new_page()

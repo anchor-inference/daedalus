@@ -6,25 +6,20 @@ import { t } from "./i18n";
 import { usePush } from "./push";
 import { pathFor } from "./router";
 import { go, useMedia } from "./shell";
+import { Row, SetBlock, SetGroup } from "./settingsrow";
+import { Button } from "./ui/primitives";
 
 export function PushCard() {
   const { state, busy, error, enable, disable } = usePush();
   return (
-    <div className="card push-card" data-push-state={state ?? "loading"} data-setting="notifications.push">
-      <div className="section-title">{t("push.device")}</div>
-      <div className="sub">{state === null ? t("common.loading") : t(`push.state.${state}`)}</div>
-      {state === "needs-home-screen" && <ol className="push-steps"><li>{t("push.ios.share")}</li><li>{t("push.ios.add")}</li><li>{t("push.ios.open")}</li></ol>}
-      {(state === "off" || state === "on") && (
-        <div className="btnrow">
-          {state === "off" ? (
-            <button className="btn primary small" disabled={busy} onClick={() => void enable()}>{t("push.enable")}</button>
-          ) : (
-            <button className="btn small" disabled={busy} onClick={() => void disable()}>{t("push.disable")}</button>
-          )}
-        </div>
-      )}
-      {error && <div className="sub push-error">{error}</div>}
-    </div>
+    <SetGroup title={t("push.device")} className="push-card" data-push-state={state ?? "loading"} data-setting="notifications.push">
+      <Row title={t("push.title")} desc={state === null ? t("common.loading") : t(`push.state.${state}`)}>
+        {state === "off" && <Button variant="primary" size="sm" busy={busy} onClick={() => void enable()}>{t("push.enable")}</Button>}
+        {state === "on" && <Button size="sm" busy={busy} onClick={() => void disable()}>{t("push.disable")}</Button>}
+      </Row>
+      {state === "needs-home-screen" && <SetBlock><ol className="push-steps"><li>{t("push.ios.share")}</li><li>{t("push.ios.add")}</li><li>{t("push.ios.open")}</li></ol></SetBlock>}
+      {error && <SetBlock><span className="push-error">{error}</span></SetBlock>}
+    </SetGroup>
   );
 }
 

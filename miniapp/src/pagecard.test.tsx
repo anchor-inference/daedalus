@@ -89,6 +89,13 @@ describe("the card", () => {
     expect(window.location.pathname + window.location.search).toBe("/app/p/cad?draft=1");
   });
 
+  it("draws a path the sidebar would refuse as the page's named icon, not as a glyph", async () => {
+    prime("/api/pages/wide", detail("wide", { icon: "board", icon_path: "M4 4h1000v1000H4z" }));
+    await act(async () => root.render(<PageCards pages={[{ callId: "c5", slug: "wide", draft: false }]} />));
+    expect(host.querySelector(".artifact-glyph .ic-custom")).toBeNull();
+    expect(host.querySelector(".artifact-glyph .ic-board")).not.toBeNull();
+  });
+
   it("falls back to the grid icon for an icon the app does not have", async () => {
     prime("/api/pages/x", detail("x", { icon: "no-such-icon", version: null }));
     await act(async () => root.render(<PageCards pages={[{ callId: "c3", slug: "x", draft: false }]} />));

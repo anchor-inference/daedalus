@@ -1,85 +1,127 @@
-/* The right panel's frame (panelhost.tsx), its state strip (panelstrip.tsx) and the Details inspector
-   (details.tsx). This file is bundled before ui/styles.css, so a rule that replaces one of the older
-   panel rules there is written one class more specific rather than relying on the order. */
+/* The right panel's frame (panelhost.tsx), its "+" menu, the Overview (paneloverview.tsx), the tools
+   that live only here (panelpanes.tsx) and the Details inspector (details.tsx). This file is bundled
+   before ui/styles.css, so a rule that replaces one of the older panel rules there is written one class
+   more specific rather than relying on the order. */
 
-/* The strip over every tab: the model on one line, the context and the cost on the next, the context's
-   bar under both. It is the first thing in the column so the two numbers are read before the tabs. */
-.panel-strip { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 10px 12px; border-bottom: 1px solid var(--line); }
-.panel-strip-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* The model is a filled chip, the value trigger of a toolbar: outlined and round it read as a tag
-   beside the effort's tag rather than as the one thing in the strip that opens a picker. */
-.panel-strip-model { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: var(--ctl-h-sm); padding: 0 8px; border: 0; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-13); font-weight: 500; cursor: pointer; transition: background var(--t-fast) var(--ease-out); }
-.panel-strip-model.static { cursor: default; }
-.panel-strip-model .ic { flex: none; color: var(--fg-3); }
-.panel-strip-model:hover:not(.static), .panel-strip-model[aria-expanded="true"] { background: var(--surface-3); }
-.panel-strip-model:focus-visible, .panel-strip-context:focus-visible, .panel-strip-cost:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.panel-strip-effort { flex: none; }
-.panel-strip-figures { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; row-gap: 5px; padding-right: 4px; }
-.panel-strip-context, .panel-strip-cost { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.panel-strip-context:disabled, .panel-strip-cost:disabled { cursor: default; }
-.panel-strip-context b, .panel-strip-cost b { color: var(--fg); font-size: var(--fs-13); font-weight: 500; }
-.panel-strip-context b.attn { color: var(--warn); }
-.panel-strip-context b.bad { color: var(--bad); }
-.panel-strip-context:hover:not(:disabled) span, .panel-strip-cost:hover:not(:disabled) span { color: var(--fg); }
-.panel-strip-bar { grid-column: 1 / -1; }
-.panel-strip .panel-strip-bar.dt-segbar { height: 4px; gap: 1px; background: var(--surface-3); }
-.panel-strip-bar.solo { height: 4px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
-.panel-strip-bar.solo i { display: block; height: 100%; background: var(--data-context); }
-.panel-strip-bar.solo.attn i { background: var(--warn); }
-.panel-strip-bar.solo.bad i { background: var(--bad); }
+/* The tab row: the header's height, so the line under it meets the line under the conversation's
+   header. The tabs are pills on the panel's own surface, the open one filled; a tab's count is quiet
+   text beside its word, not a badge, so a row of five tabs reads as five words. */
+.panel .panel-tabs, .panel-sheet .panel-tabs { gap: 2px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
+.panel .panel-tabs { height: var(--head-h); }
+.panel .panel-tablist, .panel-sheet .panel-tablist { flex: 0 1 auto; align-items: center; gap: 2px; }
+.panel-tabwrap { position: relative; flex: none; display: inline-flex; align-items: center; border-radius: var(--radius-sm); }
+.panel .panel-tab, .panel-sheet .panel-tab { height: var(--ctl-h); gap: 7px; padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out); }
+.panel .panel-tab:hover, .panel-sheet .panel-tab:hover { background: var(--hover); color: var(--fg); }
+.panel .panel-tab.on, .panel-sheet .panel-tab.on { background: var(--selected); color: var(--fg); font-weight: 500; }
+.panel .panel-tab.on::after, .panel-sheet .panel-tab.on::after { content: none; }
+.panel .panel-tab .count, .panel-sheet .panel-tab .count { min-width: 0; padding: 0; background: none; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; line-height: 1; }
+.panel .panel-tab .count.attn, .panel-sheet .panel-tab .count.attn { color: var(--attention); font-weight: 500; }
+/* The open tool's × sits inside its pill; the pill keeps room for it, so the word never runs under it. */
+.panel .panel-tablist .panel-tabwrap.closable .panel-tab, .panel-sheet .panel-tablist .panel-tabwrap.closable .panel-tab { padding-right: 28px; }
+.panel-tab-close { position: absolute; right: 6px; top: 50%; translate: 0 -50%; display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--fg-3); cursor: pointer; }
+.panel-tab-close:hover { background: var(--hover); color: var(--fg); }
+.panel-add { flex: none; }
+.panel-add.on { background: var(--selected); color: var(--fg); }
+.panel .panel-actions { display: flex; gap: 2px; }
+.panel .panel-tablist.fit-icons .panel-tab, .panel .panel-tablist.fit-active .panel-tab:not(.on) { padding: 0 8px; }
 
-/* The tabs of a desktop column: the icon over the word, the way an app's tab bar reads, so six named
-   tabs fit in the panel's 360–420 px where a row of "icon word" pairs needed about 600 and fell back
-   to icons alone. The measured fits (panelhost.tsx, useTabFit) still step down to the words, the word on
-   the open tab, and the icons when even this does not fit. */
-.panel .panel-tabs { height: 48px; }
-.panel .panel-tab { font-size: var(--fs-12); }
-.panel .panel-tablist.fit-full .panel-tab { flex-direction: column; justify-content: center; gap: 3px; padding: 0 9px; line-height: 1.2; }
-.panel .panel-tablist.fit-full .panel-tab .count { position: absolute; top: 4px; left: calc(50% + 4px); line-height: 14px; min-width: 14px; padding: 0 3px; box-shadow: 0 0 0 2px var(--panel-bg, var(--surface-1)); }
-.panel .panel-tablist.fit-full .panel-tab .tab-mark { position: absolute; top: 5px; left: calc(50% + 6px); }
-.panel .panel-tab.on::after { bottom: 0; }
-/* The icons alone, for the nine tabs of a project's orchestrator in the narrowest panel: a little
-   closer, since the pin took a button's width from the strip. */
-.panel .panel-tablist.fit-icons .panel-tab { padding: 0 7px; }
-.panel-pin.on { color: var(--fg); }
+/* The "+" menu: a search over the tools, then each group under its quiet label. */
+.panel-tools.menu { padding: 6px; gap: 1px; }
+.panel-tools-search { display: flex; align-items: center; gap: 8px; height: 36px; margin-bottom: 4px; padding: 0 10px; border-bottom: 1px solid var(--line); color: var(--fg-3); }
+.panel-tools-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.panel-tools-group { padding: 8px 10px 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.panel-tools .panel-tools-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h); padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.panel-tools .panel-tools-row:hover, .panel-tools .panel-tools-row:focus-visible { background: var(--hover); outline: 0; }
+.panel-tools .panel-tools-row > .ic { color: var(--fg-2); }
+.panel-tools-hint { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.panel-tools-none { padding: 8px 10px; color: var(--fg-3); font-size: var(--fs-13); }
 
-/* The open files as tabs over the viewer. */
-/* The open files are chips on the panel's own surface: as notebook tabs on a band of another grey
-   they were a second tab strip under the first. */
-.panel-filetabs { flex: none; display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
-.panel-filetabs::-webkit-scrollbar { display: none; }
-.file-tab { position: relative; flex: none; display: flex; align-items: center; height: var(--ctl-h-sm); max-width: 220px; border-radius: var(--radius-xs); color: var(--fg-2); transition: background var(--t-fast) var(--ease-out); }
-.file-tab.on { background: var(--surface-3); color: var(--fg); }
-.file-tab:hover:not(.on) { background: var(--surface-2); }
-.file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 8px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-12); cursor: pointer; }
-.file-tab-name .ic { flex: none; color: var(--fg-3); }
-.file-tab-name:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-xs); }
-.file-tab-close { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 4px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); cursor: pointer; }
-.file-tab-close:hover { background: var(--surface-4); color: var(--fg); }
+/* The bodies that lay themselves out. */
+.panel-body.tab-overview, .panel-body.tab-changes, .panel-body.tab-details, .panel-body.tab-context, .panel-body.tab-usage, .panel-body.tab-memory, .panel-body.tab-canvas, .panel-body.tab-attachments { padding: 0; }
+.panel-body.tab-changes { display: flex; flex-direction: column; overflow: hidden; }
 
-/* The wide view: the tree on the left, the open files with the viewer on the right. */
-.panel-body.split { display: flex; flex-direction: row; }
-.panel-beside { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.panel-beside .panel-viewer { flex: 1; min-height: 0; }
-.panel-beside > .empty { margin: auto; }
+/* The Overview: the state in its colour, the title, what the chat runs on, then a 48 px row a tool. */
+.ov { display: flex; flex-direction: column; padding-bottom: 16px; }
+.ov-head { display: flex; flex-direction: column; gap: 4px; padding: 8px 24px 16px; }
+.ov-status { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--fs-13); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ov-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); }
+.ov-status.live { color: var(--live); }
+.ov-status.live .ov-dot { background: var(--live); }
+.ov-status.attn { color: var(--attention); }
+.ov-status.attn .ov-dot { background: var(--attention); }
+.ov-status.bad { color: var(--bad); }
+.ov-status.bad .ov-dot { background: var(--bad); }
+.ov-title { margin: 0; color: var(--fg); font-size: var(--fs-18); font-weight: 500; letter-spacing: -0.015em; line-height: 1.35; overflow-wrap: anywhere; }
+.ov-meta { display: flex; flex-wrap: wrap; align-items: baseline; color: var(--fg-2); font-size: var(--fs-13); }
+.ov-meta > * + *::before { content: "·"; padding: 0 6px; color: var(--fg-3); }
+.ov-meta .attn { color: var(--attention); }
+.ov-model { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.ov-model:hover { color: var(--fg); text-decoration-color: var(--line-strong); }
+.ov-rows { display: flex; flex-direction: column; gap: 2px; padding: 0 12px; }
+.ov-row { display: flex; align-items: center; gap: 12px; width: 100%; height: 48px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; }
+.ov-row:hover { background: var(--hover); }
+.ov-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ov-row > .ic:first-child { color: var(--fg-2); }
+.ov-row > .ic:last-child { color: var(--fg-3); }
+.ov-row-name { flex: none; width: 104px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-row-text { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-row-tag { flex: none; color: var(--fg-3); font-family: var(--mono); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.ov-row-tag.live, .ov-row-tag.add { color: var(--live); }
+.ov-row-tag.attn { color: var(--attention); }
 
-/* The inspector: one line a section, grouped under quiet headings, all of them on one screen. */
-.details.inspector { gap: 0; padding: 0 0 8px; }
-.dt-props { display: flex; flex-direction: column; }
-/* The label's padding is what the list can spare: sixteen rows and five labels must fit a 900 px
-   window without a scroll (check_details_panel.py). */
-.dt-grp { margin: 0; padding: 10px 8px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
-.dt-props:first-child .dt-grp { padding-top: 4px; }
-.dt-prop { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h-dense); padding: 0 6px 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; transition: background var(--t-fast) var(--ease-out); }
-.dt-prop:hover { background: var(--surface-2); }
-.dt-prop:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; background: var(--surface-2); }
-.dt-prop > .ic:first-child { flex: none; color: var(--fg-3); }
+/* The chat's tasks under the rows: how many are done, the bar, where the rest stand, the open ones. */
+.ov-board { display: flex; flex-direction: column; gap: 8px; margin: 12px 12px 0; padding: 0 12px; }
+.ov-board-head { display: flex; align-items: flex-end; gap: 8px; min-height: 36px; }
+.ov-board-title { flex: 1; padding-bottom: 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.ov-board-bar { height: 6px; border-radius: 3px; background: var(--selected); overflow: hidden; }
+.ov-board-bar i { display: block; height: 100%; background: var(--live); }
+.ov-board-counts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--fg-2); font-size: var(--fs-13); }
+.ov-tasks { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 0; padding: 0 12px 0 0; list-style: none; font-size: var(--fs-14); }
+.ov-task { display: flex; align-items: flex-start; gap: 10px; color: var(--fg-2); }
+.ov-ring { flex: none; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid var(--line-strong); border-radius: 50%; box-sizing: border-box; }
+.ov-task.doing { color: var(--fg); }
+.ov-task.doing .ov-ring { border-color: var(--live); }
+.ov-task.review, .ov-task.you, .ov-task.blocked { color: var(--fg); }
+.ov-task.review .ov-ring, .ov-task.you .ov-ring, .ov-task.blocked .ov-ring { border-color: var(--attention); }
+.ov-task-title { flex: 1; min-width: 0; }
+.ov-task-note { flex: none; color: var(--attention); font-size: var(--fs-12); }
+.ov-task.more { padding-left: 26px; color: var(--fg-3); font-size: var(--fs-13); }
+
+/* The Details inspector: facts as key and value in groups, a 150 px column of names; the chat's
+   settings as lines of the same height that open their page. */
+.details.inspector { gap: 0; padding: 0 12px 16px; }
+.dt-facts, .dt-props { display: flex; flex-direction: column; }
+.dt-grp { display: flex; align-items: flex-end; height: 40px; margin: 0; padding: 0 12px 6px; box-sizing: border-box; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); }
+.dt-kv { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 34px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; }
+.dt-kv.press { cursor: pointer; }
+.dt-kv.press:hover { background: var(--hover); }
+.dt-kv:focus-visible, .dt-prop:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.dt-kv-k { flex: none; width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); }
+/* A block, not a flex box: an ellipsis is drawn only on a block's own line of text. */
+.dt-kv-v { flex: 1; min-width: 0; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.dt-kv-v > * + *, .dt-kv-v > .quiet { margin-left: 6px; }
+.dt-kv-v .truncate { min-width: 0; }
+.dt-kv-v.attn { color: var(--attention); }
+.dt-kv-v.live { color: var(--live); }
+.dt-kv-v .quiet, .dt-prop-v .quiet, .dt-window .quiet { color: var(--fg-3); }
+.dt-prop { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 34px; padding: 0 8px 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); text-align: left; cursor: pointer; transition: background var(--t-fast) var(--ease-out); }
+.dt-prop:hover { background: var(--hover); }
+.dt-prop-k { flex: none; display: inline-flex; align-items: center; gap: 8px; width: 150px; min-width: 0; color: var(--fg-2); }
+.dt-prop-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-prop-k .ic { flex: none; color: var(--fg-3); }
 .dt-prop > .ic:last-child { flex: none; color: var(--fg-3); }
-.dt-prop-k { flex: none; }
 .dt-prop-attn { flex: none; display: inline-flex; color: var(--warn); }
-.dt-prop-v { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg-2); font-size: var(--fs-13); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.dt-prop-v .truncate { min-width: 0; max-width: 180px; }
-.dt-prop-v .quiet, .dt-window .quiet { color: var(--fg-3); }
+.dt-prop-v { flex: 1; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--fg); font-size: var(--fs-14); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dt-prop-v .truncate { min-width: 0; }
+.dt-context-bar { height: 6px; margin: 4px 12px 0; border-radius: 3px; background: var(--selected); overflow: hidden; }
+.dt-context-bar i { display: block; height: 100%; background: var(--primary); }
+.dt-context-bar.attn i { background: var(--warn); }
+.dt-context-bar.bad i { background: var(--bad); }
+.dt-context-line { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; font-size: var(--fs-13); }
+.dt-context-more { flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg-2); font: inherit; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
+.dt-context-more:hover { color: var(--fg); }
+.dt-context-compact { flex: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; }
+.dt-context-compact:disabled { color: var(--fg-3); cursor: default; }
 .dt-window { display: inline-flex; align-items: center; gap: 4px; }
 .dt-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
 .dt-dot.ok { background: var(--ok); }
@@ -89,9 +131,71 @@
 .dt-mini.attn i { background: var(--warn); }
 .dt-mini.bad i { background: var(--bad); }
 
+/* A tool that is a page: the context's and the spend's, with the Details' own page grammar. */
+.details.tool-page { gap: 0; padding: 16px 24px; }
+.details.tool-page .tool-section { margin-top: 16px; }
+.details.tool-page .tool-section .dt-grp { padding-left: 0; }
+
+/* The chat's changes: the files at the top, the diff under them in a well, the two actions at the foot. */
+.ch-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.ch-files { flex: none; display: flex; flex-direction: column; gap: 2px; max-height: 40%; overflow-y: auto; padding: 4px 12px 0; }
+.ch-file { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--row-h); padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.ch-file:hover { background: var(--hover); }
+.ch-file.on { background: var(--selected); }
+.ch-file > .ic { flex: none; color: var(--fg-2); }
+.ch-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); }
+.ch-new { flex: none; color: var(--live); font-size: var(--fs-12); }
+.ch-counts { flex: none; display: inline-flex; gap: 6px; font-size: var(--fs-12); }
+.ch-diff { flex: 1; min-height: 0; overflow: auto; margin: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--inset); }
+.ch-diff .dp-head { top: 0; }
+.ch-foot { flex: none; display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 0 12px; border-top: 1px solid var(--line); }
+.ch-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); font-size: var(--fs-13); }
+.ch-commit-form { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ch-commit-form .field { flex: 1; min-width: 0; }
+.ch-busy { padding: 0 12px 10px; }
+.ch-confirm p { margin: 0 0 8px; }
+.ch-confirm-warn { color: var(--attention); }
+.ch-confirm-list { margin: 0; padding-left: 18px; font-size: var(--fs-13); }
+
+/* A tool's list: files, canvases, what the memory kept. */
+.tool-list { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px 16px; }
+.tool-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--fg); font: inherit; text-align: left; }
+.tool-row.press { cursor: pointer; }
+.tool-row.press:hover, .tool-row:has(a:hover) { background: var(--hover); }
+.tool-row.tall { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+.tool-row > .ic { flex: none; color: var(--fg-2); }
+.tool-row > .ic:last-child:not(:first-child) { color: var(--fg-3); }
+.tool-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; color: inherit; text-decoration: none; }
+.tool-row-name { font-size: var(--fs-14); font-weight: 500; }
+.tool-row-text { font-size: var(--fs-14); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tool-row-meta { color: var(--fg-3); font-size: var(--fs-12); }
+.tool-foot { display: flex; padding: 12px 12px 0; }
+.tool-empty { padding: 12px 24px; color: var(--fg-2); font-size: var(--fs-14); line-height: 1.5; }
+.tool-hint { padding: 6px 12px; color: var(--fg-3); font-size: var(--fs-12); }
+
+/* The open files as tabs over the viewer. */
+/* The open files are chips on the panel's own surface: as notebook tabs on a band of another grey
+   they were a second tab strip under the first. */
+.panel-filetabs { flex: none; display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+.panel-filetabs::-webkit-scrollbar { display: none; }
+.file-tab { position: relative; flex: none; display: flex; align-items: center; height: var(--ctl-h-sm); max-width: 220px; border-radius: var(--radius-xs); color: var(--fg-2); transition: background var(--t-fast) var(--ease-out); }
+.file-tab.on { background: var(--surface-3); color: var(--fg); }
+.file-tab:hover:not(.on) { background: var(--hover); }
+.file-tab-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 8px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.file-tab-name .ic { flex: none; color: var(--fg-3); }
+.file-tab-name:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-xs); }
+.file-tab-close { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 4px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); cursor: pointer; }
+.file-tab-close:hover { background: var(--hover); color: var(--fg); }
+
+/* The wide view: the tree on the left, the open files with the viewer on the right. */
+.panel-body.split { display: flex; flex-direction: row; }
+.panel-beside { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.panel-beside .panel-viewer { flex: 1; min-height: 0; }
+.panel-beside > .empty { margin: auto; }
+
 /* A section opened in place of the list. */
 .dt-drill { display: flex; flex-direction: column; min-width: 0; }
-.dt-drillhead { position: sticky; top: -8px; z-index: 1; display: flex; align-items: center; gap: 4px; min-height: 36px; margin: -8px 0 8px; padding: 0; border-bottom: 1px solid var(--line); background: var(--panel-bg, var(--surface-1)); }
+.dt-drillhead { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 4px; min-height: 36px; margin: 0 0 8px; padding: 0; border-bottom: 1px solid var(--line); background: var(--panel-bg, var(--surface-1)); }
 .dt-drillhead h3 { margin: 0; font-size: var(--fs-14); font-weight: 500; letter-spacing: -0.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-crumb { padding: 0 2px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
 .dt-crumb:hover { color: var(--fg); }
@@ -110,20 +214,72 @@
 .dt-table tbody td:nth-child(2) { color: var(--fg); }
 
 @media (max-width: 1023px) {
-  .panel-sheet-strip { order: 2; flex: 1 1 100%; margin: 0 calc(-1 * var(--space-2)) 0 calc(-1 * var(--gutter)); }
-  .panel-sheet-strip .panel-strip { padding: 4px var(--gutter) 10px; border-bottom: 0; }
-  .panel-sheet .details.inspector { gap: 0; padding: 0 0 var(--space-6); }
-  .panel-sheet .dt-prop { min-height: var(--row-h-touch); font-size: var(--fs-15); }
-  .panel-sheet .dt-grp { padding: 14px 8px 4px; }
+  /* The sheet's head is the tab row itself, with the "+" after the tabs and the sheet's close at the
+     end: the chat's title is the Overview's first line, not a second header over the tabs. */
+  .panel-sheet .sheet-head { flex-wrap: nowrap; align-items: center; margin: 0 -16px; padding: 0 var(--space-1) 0 0; gap: 0; border-bottom: 1px solid var(--line); }
+  .sheet.panel-sheet .sheet-head .panel-tabs { flex: 1; min-width: 0; height: var(--head-h); margin: 0; padding: 0 0 0 8px; border-bottom: 0; }
+  .sheet.panel-sheet .panel-tab { height: var(--ctl-h); padding: 0 10px; font-size: var(--fs-13); }
+  .sheet.panel-sheet .panel-tab .ic { width: 18px; height: 18px; }
+  /* The Overview's rows take two lines on a phone: the tool's name over what is behind it. */
+  .panel-sheet .ov-head { padding: 8px 20px 12px; }
+  .panel-sheet .ov-rows { padding: 0 8px; gap: 0; }
+  .panel-sheet .ov-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto 14px; grid-template-areas: "icon name tag chev" "icon text tag chev"; column-gap: 12px; row-gap: 2px; align-content: center; height: auto; min-height: 56px; padding: 8px 12px; }
+  .panel-sheet .ov-row > .ic:first-child { grid-area: icon; width: 20px; height: 20px; }
+  .panel-sheet .ov-row-name { grid-area: name; width: auto; font-size: var(--fs-15); line-height: 1.3; }
+  .panel-sheet .ov-row-text { grid-area: text; font-size: var(--fs-13); line-height: 1.3; }
+  .panel-sheet .ov-row-tag { grid-area: tag; }
+  .panel-sheet .ov-row > .ic:last-child { grid-area: chev; }
+  .panel-sheet .ov-board { margin: 12px 8px 0; }
+  .panel-sheet .ov-tasks { font-size: var(--fs-15); gap: 12px; }
+  .panel-sheet .details.inspector { padding: 0 8px var(--space-6); }
+  .panel-sheet .dt-kv, .panel-sheet .dt-prop { min-height: var(--row-h-touch); font-size: var(--fs-15); }
+  .panel-sheet .dt-kv-k, .panel-sheet .dt-prop-k { width: 132px; }
   .panel-sheet .dt-prop-v .truncate { max-width: 120px; }
   .panel-sheet .dt-drillhead { margin: 0 0 8px; padding: 0; top: 0; }
   /* A sheet's own heading rule gives every h3 the sheet title's size and a gap under it, which lifted
      this one off the crumb's line: here it is the last crumb, on that line. */
   .panel-sheet .dt-drillhead h3 { margin: 0; font-size: var(--fs-15); font-weight: 500; }
+  /* A sheet's heading rule sizes every h3 as the sheet's title: a group's label stays a label. */
+  .panel-sheet .details h3.dt-grp { margin: 0; font-size: var(--fs-12); font-weight: 500; }
   .panel-sheet .file-tab-name { font-size: var(--fs-13); }
+  .panel-sheet .ch-diff { margin: 8px; }
+  /* Details in the sheet: the desktop's cards as the phone's grouped cards, a 44 px header with the
+     title in the body's size, controls 36–44 px. The sheet is the lighter surface here, so the tiles
+     inside a card are the sheet's colour, set into it. */
+  /* The sheet is the floating surface, so what the desktop's cards hold as tiles are tiles here too, a
+     step up from it: on the sheet's own colour a tile, a field and a button had no edge at all. */
+  .panel-sheet .details { gap: var(--space-3); padding: var(--space-2) 0 var(--space-6); --dt-card: transparent; --dt-tile: var(--surface-2); }
+  .panel-sheet .details .dt-section, .panel-sheet .details .dt-section:first-child { margin: 0; border: 0; border-radius: var(--radius-md); }
+  .panel-sheet .details summary.dt-label { min-height: var(--row-h-touch); padding: 0 var(--space-3); border-radius: var(--radius-md); font-size: var(--fs-15); }
+  .panel-sheet .details .dt-content { padding: 0 var(--space-4) var(--space-4); font-size: var(--fs-15); }
+  .panel-sheet .dt-content .sub, .panel-sheet .dt-content p.sub, .panel-sheet .dt-content .dt-hint, .panel-sheet .dt-note { font-size: var(--fs-13); }
+  .panel-sheet .dt-stat-value, .panel-sheet .dt-today b { font-size: var(--fs-15); }
+  .panel-sheet .dt-row, .panel-sheet .dt-control { min-height: 40px; }
+  .panel-sheet .details .field { min-height: var(--row-h-touch); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-16); }
+  .panel-sheet .details .btn.small { position: relative; min-height: 36px; padding: 0 var(--space-4); border: 0; border-radius: 10px; background: var(--surface-2); box-shadow: none; font-size: var(--fs-14); font-weight: 500; }
+  .panel-sheet .details .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
+  .panel-sheet .dt-legend { grid-template-columns: minmax(0, 1fr); }
+  /* Files in the sheet: 44 px rows in the body's size, with their ⋮ always in view. */
+  .panel-sheet .files .filerow, .panel-sheet .files .filerow .title { min-height: var(--row-h-touch); font-size: var(--fs-15); }
+  .panel-sheet .files .explorer-actions { opacity: 1; }
+  .panel-sheet .files .explorer-actions .iconbtn { color: var(--fg-2); }
+  .panel-sheet .files .field { min-height: var(--row-h-touch); border: 0; border-radius: 12px; box-shadow: none; background: var(--surface-2); font-size: var(--fs-16); }
 }
 /* A phone narrower than 400 px: the quota windows keep their figures and drop their bars, which pushed
    the second window's percent past the edge of the line. */
 @media (max-width: 399px) {
   .dt-window .dt-mini { display: none; }
+}
+
+/* The tools that keep their own bodies (the helpers' cards, the background jobs, the files, a page of
+   Details) stand at the same 24 px from the panel's edges as the Overview's words and the Board's
+   cards; at the shared body's 12 they read as a wider, older panel inside this one. */
+@media (min-width: 1024px) {
+  .panel .panel-body.tab-subagents { padding: 0 24px 16px; }
+  .panel .panel-body.tab-jobs { padding: 8px 24px 16px; }
+  .panel .panel-body.tab-details > .dt-drill { padding: 8px 20px 16px; }
+  .panel .panel-body.tab-files .explorer-head { padding: 8px 16px 6px 24px; }
+  .panel .panel-body.tab-files .explorer-filter { margin: 0 24px 8px; }
+  .panel .panel-body.tab-files .explorer-note { margin: 0 24px 6px; }
+  .panel .panel-body.tab-files .explorer-tree { padding: 2px 18px 8px; }
 }

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, panelPath, setPanelCredential } from "../api";
 import { setLang, t } from "../i18n";
 import { connectShell, EXTENSION_ORIGIN, HELLO, PANEL_PROTO, READY, type Current, type Shell } from "./bridge";
-import { cardKey, cropRect, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
+import { cropRect, lineStops, pageFile, panelCarries, pickSession, rereadsOn, selectionQuote, stopUnconfirmed, type PanelSession } from "./model";
 import { SidePanel } from "./SidePanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -80,15 +80,6 @@ describe("what the panel decides", () => {
     expect(pickSession({ current: { tab: null, owner: null }, sessions, shown: "old", pinned: false })).toBe("old");
     expect(pickSession({ current: on("gone"), sessions, shown: null, pinned: false })).toBe("new");
     expect(pickSession({ current: null, sessions: [], shown: null, pinned: false })).toBeNull();
-  });
-
-  it("reads the approval card's keys", () => {
-    expect(cardKey({ key: "Enter" })).toBe("allow");
-    expect(cardKey({ key: "Enter", ctrlKey: true })).toBe("similar");
-    expect(cardKey({ key: "Enter", metaKey: true })).toBe("similar");
-    expect(cardKey({ key: "Escape" })).toBe("deny");
-    expect(cardKey({ key: "Enter", isComposing: true })).toBeNull();
-    expect(cardKey({ key: "a" })).toBeNull();
   });
 
   it("leaves Stop to the composer while its button is one", () => {
@@ -227,12 +218,12 @@ describe("the screen", { timeout: 20_000 }, () => {
     act(() => root.render(<SidePanel />));
     await settle();
     expect(host.querySelector(".sp-title")?.textContent).toContain("Pay the bill");
-    const card = host.querySelector<HTMLElement>(".sp-card");
+    // The composer's own card, in the composer's place: it hears Enter and Esc while nothing else has the keys.
+    const card = host.querySelector<HTMLElement>(".composer .approval-card");
     expect(card).not.toBeNull();
     expect(card!.textContent).toContain("https://bank.example/");
-    expect(document.activeElement).toBe(card);
     await act(async () => {
-      card!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(posted).toContainEqual({ url: "/api/panel/sessions/s1/policy/grant", body: { key: "0123456789ab" } });
@@ -243,14 +234,14 @@ describe("the screen", { timeout: 20_000 }, () => {
     act(() => root.render(<SidePanel />));
     await settle();
     expect(host.querySelector(".sp-title")?.textContent).toContain("Pay the bill");
-    expect(host.querySelector(".sp-card")).toBeNull();
+    expect(host.querySelector(".approval-card")).toBeNull();
   });
 
   it("refuses with Esc", async () => {
     act(() => root.render(<SidePanel />));
     await settle();
     await act(async () => {
-      host.querySelector(".sp-card")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(posted).toContainEqual({ url: "/api/panel/sessions/s1/policy/refuse", body: { key: "0123456789ab" } });
@@ -328,7 +319,7 @@ describe("the screen", { timeout: 20_000 }, () => {
     await act(async () => { host.querySelector<HTMLButtonElement>(".sp-new .composer .mic")!.click(); });
     await settle();
     expect(requests.map((r) => r.op)).toContain("mic.grant");
-    expect(host.querySelector(".toast")?.textContent).toBe(t("sidepanel.mic.grant"));
+    expect(document.querySelector(".toast")?.textContent).toBe(t("sidepanel.mic.grant"));
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined });
   });
 

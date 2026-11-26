@@ -23,7 +23,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, settings_model  # noqa: E402
 from screenshots import SETTINGS, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -80,7 +80,7 @@ def walk_to_providers(page, lang: str) -> None:  # type: ignore[no-untyped-def]
 
 
 def ticks(page, slug: str):  # type: ignore[no-untyped-def]
-    return page.locator(f".orp-row[data-slug='{slug}'] input")
+    return page.locator(f".orp-row[data-slug='{slug}'] [role=switch]")
 
 
 def wizard(browser, failures: list[str]) -> None:  # type: ignore[no-untyped-def]
@@ -158,11 +158,11 @@ def settings_row(browser, failures: list[str]) -> None:  # type: ignore[no-untyp
         page = context.new_page()
         page.route("**/api/**", host(LISTING, saved, settings))
         page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
-        line = page.locator(".mrow", has_text="DeepSeek through OpenRouter").first
+        line = settings_model(page, "DeepSeek through OpenRouter")
         line.wait_for(timeout=15000)
-        if line.locator(".pill.failed").count() != 1:
+        if line.locator(".pmodel-tag.failed").count() != 1:
             failures.append(f"{where}: the model's line does not say a provider is gone")
-        line.locator(".mmain").click()
+        line.locator(".pmodel-open").click()
         if "vanished/fp8" not in line.locator(".result-warning").inner_text():
             failures.append(f"{where}: the panel does not name the provider that went")
         line.get_by_role("button", name="Choose" if lang == "en" else "Выбрать").click()

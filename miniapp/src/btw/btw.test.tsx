@@ -6,7 +6,7 @@
 import { act, createRef } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Composer, type ComposerHandle, PlusSheet } from "../composerbox";
+import { Composer, type ComposerHandle } from "../composerbox";
 import { setLang } from "../i18n";
 import { btwCommand, btwQuestion } from "./btw";
 
@@ -124,33 +124,32 @@ describe("the composer", () => {
     expect(onSend).toHaveBeenCalled();
   });
 
-  it("holds the coach and the side question in one button's menu", async () => {
+  it("holds the coach and the side question in the + menu, under Helpers", async () => {
     const { onBtw, onCoach } = draw();
-    const buttons = host.querySelectorAll(".coach-open");
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].getAttribute("aria-haspopup")).toBe("menu");
+    // The wand button beside the field is gone: the helpers are rows of the one + menu.
+    expect(host.querySelector(".coach-open")).toBeNull();
     await type("fix the menu");
-    await act(async () => { (buttons[0] as HTMLButtonElement).click(); });
-    const coach = document.querySelector<HTMLButtonElement>(".helpers-menu [data-action='coach']")!;
-    const btw = document.querySelector<HTMLButtonElement>(".helpers-menu [data-action='btw']")!;
+    const plus = () => host.querySelector<HTMLButtonElement>(".composer .plus")!;
+    await act(async () => { plus().click(); });
+    const menu = document.querySelector(".menu.attach-menu")!;
+    expect(menu.querySelector(".menu-group")?.textContent).toBe("Helpers");
+    const coach = menu.querySelector<HTMLButtonElement>("[data-action='coach']")!;
     expect(coach.textContent).toContain("Improve prompt");
-    expect(btw.textContent).toContain("Quick question");
+    expect(menu.querySelector("[data-action='btw']")!.textContent).toContain("Quick question");
     await act(async () => { coach.click(); });
     expect(onCoach).toHaveBeenCalledWith("fix the menu");
-    expect(document.querySelector(".helpers-menu")).toBeNull();
-    await act(async () => { (host.querySelector(".coach-open") as HTMLButtonElement).click(); });
-    await act(async () => { document.querySelector<HTMLButtonElement>(".helpers-menu [data-action='btw']")!.click(); });
+    expect(document.querySelector(".attach-menu")).toBeNull();
+    await act(async () => { plus().click(); });
+    await act(async () => { document.querySelector<HTMLButtonElement>(".attach-menu [data-action='btw']")!.click(); });
     expect(onBtw).toHaveBeenCalledWith("");
   });
 
-  it("opens the coach straight away where it is the only helper", async () => {
-    const { onCoach } = draw({ onBtw: undefined });
-    const button = host.querySelector<HTMLButtonElement>(".coach-open")!;
-    expect(button.getAttribute("aria-haspopup")).toBeNull();
-    expect(button.getAttribute("aria-label")).toBe("Improve prompt");
-    await act(async () => { button.click(); });
-    expect(onCoach).toHaveBeenCalled();
-    expect(document.querySelector(".helpers-menu")).toBeNull();
+  it("offers only the helpers the chat has", async () => {
+    draw({ onBtw: undefined });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { host.querySelector<HTMLButtonElement>(".composer .plus")!.click(); });
+    expect(document.querySelector(".attach-menu [data-action='coach']")).not.toBeNull();
+    expect(document.querySelector(".attach-menu [data-action='btw']")).toBeNull();
   });
 
   it("leaves a press of Escape that a layer above already took", async () => {
@@ -163,24 +162,5 @@ describe("the composer", () => {
     expect(field.textContent).toBe("/");
     await act(async () => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
     expect(field.textContent).toBe("");
-  });
-});
-
-describe("the phone's + sheet", () => {
-  it("offers the side question as a row beside the coach", () => {
-    setLang("ru");
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    const onBtw = vi.fn();
-    act(() => root.render(<PlusSheet onClose={() => undefined} onPhoto={() => undefined} onFiles={() => undefined} onCoach={() => undefined} onBtw={onBtw} />));
-    const row = document.querySelector<HTMLElement>("[data-action='btw']")!;
-    expect(row.textContent).toContain("Вопрос по ходу");
-    expect(document.querySelector("[data-action='coach']")).not.toBeNull();
-    act(() => row.click());
-    expect(onBtw).toHaveBeenCalled();
-    act(() => root.unmount());
-    host.remove();
-    setLang("en");
   });
 });

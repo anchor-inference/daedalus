@@ -22,7 +22,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, expect_app  # noqa: E402
+from api_stub import DEFAULT_APP, expect_app, settings_model  # noqa: E402
 from screenshots import SETTINGS, UNHANDLED, stub  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
@@ -65,9 +65,8 @@ def run() -> int:
                 page.route("**/api/settings", settings_route)
                 page.route("**/api/presets/**", preset_route)
                 page.goto(f"{BASE}/settings/models?token=t&lang={lang}")
-                page.wait_for_selector(".mrow")
-                found = page.locator(".mrow", has_text="Claude Opus 5")
-                found.locator(".mmain").click()
+                found = settings_model(page, "Claude Opus 5")
+                found.locator(".pmodel-open").click()
                 line = found.locator('[data-testid="window-source"]')
                 line.wait_for()
                 text = line.inner_text()
@@ -79,8 +78,8 @@ def run() -> int:
                 page.wait_for_timeout(300)
                 if not any(m == "POST" and path == "presets/claude-opus-5/context-window" for m, path, _ in sent):
                     failures.append(f"{lang}/{width}: Check again did not ask the host: {sent}")
-                typed = page.locator(".mrow", has_text="GPT-5.6 Luna")
-                typed.locator(".mmain").click()
+                typed = settings_model(page, "GPT-5.6 Luna")
+                typed.locator(".pmodel-open").click()
                 manual = typed.locator('[data-testid="window-source"]')
                 manual.wait_for()
                 if words["manual"] not in manual.inner_text():

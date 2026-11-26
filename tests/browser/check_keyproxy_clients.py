@@ -28,6 +28,7 @@ from playwright.sync_api import expect, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import UNHANDLED, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -67,11 +68,11 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
     page.goto(f"{BASE}/settings/keyproxy?token=t&lang={lang}")
     section = page.locator('[data-setting="keyproxy.clients"]')
     section.scroll_into_view_if_needed()
-    expect(section.locator(".section-title")).to_have_text(words["title"])
+    expect(section.locator(".set-label")).to_have_text(words["title"])
     claude = section.locator('[data-client="claude"]')
-    expect(claude.locator(".mtitle")).to_contain_text("2.1.296")
-    expect(claude.locator(".pill")).to_have_text(words["out"])
-    expect(section.locator('[data-client="codex"] .pill')).to_have_text(words["current"])
+    expect(claude.locator(".settings-row-title")).to_contain_text("2.1.296")
+    expect(claude.locator(".badge")).to_have_text(words["out"])
+    expect(section.locator('[data-client="codex"] .badge')).to_have_text(words["current"])
     if section.locator('[data-client="codex"] [data-action="update"]').count():
         problems.append(f"{lang} {width}: a client that is up to date offers Update")
     if phone and (outside := page.evaluate(OUTSIDE)):
@@ -79,15 +80,15 @@ def settings(browser, lang: str, width: int) -> list[str]:  # type: ignore[no-un
 
     claude.locator('[data-action="update"]').click()
     # Up to date, and on trial until its first request answers.
-    expect(claude.locator(".pill.idle")).to_have_text(words["current"])
-    expect(claude.locator(".pill.waiting")).to_have_text(words["pending"])
-    expect(claude.locator(".mtitle")).to_contain_text("2.1.310")
+    expect(claude.locator(".badge:not(.attention)")).to_have_text(words["current"])
+    expect(claude.locator(".badge.attention")).to_have_text(words["pending"])
+    expect(claude.locator(".settings-row-title")).to_contain_text("2.1.310")
     expect(claude.locator(".clients-said")).to_contain_text(words["kept"])
     expect(claude.locator('[data-action="revert"]')).to_have_text(words["revert"])
     if posted != ["keyproxy/clients/claude/update"]:
         problems.append(f"{lang} {width}: Update posted {posted}")
     section.locator('[data-action="check"]').click()
-    page.wait_for_timeout(300)
+    until(page, lambda: posted[-1:] == ["keyproxy/clients/check"])
     if posted[-1:] != ["keyproxy/clients/check"]:
         problems.append(f"{lang} {width}: Check now posted {posted}")
     context.close()
@@ -125,7 +126,9 @@ def notification(browser, lang: str) -> list[str]:  # type: ignore[no-untyped-de
     page.route("**/api/**", stub)
     page.route("**/api/notifications**", notices)
     page.goto(f"{BASE}/inbox?token=t&lang={lang}")
-    row = page.locator('[data-notice="72"]').first
+    # The one entry is the open one: its buttons are in the reading pane beside the list.
+    page.locator('.inbox-row[data-notice="72"]').first.click()
+    row = page.locator('.inbox-pane[data-item="n72"]')
     expect(row).to_be_visible(timeout=15000)
     button = row.locator('[data-action="update"]')
     expect(button).to_have_text(words["update"])

@@ -62,7 +62,7 @@ QUESTIONS: list[tuple[str, str]] = [
     ("Telegram topics instead of the private chat", "setting:telegram.mode"),
     ("change the voice that reads answers aloud", "setting:companion.tts.local_voice"),
     ("модель для голосового режима консьержа", "setting:companion.preset"),
-    ("как поменять порядок пунктов в боковой панели", "setting:navigation.rail"),
+    ("как поменять порядок пунктов в боковой панели", "setting:navigation.pinned"),
     ("разрешить агенту менять свой код без моего подтверждения", "setting:self_change.approval"),
     ("how many browsers can run at once", "setting:browser.running_cap"),
     # Asked after the ranking was tuned on the ones above, and kept as they came.
@@ -147,7 +147,7 @@ def test_the_settings_index_is_whole_and_names_real_configuration() -> None:
 
 def test_a_link_names_the_section_and_the_row() -> None:
     assert setting_link("dictation", "asr.transcriber") == "/app/settings/dictation#asr.transcriber"
-    assert setting_link("providers", "providers.list") == "/app/settings/providers#providers.list"
+    assert setting_link("models", "providers.list") == "/app/settings/models#providers.list"
     assert setting_link("budget") == "/app/settings/budget"
 
 

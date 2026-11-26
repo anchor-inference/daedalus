@@ -12,6 +12,7 @@ import { api, type BrowserActionRow, type BrowserFrame } from "../api";
 import { clock } from "../format";
 import { t } from "../i18n";
 import { Icon } from "../icons";
+import { IconButton } from "../ui/primitives";
 import { fit } from "./geometry";
 import { actionWords } from "./model";
 
@@ -158,7 +159,14 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
   return (
     <div className="bp-replay" data-no={frame.no} role="region" aria-label={t("browser.replay")}>
       <div className="bp-replay-bar">
-        <Icon name="image" size={14} />
+        <button type="button" className="btn small bp-replay-live" onClick={onLive}>
+          <Icon name="play" size={12} />
+          {t("browser.replay.live")}
+        </button>
+        <span className="bp-replay-steps">
+          <IconButton icon="back" size={28} label={t("browser.replay.prev")} disabled={index <= 0} onClick={() => onIndex(index - 1)} />
+          <IconButton icon="forward" size={28} label={t("browser.replay.next")} disabled={index >= frames.length - 1} onClick={() => onIndex(index + 1)} />
+        </span>
         <span className="bp-replay-when">{t("browser.replay.at", { time: clock(new Date(frame.at).toISOString()), n: index + 1, of: frames.length })}</span>
         <input
           className="bp-replay-scrub"
@@ -170,10 +178,6 @@ export function ReplayStage({ group, viewportW, frames, index, rows, agent, onIn
           aria-label={t("browser.replay.scrub")}
           onChange={(e) => onIndex(Number(e.target.value))}
         />
-        <button type="button" className="btn small bp-replay-live" onClick={onLive}>
-          <Icon name="play" size={12} />
-          {t("browser.replay.live")}
-        </button>
       </div>
       {picture}
     </div>

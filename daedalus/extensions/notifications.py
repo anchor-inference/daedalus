@@ -85,7 +85,7 @@ Category = Literal[
 ]
 Level = Literal["quiet", "normal", "urgent"]
 Tone = Literal["ok", "info", "warning", "error"]
-View = Literal["all", "unseen", "problems", "needs_you"]
+View = Literal["all", "unseen", "problems", "needs_you", "done"]
 ActionStyle = Literal["primary", "default", "danger", "ghost"]
 
 CATEGORIES: tuple[str, ...] = get_args(Category)
@@ -114,15 +114,24 @@ ASK_BUTTONS_MAX = 4
 
 @dataclass(frozen=True)
 class Action:
-    """A button on a notification. ``quick`` actions may be taken without opening the app."""
+    """A button on a notification. ``quick`` actions may be taken without opening the app.
+
+    ``description`` says what pressing it does, in the operator's language, and is set only by a producer
+    that knows: a button whose effect the host cannot state truthfully carries none, and the key is then
+    absent from :meth:`as_dict` rather than empty.
+    """
 
     id: str
     label: str
     style: ActionStyle = "default"
     quick: bool = False
+    description: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "label": self.label, "style": self.style, "quick": self.quick}
+        shown: dict[str, Any] = {"id": self.id, "label": self.label, "style": self.style, "quick": self.quick}
+        if self.description:
+            shown["description"] = self.description
+        return shown
 
 
 @dataclass(frozen=True)
@@ -336,6 +345,7 @@ _VIEW_WHERE: dict[str, str] = {
     "unseen": _UNSEEN,
     "problems": f"tone IN ('warning', 'error') AND {_NOT_HELD}",
     "needs_you": _NEEDS_YOU,
+    "done": f"category = 'run_finished' AND {_NOT_HELD}",
 }
 
 
@@ -855,6 +865,29 @@ class NotificationService:
                 logger.warning("notify.seen was not announced", exc_info=True)
         return len(changed)
 
+    async def mark_unseen(self, ids: Sequence[int]) -> int:
+        """Take the listed entries back to unseen, so they badge and list as unread again. Returns how many changed.
+
+        A quiet entry changes too, and still never badges: ``seen`` on its row says unread, the count
+        goes on leaving quiet rows out, as it does for one that arrived quiet.
+        """
+        wanted = sorted({int(i) for i in ids})
+        if not wanted:
+            return 0
+        where = f"seen_at IS NOT NULL AND id IN ({','.join('?' for _ in wanted)})"
+        async with self.db.transaction() as conn:
+            cursor = await conn.execute(f"SELECT id FROM notifications WHERE {where}", wanted)
+            changed = [int(r["id"]) for r in await cursor.fetchall()]
+            await cursor.close()
+            if changed:
+                await conn.execute(f"UPDATE notifications SET seen_at = NULL WHERE {where}", wanted)
+        if changed and self.bus is not None:
+            try:
+                await self.bus.publish("notify.unseen", {"ids": changed, "summary": await self.summary()})
+            except Exception:  # noqa: BLE001
+                logger.warning("notify.unseen was not announced", exc_info=True)
+        return len(changed)
+
     async def delete(self, entry_id: int) -> bool:
         async with self.db.transaction() as conn:
             cursor = await conn.execute("DELETE FROM notifications WHERE id = ?", (entry_id,))
@@ -1041,7 +1074,8 @@ class NotificationRouter:
         actions: list[Action] = []
         only = questions[0] if len(questions) == 1 else None
         if only is not None and not only.get("multi") and 0 < len(only.get("options") or []) <= ASK_BUTTONS_MAX:
-            actions = [Action(f"answer:{i}", str(o.get("label") or "")[:60], "primary" if i == 0 else "default", quick=True) for i, o in enumerate(only["options"])]
+            about = render("ask.answer.about", self._lang())
+            actions = [Action(f"answer:{i}", str(o.get("label") or "")[:60], "primary" if i == 0 else "default", quick=True, description=about) for i, o in enumerate(only["options"])]
         actions.append(Action("open", render("open", self._lang()), "ghost"))
         ref = str(p["request_ref"])
         await self.service.post(Draft(
@@ -1067,8 +1101,8 @@ class NotificationRouter:
             await self._blocked_pending(event)
             return
         actions = (
-            Action("allow", render("allow", lang), "primary", quick=quick),
-            Action("deny", render("deny", lang), "default", quick=quick),
+            Action("allow", render("allow", lang), "primary", quick=quick, description=render("allow.about", lang)),
+            Action("deny", render("deny", lang), "default", quick=quick, description=render("deny.about", lang)),
             Action("open", render("open", lang), "ghost"),
         )
         ref = str(p["request_ref"])
@@ -1100,8 +1134,8 @@ class NotificationRouter:
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)),
             actions=(
-                Action("allow", render("allow.anyway", lang), "primary"),
-                Action("deny", render("rules.keep", lang), "default"),
+                Action("allow", render("allow.anyway", lang), "primary", description=render("allow.anyway.about", lang)),
+                Action("deny", render("rules.keep", lang), "default", description=render("rules.keep.about", lang)),
                 Action("open", render("open", lang), "ghost"),
             ),
             request_ref=ref, dedupe_key=ref, source="rules", handled=self._telegram_handled(p),
@@ -1120,7 +1154,7 @@ class NotificationRouter:
             kind="handoff", tone="warning", level="urgent",
             session_id=event.session_id, project_id=event.project_id, staff_id=event.staff_id,
             link=await self.service.link_for(ref, self._session_link(event.session_id)),
-            actions=(Action("done", render("handoff.done", lang), "primary", quick=True), Action("open", render("open", lang), "ghost")),
+            actions=(Action("done", render("handoff.done", lang), "primary", quick=True, description=render("handoff.done.about", lang)), Action("open", render("open", lang), "ghost")),
             request_ref=ref, dedupe_key=ref, source="handoff", handled=self._telegram_handled(p),
         ))
 

@@ -31,26 +31,23 @@ def main() -> int:
 
                 page.route("**/api/settings", save)
                 suffix = f"?token=t&lang=ru&scheme={scheme}"
-                for section, selector in (("components", ".comp-grid"), ("speech-models", ".stt-list")):
-                    page.goto(f"{BASE}/settings/{section}{suffix}")
-                    page.wait_for_selector(f"{selector} > div")
-                    page.wait_for_timeout(250)
-                    for grid in page.locator(selector).all():
-                        heights = grid.evaluate("g => [...g.children].map(c => c.getBoundingClientRect().height)")
-                        if width >= 760:
-                            assert max(heights) - min(heights) < 1, (width, scheme, section, heights)
                 page.goto(f"{BASE}/settings/text{suffix}")
-                panel = page.locator(".settings-font")
+                panel = page.locator('[data-setting="appearance.font"]')
                 panel.wait_for()
-                assert panel.locator(".settings-faces").evaluate("e => e.clientHeight <= 280")
-                assert panel.locator(".settings-font-catalogue").evaluate("e => e.querySelector('.settings-faces').getBoundingClientRect().top - e.querySelector('input').getBoundingClientRect().bottom >= 7")
-                panel.locator(".settings-faces button").filter(has_text="JetBrains Mono").click()
-                assert panel.locator(".settings-faces button[aria-pressed=true]").inner_text().startswith("JetBrains Mono")
-                panel.locator(".settings-font-url button").click()
-                assert panel.locator(".attn").is_visible()
+                code = panel.locator('[data-font-role="code"]')
+                field = code.locator(".combo-input")
+                field.click()
+                field.fill("JetBrains")
+                assert page.locator(".combo-popup").evaluate("e => e.getBoundingClientRect().height <= 480")
+                page.locator(".combo-item").filter(has_text="JetBrains Mono").click()
+                assert field.input_value().startswith("JetBrains Mono")
+                field.fill("https://example.com/not-a-font.css")
+                page.locator(".combo-item").first.click()
+                assert code.locator(".attn").is_visible()
                 page.goto(f"{BASE}/settings/tools{suffix}")
                 page.wait_for_selector(".tgroup")
-                assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => r.querySelector('.tgroup-use-text').getBoundingClientRect().right <= r.querySelector('.dropdown-btn').getBoundingClientRect().left - 7)")
+                # The usage never runs under the picker: beside it where there is room, over it on a narrow screen.
+                assert page.locator(".tgroup").evaluate_all("rows => rows.every(r => { const use = r.querySelector('.tgroup-use-text').getBoundingClientRect(), pick = r.querySelector('.dropdown-btn').getBoundingClientRect(); return use.right <= pick.left - 7 || use.bottom <= pick.top; })")
                 page.goto(f"{BASE}/settings/search{suffix}")
                 page.wait_for_selector("#search-fallbacks")
                 # The fallbacks are an in-place list: ticking rows must not shift its search field sideways

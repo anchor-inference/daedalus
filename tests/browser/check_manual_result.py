@@ -16,6 +16,7 @@ from api_stub import (  # noqa: E402
     BoardStub,
     TeamStub,
     Unhandled,
+    choose_option,
     expect_app,
     folders,
     fulfil_shared,
@@ -183,7 +184,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/project/p1/board?token=t&lang={language}")
         # A desktop's card, or the row of a phone's list.
-        page.locator(".pcard, .ph-row", has_text="Update catalog").first.click()
+        page.locator(".pcard, .list-row", has_text="Update catalog").first.click()
         sheet = page.locator(".sheet.pboard-sheet")
         open_task_tool(page, "Submit my result" if language == "en" else "Сдать мой результат", language)
         if file_bound:
@@ -211,7 +212,7 @@ def scenario(language: str, width: int, file_bound: bool) -> None:
         flow.get_by_label("What did you observe?" if language == "en" else "Что вы наблюдали?").fill("I checked the current prices")
         flow.get_by_role("button", name="Record my observation" if language == "en" else "Записать моё наблюдение").click()
         if file_bound:
-            flow.get_by_label("Acceptance check" if language == "en" else "Критерий принятия").select_option("R1")
+            choose_option(page, flow.get_by_label("Acceptance check" if language == "en" else "Критерий принятия"), "R1")
             flow.get_by_label("What did you observe?" if language == "en" else "Что вы наблюдали?").fill("Opened prices.csv")
             flow.get_by_role("button", name="Record file observation" if language == "en" else "Записать проверку файла").click()
         flow.get_by_label("Review conclusion" if language == "en" else "Вывод проверки").fill("All criteria observed")

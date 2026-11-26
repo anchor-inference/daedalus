@@ -21,11 +21,13 @@ import { useOffline, useQuery } from "../store";
 import { useStreamUp } from "../events";
 import { errorText } from "../ui";
 import { fmtInterval, statusWord } from "../ui/components";
-import type { MenuItem } from "../ui/dialogs";
-import { ActionSheet, Banner, Chip, ChipBar, EmptyState, IconButton, ListRow, NewChatPill, SectionHeader, TopBar } from "../ui/phone";
+import type { MenuAction, MenuItem } from "../ui/dialogs";
+import { Banner, Chip, ChipBar, EmptyState, NewChatPill, SectionHeader } from "../ui/primitives";
+import { TopBar } from "../shell";
+import { IconButton, Menu, Row as ListRow, Tabs, isAction } from "../ui/primitives";
 import { useSessionCommands } from "./Sessions";
 import { asChatCommand } from "../chatproject";
-import { KindTabs, byTab, kindIcon, kindPlate, tabCounts, useKindTab } from "../chatkind";
+import { KIND_TABS, type KindTab, byTab, kindIcon, kindPlate, tabCounts, tabLabel, useKindTab } from "../chatkind";
 import { remoteRowWords } from "../remote";
 
 type View = "all" | "attention" | "working" | "loops" | "archive";
@@ -119,7 +121,7 @@ function ChatRow({ row, fork, projectName, toast, onOpen, onNewIn, pin }: { row:
     ...(pin ? [pinCommand(s.project_id, pin === "on")] : []),
     ...items,
   ];
-  const find = (icon: string) => items.find((item) => item !== "-" && item.icon === icon) as Exclude<MenuItem, "-"> | undefined;
+  const find = (icon: string) => items.find((item): item is MenuAction => isAction(item) && item.icon === icon);
   const archive = find("archive"), remove = find("trash"), move = find("folder");
   const swipe = s.archived ? undefined : [
     ...(move ? [{ label: t("ph.swipe.move"), icon: "folder" as const, tone: "neutral" as const, onSelect: move.onSelect }] : []),
@@ -163,16 +165,16 @@ function ProjectSection({ folder, rows, toast, onOpen, filtered }: { folder: Fol
   return (
     <section data-project={folder.key}>
       <SectionHeader count={folder.total} action={<>
-        <IconButton icon="vdots" label={`${folder.name}: ${t("dlg.menu")}`} onClick={() => setMenu(true)} popup="menu" />
-        <IconButton icon={shown ? "chevron" : "forward"} label={t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })} onClick={toggle} expanded={shown} />
+        <IconButton icon="vdots" label={`${folder.name}: ${t("dlg.menu")}`} onClick={() => setMenu(true)} popup="menu" className="ph-ib" />
+        <IconButton icon={shown ? "chevron" : "forward"} label={t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name })} onClick={toggle} expanded={shown} className="ph-ib" />
       </>}>{folder.name}</SectionHeader>
-      {menu && <ActionSheet preview={{ title: folder.name, meta: plural("agents.count", folder.total) }} onClose={() => setMenu(false)} items={[
+      {menu && <Menu preview={{ title: folder.name, meta: plural("agents.count", folder.total) }} onClose={() => setMenu(false)} items={[
         { label: t("side.project.newagent", { name: folder.name }), icon: "compose", onSelect: () => navigate(newAgentPath(folder.key)) },
         pinCommand(folder.key, false),
         ...(folder.system ? [{ label: t("agents.folder.tocompanion"), icon: "mic" as const, onSelect: () => navigate(pathFor("companion")) }] : [{ label: t("project.settings.for", { name: folder.name }), icon: "settings" as const, onSelect: () => setEditing(true) }]),
         ...(backToChat ? [backToChat] : []),
         { label: t(shown ? "agents.folder.hide" : "agents.folder.show", { name: folder.name }), icon: shown ? "chevron" : "forward", onSelect: toggle },
-      ]} />}
+      ]} label={t("dlg.menu")} />}
       {shown && <div className="ph-list">{lines(rows).map(({ row, fork }) => <ChatRow key={row.s.id} row={row} fork={fork} projectName={folder.name} toast={toast} onOpen={onOpen} onNewIn={() => navigate(newAgentPath(folder.key))} />)}</div>}
       {editing && <ProjectSettingsSheet project={{ ...folder.project, sessions: folder.rows.map((r) => ({ id: r.s.id, title: r.s.title })) }} onClose={() => setEditing(false)} onRemoved={() => setEditing(false)} toast={toast} />}
     </section>
@@ -317,15 +319,15 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
 
   const top = searching ? (
     <header className="ph-top">
-      <IconButton icon="back" label={t("shell.back")} onClick={() => { setSearching(false); setQuery(""); }} />
+      <IconButton icon="back" label={t("shell.back")} onClick={() => { setSearching(false); setQuery(""); }} className="ph-ib" />
       <label className="ph-search">
         <Icon name="search" size={18} />
         <input ref={field} type="search" value={query} maxLength={500} placeholder={t("search.placeholder")} aria-label={t("search.label")} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setSearching(false); setQuery(""); } }} />
       </label>
-      {query && <IconButton icon="close" label={t("ph.search.clear")} onClick={() => { setQuery(""); field.current?.focus(); }} />}
+      {query && <IconButton icon="close" label={t("ph.search.clear")} onClick={() => { setQuery(""); field.current?.focus(); }} className="ph-ib" />}
     </header>
   ) : (
-    <TopBar center title={t("ph.chats")} pip={counts.attention > 0} actions={<IconButton icon="search" label={t("search.label")} onClick={() => setSearching(true)} />} />
+    <TopBar title={t("ph.chats")} pip={counts.attention > 0} actions={<IconButton icon="search" label={t("search.label")} onClick={() => setSearching(true)} className="ph-ib" />} />
   );
 
   let body: React.ReactNode;
@@ -397,7 +399,10 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
     <div className="ph-page ph-chats">
       {top}
       {offline && <Banner strip tone="bad" icon="offline">{t("app.offline")}</Banner>}
-      {!searching && <KindTabs tab={tab} onChange={setTab} counts={all.data ? kindCounts : undefined} className="ph-kinds" />}
+      {/* The kinds are the shared page tabs: a count only on the kinds a list holds few of, since on
+          All and Chats it would be one more number to read. */}
+      {!searching && <Tabs variant="page" className="ph-kinds" label={t("kind.tabs.label")} value={tab} onChange={(next) => setTab(next as KindTab)}
+        tabs={KIND_TABS.map((k) => ({ id: k, label: tabLabel(k), icon: k === "all" ? undefined : kindIcon(k) ?? undefined, count: all.data && k !== "all" && k !== "chat" && kindCounts[k] > 0 ? kindCounts[k] : undefined }))} />}
       {!searching && (
         <ChipBar label={t("agents.filter.label")}>
           {lens && (visit || onPickProject) && <Chip on onClick={clearLens} label={t("ph.lens.clear", { name: lens.name })}><span className="ph-lens"><Icon name="folder" size={16} />{lens.name}<Icon name="close" size={14} /></span></Chip>}
@@ -409,7 +414,7 @@ export function ChatsScreen({ onOpen, toast, project: kept = "", projects = [], 
         </ChipBar>
       )}
       <div className="ph-page-body list">{body}</div>
-      {!searching && <NewChatPill floating label={t("ph.newchat")} onClick={newChat} />}
+      {!searching && <NewChatPill label={t("ph.newchat")} onClick={newChat} />}
     </div>
   );
 }

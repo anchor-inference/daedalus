@@ -325,6 +325,8 @@ export const api = {
     call<{ commands: TerminalCommand[] }>("GET", `/api/terminals/${encodeURIComponent(id)}/commands?last=${last}&output=${output ? 1 : 0}`),
   /** A name of the operator's own; an empty one gives the terminal back the title its program sets. */
   renameTerminal: (id: string, title: string) => call<TerminalView>("PATCH", `/api/terminals/${encodeURIComponent(id)}`, { title }),
+  /** Takes the keyboard (`human`: an agent's writes wait) or gives it back (`auto`: they go in at once). */
+  terminalKeyboard: (id: string, owner: "auto" | "human") => call<unknown>("POST", `/api/terminals/${encodeURIComponent(id)}/keyboard`, { owner }),
   /** Forgets an exited or lost terminal; refused (409) while it runs. */
   removeTerminal: (id: string) => call<unknown>("DELETE", `/api/terminals/${encodeURIComponent(id)}`),
   /** One changed file's unified diff, as `GET /api/terminals/{id}/files` listed it. */
@@ -1559,6 +1561,14 @@ export type SessionDetail = {
    *  Present until the next run starts: the reply the model managed to write is not the only trace of a failure. */
   error?: string;
   compacting?: Compacting | null;
+  /** When the run it is on began, by the host's clock (a run resumed after a question counts from the
+   *  resume); null while it does nothing. */
+  run_started_at?: string | null;
+  /** The git branch of the folder it works in, read from the repository at each read; null outside one. */
+  branch?: string | null;
+  /** Whether that folder is in a git repository at all: what decides that the chat has a Changes tool,
+   *  without asking git for its changes; null while the host does not know (a host folder not yet read). */
+  repository?: boolean | null;
   /** The summary being written ahead of the trigger; the session is not compacting while it is. */
   compaction_background?: Compacting | null;
   run_id: string | null;
@@ -2160,7 +2170,9 @@ export type Question = {
 /** How many notifications want the operator: unseen ones worth a badge, and open requests. */
 export type NotificationSummary = { unseen: number; needs_you: number };
 
-export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean };
+/** `description` says what the button does, in the operator's language; only a producer that knows sets
+ *  it, so a button without one is drawn without one rather than with a guess. */
+export type NotificationAction = { id: string; label: string; style: "primary" | "default" | "danger" | "ghost"; quick: boolean; description?: string };
 
 /** One entry of the notification centre, as `/api/notifications` and the `notify` event carry it. */
 export type Notification = {
@@ -2218,6 +2230,9 @@ export type Proposal = {
   status: string;
   reason: string | null;
   created_at: string;
+  /** The chat that made the change and when it was decided; rows from before these were kept have none. */
+  session_id?: string | null;
+  decided_at?: string | null;
 };
 
 /** What a watch waits for: ``event`` and the fields that kind of event has (the host adds the ids and
@@ -2431,6 +2446,8 @@ export type Preset = {
   openrouter_providers_gone?: string[];
   /** The subscription account the model's calls use; empty for the subscription's default account. */
   account?: string;
+  /** Starred by the operator: the model picker lists it under Favourites, ahead of the providers. */
+  favourite?: boolean;
 };
 
 /** One probe of Check models: `ok` and `slow` answered (in `ms`), `broken` was refused in words about the
@@ -2495,7 +2512,7 @@ export type Settings = {
   terminals?: { running_cap: number; host_memory_cap?: string };
   browser?: BrowserSettings;
   action_rules?: ActionRulesSettings;
-  /** The rail, its More launcher and the phone drawer (navconfig.ts reads it). Missing on an older host. */
+  /** The sidebar's pinned rows and its More launcher (navconfig.ts reads it). Missing on an older host. */
   navigation?: NavConfig;
   /** The helpers around the operator's messages; absent from a host older than them. */
   assist?: { predict: boolean; predict_preset?: string; predict_effort?: string; predict_usd_per_day?: number };

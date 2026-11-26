@@ -70,8 +70,8 @@ def serve(page: Page, host: Host) -> None:
 def in_agent_mode(page: Page, project: str | None) -> bool:
     page.wait_for_selector(".start-composer[data-agent]", timeout=10000)
     query = page.evaluate("() => location.search")
-    picked = page.locator(f".start-where-chip[data-project='{project}']") if project else None
-    return "agent=1" in query and (project is None or f"in={project}" in query) and (picked is None or picked.count() == 0 or picked.get_attribute("aria-pressed") == "true")
+    picked = page.locator(".composer-project") if project else None
+    return "agent=1" in query and (project is None or f"in={project}" in query) and (picked is None or picked.count() == 0 or picked.get_attribute("data-project") == project)
 
 
 def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
@@ -96,9 +96,10 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/new-agent-{lang}-1440.png")
 
-    # The split New chat button's menu.
+    # The menu at the end of the sidebar's New chat row.
     page.goto(home)
-    page.locator(".sb-newsplit .sb-new-more").click()
+    page.locator(".sb-newchat").hover()
+    page.locator(".sb-newchat .sb-new-more").click()
     page.get_by_role("menuitem", name=words["palette"]).click()
     check(in_agent_mode(page, None), f"{where}: the New chat button's menu offers New agent")
 
@@ -107,7 +108,7 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     page.wait_for_selector(".start-composer", timeout=15000)
     page.keyboard.press("Control+k")
     page.wait_for_selector("[role=option]", timeout=5000)
-    page.locator(".palette-sheet input").click()
+    page.locator(".palette-sheet .combo-input").click()
     page.keyboard.type(words["palette"])
     page.wait_for_function("w => document.querySelector('[role=option]')?.textContent === w", arg=words["palette"], timeout=5000)
     page.keyboard.press("Enter")
@@ -142,20 +143,20 @@ def desktop(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     page.locator(".start-agent-name").fill("Night watch")
     composer = page.locator(".start-composer")
     composer.locator(".plus").click()
-    menu = page.locator(".plus-menu")
-    check(menu.locator("[data-private]").count() == 1 and menu.locator("[data-option='own-directory']").inner_text().strip() == words["own"], f"{where}: + holds the private chat and the own directory")
+    menu = page.locator(".attach-menu")
+    check(menu.locator("[data-private]").count() == 1 and menu.locator("[data-option='own-directory']").inner_text().strip().startswith(words["own"]), f"{where}: + holds the private chat and the own directory")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/new-agent-plus-{lang}-1440.png")
     menu.locator("[data-option='own-directory']").click()
     menu.locator("[data-private]").click()
     composer.locator(".plus").click()
-    page.locator(".plus-menu [data-option='loop']").click()
+    page.locator(".attach-menu [data-option='loop']").click()
     loop = composer.locator(".start-agent-loop")
     check(loop.count() == 1, f"{where}: the loop asks for its instruction")
     check(composer.locator(".roundbtn.primary").is_disabled(), f"{where}: and creating waits for it")
     loop.locator("textarea").fill("Look at the overnight orders")
     composer.locator(".plus").click()
-    page.locator(".plus-menu [data-option='tools']").click()
+    page.locator(".attach-menu [data-option='tools']").click()
     sheet = page.locator(".sheet")
     sheet.locator(".toolpicker-head").click()
     sheet.locator(".toolrow:not(.head)", has_text="Exec").locator("input").uncheck()
@@ -184,7 +185,7 @@ def phone(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     section.wait_for(timeout=15000)
     project = section.get_attribute("data-project")
     section.locator(".ph-sec-act .ph-ib").first.click()
-    page.locator(".ph-actions .ph-mrow").first.click()
+    page.locator(".menu-sheet .menu-row").first.click()
     check(in_agent_mode(page, project), f"{where}: the project sheet's first row opens Agent mode in it")
     check(page.locator(".start-composer .start-agent-name").is_visible(), f"{where}: the name heads the composer")
     check(page.locator(".ph-kind").get_attribute("data-kind") == "agent", f"{where}: the mode says {words['agent']}")
@@ -193,7 +194,7 @@ def phone(browser, lang: str, check) -> None:  # type: ignore[no-untyped-def]
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/new-agent-{lang}-390.png")
     page.locator(".start-composer .plus").click()
-    rows = page.locator(".ph-plus-sheet")
+    rows = page.locator(".attach-menu")
     check(rows.locator("[data-option='loop']").count() == 1 and rows.locator("[data-option='tools']").count() == 1, f"{where}: + offers the loop and the tools")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/new-agent-plus-{lang}-390.png")

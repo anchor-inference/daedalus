@@ -326,7 +326,7 @@ export function PairSheet({ code, request, loaded, onClose }: { code: string; re
     }
   }
   return (
-    <Sheet title={t("pair.sheet.title")} onClose={onClose} size="narrow" className="pair-sheet">
+    <Sheet title={t("pair.sheet.title")} onClose={onClose} size="sm" className="pair-sheet">
       {!request ? (
         <div className="pair-missing" data-pair-state={loaded ? "missing" : "loading"}>
           {loaded ? <>

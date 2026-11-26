@@ -9,11 +9,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { locale, t, useLang } from "../i18n";
 import { Icon } from "../icons";
-import { MenuButton } from "../ui/phone";
 import { navigate, pathFor } from "../router";
+import { PageHeader, screenTitle, useMedia } from "../shell";
 import { hold, invalidate, peek, prime, release, useQuery } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import { OverflowMenu, Sheet, deleteWithUndo, toast as showToast } from "../ui/dialogs";
+import { Button, IconButton, Segmented, type Anchor } from "../ui/primitives";
 import { AgendaView, DayList } from "./Agenda";
 import { ConnectionsSheet } from "./Connections";
 import { addDays, dayLabel, rangeTitle, startOfWeek, step, visibleRange, weekdayNames, type Day, type View } from "./dates";
@@ -31,9 +32,9 @@ import { EventEditor, draftFromOccurrence, fieldsFromDraft, type EventDraft } fr
 import { eventItem, isDone, taskItem } from "./items";
 import { MiniMonth } from "./MiniMonth";
 import { MonthView } from "./MonthView";
-import { QuickCreate, type QuickDraft } from "./QuickCreate";
-import { useScopeQuestion } from "./scope";
-import { SearchBox, SearchSheet, type SearchHandle } from "./Search";
+import { QUICK_WIDTH, QuickCreate, type QuickDraft } from "./QuickCreate";
+import { askScope } from "./scope";
+import { SearchControl } from "./Search";
 import { SettingsSheet } from "./SettingsSheet";
 import { CalendarsSection } from "./Sidebar";
 import { TaskEditor, TasksPanel, type TaskDraft } from "./Tasks";
@@ -50,6 +51,11 @@ const SIDE_KEY = "daedalus.calendar.side";
 const TASKS_KEY = "daedalus.calendar.tasks";
 const DENSE_KEY = "daedalus.calendar.dense";
 const DESK_VIEWS: View[] = ["day", "week", "month", "agenda"];
+/** The pane beside the grid, and the width of the screen it needs to stand there. */
+const PANE_WIDTH = 420;
+const PANE_FROM = 1000;
+/** Below this much room for the grid the header sheds its secondary buttons into the menu. */
+const ROOMY = 900;
 const PHONE_VIEWS: View[] = ["day", "3day", "month", "agenda"];
 
 function stored(key: string): string | null {
@@ -82,7 +88,8 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   }, []);
   // The layout follows the room the screen has, not the window: the app's own sidebar takes some of it.
   const phone = width < 640;
-  const sideInline = width >= 940;
+  // The page header is the phone's top bar below 1024 px of window, whatever the screen's own width.
+  const compact = useMedia("(max-width: 1023px)");
 
   const settingsQuery = useQuery<CalendarSettings>(SETTINGS, { staleMs: 60000 });
   const settings: CalendarSettings = { ...DEFAULT_SETTINGS, ...(settingsQuery.data ?? {}) };
@@ -108,8 +115,20 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   const [taskView, setTaskView] = useState<TaskView>(() => (stored(TASKS_KEY) as TaskView | null) || "today");
 
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [quick, setQuick] = useState<{ draft: QuickDraft; anchor: DOMRect | null } | null>(null);
-  const [sheet, setSheet] = useState<"settings" | "connections" | "drawer" | "search" | "keys" | "filters" | "types" | null>(null);
+  // The event being read stays in its pane while its editor is open over it, so the grid does not
+  // change width behind the form and change back when it closes.
+  const viewing = editor?.kind === "view" ? editor.occurrence : editor?.kind === "event" ? editor.draft.occurrence ?? null : null;
+  const openKey = viewing ? `e:${viewing.id}` : null;
+  const paneInline = !compact && width >= PANE_FROM;
+  const paneOpen = paneInline && viewing !== null;
+  // What the grid has to itself: the side column and the long header wait for room.
+  const room = width - (paneOpen ? PANE_WIDTH : 0);
+  const sideInline = room >= 940;
+  const tight = room < ROOMY;
+  const [quick, setQuick] = useState<{ draft: QuickDraft; anchor: Anchor | null; side: "right" | "left" | "bottom" } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [sheet, setSheet] = useState<"settings" | "connections" | "drawer" | "keys" | "filters" | "types" | null>(null);
+  const createButton = useRef<HTMLElement | null>(null);
   const [filters, setFiltersState] = useState<Filters>(storedFilters);
   const setFilters = (next: Filters) => { setFiltersState(next); storeFilters(next); };
   const [dense, setDenseState] = useState(() => stored(DENSE_KEY) === "1");
@@ -119,8 +138,6 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   const groups = useGroups();
   const [busy, setBusy] = useState(false);
   const [dragTask, setDragTask] = useState<Task | null>(null);
-  const [scopeDialog, askScope] = useScopeQuestion();
-  const search = useRef<SearchHandle>(null);
 
   const weekends = settings.show_weekends && !workWeek;
   const range = visibleRange(view, anchor, { weekStart: settings.week_start, weekends });
@@ -242,9 +259,15 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
 
   // ── creating ───────────────────────────────────────────────────────────────────────────────
 
+  /** The card beside the slot that was picked (on the side with room), under the Create button when
+   *  there is no slot to stand beside, and a sheet below 1024 px, where the primitive makes it one. */
   function startQuick(day: Day, start: number, end: number, allDay: boolean, rect: DOMRect | null) {
     if (!defaultCalendar) { toast(t("cal.no.calendar")); return; }
-    setQuick({ draft: { kind: "event", title: "", day, start, end, allDay, calendar_id: defaultCalendar.id }, anchor: rect });
+    const draft: QuickDraft = { kind: "event", title: "", day, start, end, allDay, calendar_id: defaultCalendar.id };
+    if (rect && !compact) {
+      const fits = window.innerWidth - rect.right - 10 - QUICK_WIDTH >= 8;
+      setQuick({ draft, side: fits ? "right" : "left", anchor: { getBoundingClientRect: () => rect } });
+    } else setQuick({ draft, side: "bottom", anchor: compact ? null : createButton.current });
   }
 
   /** A new item at the next half hour of the day in view: what `c` and the phone's add button make. */
@@ -550,8 +573,8 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
     const target = e.target as HTMLElement | null;
     const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
     if (typing || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-    // A sheet, a menu or the quick card has the keyboard while it is open.
-    if (document.querySelector(".sheet-backdrop, .cal-quick, .menu, .navmenu")) return;
+    // A sheet, a menu, a list or the quick card has the keyboard while it is open.
+    if (document.querySelector(".sheet-backdrop, .layer-pos, .navmenu")) return;
     const act: Record<string, () => void> = {
       t: goToday,
       d: () => pickView("day"),
@@ -561,7 +584,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       j: () => go(1), n: () => go(1), ArrowRight: () => go(1),
       k: () => go(-1), p: () => go(-1), ArrowLeft: () => go(-1),
       c: createHere,
-      "/": () => (phone ? setSheet("search") : search.current?.focus()),
+      "/": () => setSearching(true),
       "?": () => setSheet("keys"),
     };
     // `g` then a letter is the app's own jump to another screen; that letter is not ours.
@@ -602,7 +625,7 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
   // Capitalised here rather than with ::first-letter: Russian dates start lower case ("вт, 6 октября"),
   // and the wider capital drawn by the pseudo-element was not counted in the title's width, so the
   // title lost its last characters to an ellipsis with room to spare.
-  const shown = rangeTitle(view, range, anchor, locale(), phone, today);
+  const shown = rangeTitle(view, range, anchor, locale(), phone || tight, today);
   const title = shown.charAt(0).toLocaleUpperCase(locale()) + shown.slice(1);
   const busyDays = useMemo(() => {
     const days = new Set<Day>();
@@ -629,117 +652,114 @@ export function CalendarScreen({ toast, query }: { toast: (message: string) => v
       hourHeight={phone ? 52 : 48} phone={phone} scrollToken={scrollToken + (view === "day" ? 1000 : view === "3day" ? 2000 : 3000)} dragTask={dragTask} defaultDuration={settings.default_duration}
       selection={quick && !quick.draft.allDay ? { day: quick.draft.day, start: quick.draft.start, end: quick.draft.end } : null}
       onSelect={(slot: Slot, rect) => startQuick(slot.day, slot.start, slot.end, false, phone ? null : rect)}
-      onAllDay={(day) => startQuick(day, 540, 600, true, null)}
+      onAllDay={(day, rect) => startQuick(day, 540, 600, true, rect)} openKey={openKey}
       onOpen={openItem} onMove={(item, sd, sm, ed, em) => void moveItem(item, sd, sm, ed, em)} onToggleTask={(task) => void toggleTask(task)}
       onDropTask={(task, day, minutes) => void dropTask(task, day, minutes)} onPickDay={(day) => (view === "day" ? setAnchor(day) : openDay(day))} />
   ) : view === "month" ? (
     phone ? (
       <div className="cal-month-phone">
         <MonthView weeks={chunk(range.days)} month={anchor.slice(0, 7)} items={items} zone={zone} today={today} weekStart={settings.week_start} compact selected={anchor} dragTask={null}
-          onPickDay={setAnchor} onMore={openDay} onCreate={(day) => startQuick(day, 540, 600, false, null)} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onDropTask={() => undefined} />
+          onPickDay={setAnchor} onMore={openDay} onCreate={(day) => startQuick(day, 540, 600, false, null)} openKey={openKey} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onDropTask={() => undefined} />
         <div className="cal-month-day">
           <h2 className="cal-month-day-title">{dayLabel(anchor, locale(), { weekday: "long", day: "numeric", month: "long" })}</h2>
-          <DayList day={anchor} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} />
+          <DayList day={anchor} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} openKey={null} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} />
         </div>
       </div>
     ) : (
-      <MonthView weeks={chunk(range.days)} month={anchor.slice(0, 7)} items={items} zone={zone} today={today} weekStart={settings.week_start} compact={false} selected={anchor} dragTask={dragTask}
-        onPickDay={openDay} onMore={openDay} onCreate={(day) => startQuick(day, parseClockSafe(settings.work_start), parseClockSafe(settings.work_start) + settings.default_duration, false, null)}
+      <MonthView weeks={chunk(range.days)} month={anchor.slice(0, 7)} items={items} zone={zone} today={today} weekStart={settings.week_start} compact={false} selected={anchor} dragTask={dragTask} openKey={openKey}
+        onPickDay={openDay} onMore={openDay} onCreate={(day, rect) => startQuick(day, parseClockSafe(settings.work_start), parseClockSafe(settings.work_start) + settings.default_duration, false, rect)}
         onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onDropTask={(task, day) => void dropTask(task, day, null)} />
     )
   ) : (
-    <AgendaView days={range.days} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} onCreate={newEvent} />
+    <AgendaView days={range.days} items={items} zone={zone} today={today} now={now} calendars={calendars} types={types} aggregates={aggregates} dense={dense} openKey={openKey} onOpen={openItem} onToggleTask={(task) => void toggleTask(task)} onStatus={(item, status) => void changeStatus(item, status)} onCreate={newEvent} />
+  );
+
+  const filtersOn = filterCount(filters);
+  const views = (phone ? PHONE_VIEWS : DESK_VIEWS).map((v) => ({ id: v, label: v === "week" && workWeek ? t("cal.view.workweek") : viewLabel(v) }));
+  // The secondary buttons stand in the header while it has room; narrower, the menu carries them.
+  const shed = compact || tight;
+  const eventPane = (pane: boolean, occurrence: Occurrence) => (
+    <EventView key={occurrence.id} occurrence={occurrence} calendars={calendars} types={types} groups={groups} zone={zone} phone={phone} pane={pane} busy={busy}
+      onClose={() => setEditor(null)} onEdit={(full) => setEditor({ kind: "event", draft: draftFromOccurrence(full, zone, colorOf(full.calendar_id)) })} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)}
+      onOpenGroup={(id) => { setEditor(null); setGroupOpen(id); }} onOpenEvent={openEventById} />
   );
 
   return (
-    <div ref={shell} className={`screen cal-screen ${phone ? "phone" : "desk"}`}>
-      <header className="cal-head">
-        {/* A phone reaches the other destinations from the app's drawer; the planner's own drawer of
-            calendars and tasks keeps a button of its own beside it, under the planner's flag. */}
-        {phone && <MenuButton />}
-        <button type="button" className="iconbtn" onClick={toggleSide} aria-label={sideInline ? (sideOpen ? t("cal.side.hide") : t("cal.side.show")) : t("cal.side.open")} title={sideInline ? (sideOpen ? t("cal.side.hide") : t("cal.side.show")) : t("cal.side.open")} aria-expanded={sideInline ? sideOpen : sheet === "drawer"}>
-          <Icon name={sideInline ? "sidebar" : phone ? "flag" : "menu"} />
-        </button>
-        {!phone && <button type="button" className="btn cal-today" onClick={goToday} title={`${t("cal.today")} (T)`}>{t("cal.today")}</button>}
-        {!phone && (
-          <div className="cal-nav">
-            <button type="button" className="iconbtn" onClick={() => go(-1)} aria-label={t(`cal.previous.${view}`)} title={`${t(`cal.previous.${view}`)} (K)`}><Icon name="back" /></button>
-            <button type="button" className="iconbtn" onClick={() => go(1)} aria-label={t(`cal.next.${view}`)} title={`${t(`cal.next.${view}`)} (J)`}><Icon name="forward" /></button>
-          </div>
-        )}
-        <h1 className="cal-title" aria-live="polite">{title}</h1>
-        {!phone && <SearchBox ref={search} zone={zone} onPick={(o) => void openFound(o)} />}
-        {!phone && (
-          <div className="segmented inline cal-views" role="radiogroup" aria-label={t("cal.view")}>
-            {DESK_VIEWS.map((v) => (
-              <button key={v} type="button" role="radio" aria-checked={view === v} className={view === v ? "on" : ""} onClick={() => pickView(v)} title={`${viewLabel(v)} (${v[0].toUpperCase()})`}>
-                {v === "week" && workWeek ? t("cal.view.workweek") : viewLabel(v)}
-              </button>
-            ))}
-          </div>
-        )}
-        {phone && (
-          <>
-            <button type="button" className="iconbtn" onClick={() => setSheet("search")} aria-label={t("cal.search")} title={t("cal.search")}><Icon name="search" /></button>
-            <OverflowMenu label={t("cal.view")} className="cal-view-pick" trigger={<span className="cal-view-current">{viewLabel(view)}<Icon name="chevron" size={14} /></span>}
-              items={PHONE_VIEWS.map((v) => ({ label: viewLabel(v), icon: v === view ? "check" as const : undefined, onSelect: () => pickView(v) }))} />
-            <button type="button" className="iconbtn cal-today-icon" onClick={goToday} aria-label={t("cal.today")} title={t("cal.today")}>
-              <span className="cal-today-glyph" aria-hidden="true">{Number(today.slice(8, 10))}</span>
-            </button>
-          </>
-        )}
-        {/* On a phone the header has no room for a sixth glyph: the filters live in its menu, and the
-            button comes back only while a filter is on, so a narrowed view never looks complete. */}
-        {(!phone || filterCount(filters) > 0) && <button type="button" className={`iconbtn cal-filter-btn ${filterCount(filters) ? "on" : ""}`} onClick={() => setSheet("filters")} aria-label={filterCount(filters) ? t("cal.filters.on", { n: filterCount(filters) }) : t("cal.filters")} title={t("cal.filters")}>
-          <Icon name="sliders" />
-          {filterCount(filters) > 0 && <span className="cal-filter-count" aria-hidden="true">{filterCount(filters)}</span>}
-        </button>}
-        {!phone && <button type="button" className="iconbtn" onClick={() => setSheet("settings")} aria-label={t("cal.settings")} title={t("cal.settings")}><Icon name="settings" /></button>}
-        <OverflowMenu label={t("cal.menu")} items={[
-          ...(!phone ? [{ label: t("cal.view.workweek.toggle"), checked: workWeek, onSelect: toggleWorkWeek }, "-" as const] : []),
-          ...(phone ? [{ label: t("cal.filters"), icon: "sliders" as const, onSelect: () => setSheet("filters") }, { label: t("cal.settings"), icon: "settings" as const, onSelect: () => setSheet("settings") }] : []),
-          { label: t("cal.connections"), icon: "plug", onSelect: () => setSheet("connections") },
-          { label: t("cal.types"), icon: "list", onSelect: () => setSheet("types") },
-          { label: t("cal.density.compact"), checked: dense, onSelect: () => setDense(!dense) },
-          ...(!phone ? [{ label: t("cal.keys"), icon: "question" as const, hint: "?", onSelect: () => setSheet("keys") }] : []),
-        ]} />
-        {!phone && <button type="button" className="btn primary cal-new" onClick={newEvent} title={`${t("cal.new")} (C)`}><Icon name="plus" size={16} /> {t("cal.new.short")}</button>}
-      </header>
-      {phone && (view === "day" || view === "3day") && (
-        <WeekStrip anchor={anchor} today={today} weekStart={settings.week_start} span={view === "3day" ? 3 : 1} busy={busyDays} onPick={setAnchor} />
-      )}
-      <div className="cal-body">
-        {sideInline && sideOpen && <aside className="cal-side" aria-label={t("cal.side")}>{side}</aside>}
-        <main className={`cal-main view-${view}`} onTouchStart={phone ? onTouchStart : undefined} onTouchEnd={phone ? onTouchEnd : undefined} aria-busy={loading}>
-          {loading && <div className="cal-loading" role="progressbar" aria-label={t("common.loading")} />}
-          {loadError && (
-            <div className="cal-banner" role="alert">
-              <Icon name="alert" size={16} /><span>{t("cal.load.failed", { error: loadError })}</span>
-              <button type="button" className="btn small" onClick={() => void events.refresh()}>{t("cal.retry")}</button>
-            </div>
+    <div ref={shell} className={`screen cal-screen ${phone ? "phone" : "desk"} ${tight ? "tight" : ""}`}>
+      <div className="cal-page">
+        <section className="cal-area" aria-label={screenTitle("calendar")}>
+          <PageHeader ruled
+            title={<span className="cal-title" aria-live="polite">{title}</span>}
+            filters={compact ? (
+              <div className="cal-filter-row">
+                <IconButton icon="flag" label={t("cal.side.open")} expanded={sheet === "drawer"} onClick={toggleSide} />
+                <Segmented size="md" className="cal-views" label={t("cal.view")} value={view} onChange={pickView} options={views} />
+                <button type="button" className="iconbtn cal-today-icon" onClick={goToday} aria-label={t("cal.today")} title={t("cal.today")}>
+                  <span className="cal-today-glyph" aria-hidden="true">{Number(today.slice(8, 10))}</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {!tight && <IconButton icon="sidebar" label={sideInline ? (sideOpen ? t("cal.side.hide") : t("cal.side.show")) : t("cal.side.open")} expanded={sideInline ? sideOpen : sheet === "drawer"} onClick={toggleSide} />}
+                <Button className="cal-today" onClick={goToday} title={`${t("cal.today")} (T)`}>{t("cal.today")}</Button>
+                <span className="cal-nav">
+                  <IconButton icon="back" label={t(`cal.previous.${view}`)} kbd="K" onClick={() => go(-1)} />
+                  <IconButton icon="forward" label={t(`cal.next.${view}`)} kbd="J" onClick={() => go(1)} />
+                </span>
+                <Segmented size="md" className="cal-views" label={t("cal.view")} value={view} onChange={pickView} options={views} />
+              </>
+            )}
+            actions={
+              <>
+                <SearchControl zone={zone} open={searching} onOpen={() => setSearching(true)} onClose={() => setSearching(false)} onPick={(o) => void openFound(o)} />
+                {/* On a phone the filters come back to the header only while one is on, so a narrowed view never looks complete. */}
+                {(!shed || (compact && filtersOn > 0)) && <IconButton icon="sliders" className="cal-filter-btn" label={filtersOn ? t("cal.filters.on", { n: filtersOn }) : t("cal.filters")} pressed={filtersOn > 0} badge={filtersOn || undefined} onClick={() => setSheet("filters")} />}
+                {!shed && <IconButton icon="settings" label={t("cal.settings")} onClick={() => setSheet("settings")} />}
+                <OverflowMenu label={t("cal.menu")} items={[
+                  ...(!phone ? [{ label: t("cal.view.workweek.toggle"), checked: workWeek, onSelect: toggleWorkWeek }, "-" as const] : []),
+                  ...(tight && !compact ? [{ label: t("cal.side.open"), icon: "sidebar" as const, onSelect: () => setSheet("drawer") }] : []),
+                  ...(shed ? [{ label: t("cal.filters"), icon: "sliders" as const, onSelect: () => setSheet("filters") }, { label: t("cal.settings"), icon: "settings" as const, onSelect: () => setSheet("settings") }] : []),
+                  { label: t("cal.connections"), icon: "plug", onSelect: () => setSheet("connections") },
+                  { label: t("cal.types"), icon: "list", onSelect: () => setSheet("types") },
+                  { label: t("cal.density.compact"), checked: dense, onSelect: () => setDense(!dense) },
+                  ...(!compact ? [{ label: t("cal.keys"), icon: "question" as const, hint: "?", onSelect: () => setSheet("keys") }] : []),
+                ]} />
+                {compact
+                  ? <IconButton icon="plus" className="primary cal-new" label={t("cal.new")} onClick={createHere} />
+                  : <span ref={(el) => { createButton.current = el; }} className="cal-create-anchor"><Button variant="primary" icon="plus" className="cal-new" aria-label={t("cal.new.short")} title={`${t("cal.new")} (C)`} onClick={createHere}><span className="cal-new-label">{t("cal.new.short")}</span></Button></span>}
+              </>
+            } />
+          {phone && (view === "day" || view === "3day") && (
+            <WeekStrip anchor={anchor} today={today} weekStart={settings.week_start} span={view === "3day" ? 3 : 1} busy={busyDays} onPick={setAnchor} />
           )}
-          {grid}
-        </main>
+          <div className="cal-body">
+            {sideInline && sideOpen && <aside className="cal-side" aria-label={t("cal.side")}>{side}</aside>}
+            <main className={`cal-main view-${view}`} onTouchStart={phone ? onTouchStart : undefined} onTouchEnd={phone ? onTouchEnd : undefined} aria-busy={loading}>
+              {loading && <div className="cal-loading" role="progressbar" aria-label={t("common.loading")} />}
+              {loadError && (
+                <div className="cal-banner" role="alert">
+                  <Icon name="alert" size={16} /><span>{t("cal.load.failed", { error: loadError })}</span>
+                  <Button size="sm" onClick={() => void events.refresh()}>{t("cal.retry")}</Button>
+                </div>
+              )}
+              {grid}
+            </main>
+          </div>
+        </section>
+        {paneOpen && viewing && eventPane(true, viewing)}
       </div>
-      {phone && (
-        <button type="button" className="cal-fab" onClick={createHere} aria-label={t("cal.new")} title={t("cal.new")}><Icon name="plus" size={24} /></button>
-      )}
       {sheet === "drawer" && <Sheet title={t("cal.side")} onClose={() => setSheet(null)} className="cal-drawer"><div className="cal-side in-drawer">{side}</div></Sheet>}
       {sheet === "settings" && <SettingsSheet settings={settings} zone={zone} onClose={() => setSheet(null)} toast={toast} />}
       {sheet === "connections" && <ConnectionsSheet onClose={() => setSheet(null)} toast={toast} />}
-      {sheet === "search" && <SearchSheet zone={zone} onPick={(o) => void openFound(o)} onClose={() => setSheet(null)} />}
       {sheet === "keys" && <KeysSheet onClose={() => setSheet(null)} />}
-      {quick && <QuickCreate draft={quick.draft} calendars={calendars} anchor={quick.anchor} phone={phone} busy={busy} onChange={(draft) => setQuick({ ...quick, draft })} onSave={(q) => void saveQuick(q)} onMore={moreQuick} onClose={() => setQuick(null)} />}
+      {quick && <QuickCreate draft={quick.draft} calendars={calendars} anchor={quick.anchor} side={quick.side} busy={busy} onChange={(draft) => setQuick({ ...quick, draft })} onSave={(q) => void saveQuick(q)} onMore={moreQuick} onClose={() => setQuick(null)} />}
       {sheet === "filters" && <FilterSheet filters={filters} calendars={calendars} types={types} groups={groups} tags={tags} dense={dense} onDense={setDense} onChange={setFilters} onClose={() => setSheet(null)} />}
       {sheet === "types" && <TypesSheet types={types} onClose={() => setSheet(null)} toast={toast} />}
       {groupOpen && <GroupPage groupId={groupOpen} groups={groups} types={types} calendars={calendars} zone={zone} today={today} now={now} phone={phone} dense={dense} onClose={() => setGroupOpen(null)} onOpen={openItem} onStatus={(item, status) => void changeStatus(item, status)} toast={toast} />}
-      {editor?.kind === "view" && <EventView key={editor.occurrence.id} occurrence={editor.occurrence} calendars={calendars} types={types} groups={groups} zone={zone} phone={phone} busy={busy}
-        onClose={() => setEditor(null)} onEdit={(full) => setEditor({ kind: "event", draft: draftFromOccurrence(full, zone, colorOf(full.calendar_id)) })} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)}
-        onOpenGroup={(id) => { setEditor(null); setGroupOpen(id); }} onOpenEvent={openEventById} />}
+      {editor?.kind === "view" && !paneOpen && eventPane(false, editor.occurrence)}
       {editor?.kind === "event" && <EventEditor key={editor.draft.occurrence?.id ?? "new"} draft={editor.draft} calendars={calendars} types={types} groups={groups} phone={phone} busy={busy} onClose={() => setEditor(editor.draft.occurrence ? { kind: "view", occurrence: editor.draft.occurrence } : null)} onSave={(d) => void saveEvent(d)} onDelete={(o) => void removeEvent(o)} onResolve={(o, c) => void resolveConflict(o, c)} />}
       {editor?.kind === "task" && <TaskEditor key={editor.draft.task?.id ?? "new"} draft={editor.draft} lists={lists} zone={zone} today={today} busy={busy} onClose={() => setEditor(null)} onSave={(d) => void saveTask(d)} onDelete={(task) => void removeTask(task)}
         onToggle={(task) => { void toggleTask(task); setEditor(null); }} />}
-      {scopeDialog}
     </div>
   );
 }
@@ -779,7 +799,7 @@ function WeekStrip({ anchor, today, weekStart, span, busy, onPick }: { anchor: D
 function KeysSheet({ onClose }: { onClose: () => void }) {
   const rows: [string, string][] = [["T", "cal.keys.today"], ["J · →", "cal.keys.next"], ["K · ←", "cal.keys.previous"], ["D", "cal.keys.day"], ["W", "cal.keys.week"], ["M", "cal.keys.month"], ["A", "cal.keys.agenda"], ["C", "cal.keys.create"], ["/", "cal.keys.search"], ["Esc", "cal.keys.close"], ["?", "cal.keys.help"]];
   return (
-    <Sheet title={t("cal.keys")} onClose={onClose} size="narrow">
+    <Sheet title={t("cal.keys")} onClose={onClose} size="sm">
       <dl className="cal-keys">
         {rows.map(([key, what]) => <div key={what}><dt><kbd>{key}</kbd></dt><dd>{t(what)}</dd></div>)}
       </dl>

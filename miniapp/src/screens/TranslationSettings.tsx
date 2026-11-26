@@ -14,8 +14,8 @@ import { type Settings } from "../api";
 import { lang, t } from "../i18n";
 import { ModelPicker } from "../modelitems";
 import { WithEffort } from "../taskeffort";
-import { NumRow, Row } from "../settingsrow";
-import { Dropdown } from "../ui/index";
+import { NumRow, Row, SetGroup } from "../settingsrow";
+import { Select } from "../ui/primitives";
 import { AGENT_LANGUAGES, languageName } from "../agentlang";
 
 type SaveProps = { s: Settings; save: (patch: Partial<Settings>) => void; presetLabel: (id: string) => string };
@@ -41,9 +41,9 @@ export function TranslationSettings({ s, save, presetLabel }: SaveProps) {
 function AnswerLanguage({ s, save }: Omit<SaveProps, "presetLabel">) {
   const value = s.answer_language || "auto";
   return (
-    <div className="card" data-card="answer-language">
-      <Row title={t("settings.answerlang")} desc={t("settings.answerlang.sub")} stack data-setting="answer_language">
-        <Dropdown
+    <SetGroup title={t("settings.answerlang.group")} data-card="answer-language">
+      <Row title={t("settings.answerlang")} desc={t("settings.answerlang.sub")} data-setting="answer_language">
+        <Select
           id="answer-language"
           label={t("settings.answerlang")}
           value={value}
@@ -54,7 +54,7 @@ function AnswerLanguage({ s, save }: Omit<SaveProps, "presetLabel">) {
           ]}
         />
       </Row>
-    </div>
+    </SetGroup>
   );
 }
 
@@ -73,18 +73,17 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
   const suggested = s.translation?.suggested ?? "";
   const fallbackSuggested = s.translation?.fallback_suggested ?? "";
   return (
-    <div className="card" data-card="agent-language">
-      <div className="section-title">{t("settings.translation")}</div>
-      <Row title={t("settings.translation.operator")} desc={t("settings.translation.operator.sub")} stack data-setting="translation.operator_language">
-        <Dropdown id="translation-operator" label={t("settings.translation.operator")} value={current.operator_language} onChange={(operator_language) => put({ operator_language })}
+    <SetGroup title={t("settings.translation")} data-card="agent-language">
+      <Row title={t("settings.translation.operator")} desc={t("settings.translation.operator.sub")} data-setting="translation.operator_language">
+        <Select id="translation-operator" label={t("settings.translation.operator")} value={current.operator_language} onChange={(operator_language) => put({ operator_language })}
           options={ordered.map((code) => ({ id: code, label: code === ui ? t("settings.translation.applang", { lang: languageName(code) }) : languageName(code) }))} />
       </Row>
-      <Row title={t("settings.translation.agent")} desc={t("settings.translation.agent.sub")} stack data-setting="translation.agent_language">
-        <Dropdown id="translation-agent" label={t("settings.translation.agent")} value={current.agent_language} onChange={(agent_language) => put({ agent_language })}
+      <Row title={t("settings.translation.agent")} desc={t("settings.translation.agent.sub")} data-setting="translation.agent_language">
+        <Select id="translation-agent" label={t("settings.translation.agent")} value={current.agent_language} onChange={(agent_language) => put({ agent_language })}
           options={[{ id: "", label: t("agentlang.off") }, ...AGENT_LANGUAGES.filter((code) => code !== current.operator_language).map((code) => ({ id: code, label: languageName(code) }))]} />
       </Row>
-      {/* The same picker as every other single model in Settings, so the translator is found by name,
-          provider or model id like the rest; empty is Automatic, naming the model the host would use. */}
+      {/* The translator is a model like every other one in Settings; empty is Automatic, naming the
+          model the host would use. */}
       <Row title={t("settings.translation.preset")} desc={t("settings.translation.preset.sub")} stack data-setting="translation.preset">
         <WithEffort id="translation-effort" value={current.effort} onChange={(effort) => put({ effort })} fallback="off">
           <ModelPicker
@@ -113,6 +112,6 @@ function AgentLanguage({ s, save, presetLabel }: SaveProps) {
         value={current.blocking_timeout_seconds ?? 30} min={5} step={5} onSave={(blocking_timeout_seconds) => put({ blocking_timeout_seconds })} />
       <NumRow id="translation-timeout" setting="translation.timeout_seconds" title={t("settings.translation.timeout")} desc={t("settings.translation.timeout.sub")} unit={t("settings.unit.seconds")}
         value={current.timeout_seconds} min={5} step={5} onSave={(timeout_seconds) => put({ timeout_seconds })} />
-    </div>
+    </SetGroup>
   );
 }

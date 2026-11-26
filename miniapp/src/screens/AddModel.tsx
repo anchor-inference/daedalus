@@ -13,12 +13,14 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { api, Preset, PROVIDER_KEYS_CHANGED, Settings } from "../api";
 import { Icon } from "../icons";
 import { plural, t, useLang } from "../i18n";
-import { LangPicker, Switch, useMedia } from "../ui/index";
+import { LangPicker, Segmented, Switch } from "../ui/index";
+import { Badge, Button, Field } from "../ui/primitives";
 import { errorText, numInput } from "../ui";
 import { BLANK, ModelEntry, Picked, PricingDraft, REASONING_EFFORTS, RouteListing, prefilled, presetIdFor, priceFor, pricingFromDraft, retyped, routeBill } from "../models";
 import { FreeModels } from "./FreeModels";
 import { OpenRouterProviders } from "./OpenRouterProviders";
 import { ProviderMark } from "../ui/provider-mark";
+import { useProviderTest } from "../providertest";
 import { Billing, OPENCODE_KEY_URL, OPENCODE_PLANS, OpencodePlan, missingPlans, opencodePlanOf, opencodeProvider } from "../opencode";
 
 export type { ModelEntry, Picked } from "../models";
@@ -93,16 +95,15 @@ function keyWords(p: ProviderCard): { pill: string; tone: string; note: string }
   return { pill: t("add.key.none"), tone: "pending", note };
 }
 
-/** A step of the flow: a card that lightens when it is the one being worked on. */
+/** A step of the flow: its label in the page's section-label voice, then what it holds. The number says
+ *  which step is being worked on, in ink; a step that is not the current one keeps every colour it had. */
 function Step({ n, title, sub, active, done, children }: { n: number; title: string; sub: string; active: boolean; done: boolean; children: ReactNode }) {
   return (
-    <section className={`card step reveal ${active ? "on" : "waiting"}`} style={{ animationDelay: `${(n - 1) * 70}ms` }}>
+    <section className={`step ${active ? "on" : "waiting"}`}>
       <div className="step-head">
-        <span className={`step-n ${done ? "done" : ""}`}>{done ? <Icon name="check" size={14} /> : n}</span>
-        <div className="grow">
-          <b>{title}</b>
-          <div className="sub">{sub}</div>
-        </div>
+        <span className={`step-n ${done ? "done" : ""}`}>{done ? <Icon name="check" size={12} /> : n}</span>
+        <b>{title}</b>
+        <span className="step-sub">{sub}</span>
       </div>
       {children}
     </section>
@@ -116,148 +117,91 @@ function planLine(plan: OpencodePlan): string {
   return rest.charAt(0).toLocaleUpperCase() + rest.slice(1);
 }
 
-/** The kinds an operator runs on its own machine or network, listed under "Your own" on a phone. */
+/** The kinds an operator runs on its own machine or network, listed under "Your own". */
 const OWN_KINDS = new Set(["llamacpp", "vllm", "openai_compat"]);
 
 /**
- * Step 1 on a phone: the endpoints as rows in three groups — the OpenCode plans (a subscription and a
- * gateway), the providers, and the ones of the operator's own — each with what it costs or what it
- * needs and one word about its key. An endpoint's address is not on its row: an internal address
- * such as the key proxy's told a newcomer nothing and pushed the words that did off the screen, so it
- * is under "Advanced" for the endpoint picked.
+ * Step 1: the endpoints as rows in three groups — the OpenCode plans (a subscription and a gateway),
+ * the providers, and the ones of the operator's own — each with its mark, what it costs or what it
+ * needs, and one word about its key. The same rows at every width: the phone's list and the desktop's
+ * cards said the same things in two shapes. An endpoint's address is not on its row (an internal
+ * address such as the key proxy's told a newcomer nothing); it is under the connection test of the
+ * endpoint picked, where it matters.
  */
-function PhoneProviderRows({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
+function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
   const providers = state?.providers ?? [];
-  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)];
+  const [filter, setFilter] = useState("");
+  const query = filter.trim().toLocaleLowerCase();
+  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)]
+    .filter((p) => !query || `${providerName(p.id, p.kind, p.name, p.billing)} ${p.id}`.toLocaleLowerCase().includes(query));
   // An OpenAI-compatible endpoint is the operator's own only when it needs no credential; one that
   // borrows a CLI's login (Codex, Claude, Grok) is a provider like any other.
   const ownKind = (p: ProviderCard) => OWN_KINDS.has(p.kind) && (p.kind !== "openai_compat" || p.key_kind === "endpoint");
   const gateways = ordered.filter((p) => opencodePlanOf(p.kind, p.billing));
   const own = ordered.filter((p) => !opencodePlanOf(p.kind, p.billing) && ownKind(p));
   const rest = ordered.filter((p) => !opencodePlanOf(p.kind, p.billing) && !ownKind(p));
-  const absent = missingPlans(providers);
-  const picked = providers.find((p) => p.id === chosen);
+  // Both ways of paying OpenCode stay on offer: a plan with no endpoint yet is a row that adds one.
+  const absent = missingPlans(providers).filter((plan) => !query || plan.name.toLocaleLowerCase().includes(query));
+  const showLlama = !query || "llama.cpp".includes(query);
+  const showCustom = !query || `${t("add.custom")} OpenAI API`.toLocaleLowerCase().includes(query);
   const row = (p: ProviderCard) => {
     const { pill, tone, note } = keyWords(p);
     const plan = opencodePlanOf(p.kind, p.billing);
+    const name = providerName(p.id, p.kind, p.name, p.billing);
+    // An endpoint with no credential is not a choice: picking it produced a list of URLs and HTTP
+    // codes, and the operator had to work backwards from those to "there is no key". `disabled` would
+    // take it out of the tab order, and the sentence under it — why this endpoint cannot be used — is
+    // exactly what a keyboard or screen-reader user needs: `aria-disabled` keeps the row reachable.
     const blocked = p.key_held === false;
     return (
-      <button key={p.id} className={`pick ph-pickrow ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
-        <ProviderMark id={p.id} kind={p.kind} name={providerName(p.id, p.kind, p.name, p.billing)} className="ph-pickrow-ico" />
-        <span className="ph-pickrow-main">
-          <b>{providerName(p.id, p.kind, p.name, p.billing)}</b>
-          <span className="ph-pickrow-sub">{plan ? planLine(plan) : note || t(`add.kind.${ownKind(p) ? "own" : "provider"}`)}</span>
+      <button key={p.id} type="button" className={`pick ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
+        <ProviderMark id={p.id} kind={p.kind} name={name} />
+        <span className="pick-main">
+          <b className="truncate">{name}</b>
+          <span className="pick-line">{plan ? planLine(plan) : note || t(`add.kind.${ownKind(p) ? "own" : "provider"}`)}</span>
         </span>
-        <span className={`pill ${tone}`}>{pill}</span>
+        <span className="pick-state" data-tone={tone === "done" ? "live" : tone === "pending" ? "attention" : "idle"}><span className="pick-dot" aria-hidden />{pill}</span>
       </button>
     );
   };
   // A new endpoint of a known family (an OpenCode plan, a llama.cpp server) shows the mark it will
   // have once added; only the blank custom address keeps a plain glyph, as it has no name yet.
-  const fresh = (id: string, title: string, sub: string, mark: string | null, tag = false) => (
-    <button key={id} className={`pick ph-pickrow dashed ${chosen === id ? "on" : ""}`} onClick={() => onPick(id)} aria-pressed={chosen === id}>
-      {mark ? <ProviderMark id={mark} name={title} className="ph-pickrow-ico" /> : <span className="ph-pickrow-ico"><Icon name="link" size={18} /></span>}
-      <span className="ph-pickrow-main">
-        <b>{title}{tag && <span className="ph-tag ok ph-new">{t("add.custom.new")}</span>}</b>
-        <span className="ph-pickrow-sub">{sub}</span>
+  const fresh = (id: string, title: string, sub: string, mark: string | null) => (
+    <button key={id} type="button" className={`pick dashed ${chosen === id ? "on" : ""}`} onClick={() => onPick(id)} aria-pressed={chosen === id}>
+      {mark ? <ProviderMark id={mark} name={title} /> : <span className="provider-mark"><Icon name="link" size={16} /></span>}
+      <span className="pick-main">
+        <b className="truncate">{title}</b>
+        <span className="pick-line">{sub}</span>
       </span>
-      {tag ? <span className="pill">{t("add.key.none")}</span> : <Icon name="forward" size={18} />}
+      <span className="pick-state" data-tone="idle">{t("add.custom.new")}</span>
     </button>
   );
-  return (
-    <div className="ph-picks">
-      {(gateways.length > 0 || absent.length > 0) && <>
-        <div className="ph-gl">{t("add.group.gateways")}</div>
-        <div className="pickgrid">{gateways.map(row)}{absent.map((plan) => fresh(OPENCODE_NEW + plan.id, plan.name, planLine(plan), "opencode", true))}</div>
-      </>}
-      {rest.length > 0 && <>
-        <div className="ph-gl">{t("add.group.providers")}</div>
-        <div className="pickgrid">{rest.map(row)}</div>
-      </>}
-      <div className="ph-gl">{t("add.group.own")}</div>
-      <div className="pickgrid">
-        {own.map(row)}
-        {fresh(LLAMACPP, t("add.llamacpp"), t("add.llamacpp.sub"), "llamacpp")}
-        {fresh(CUSTOM, t("add.custom"), t("add.custom.sub"), null)}
-      </div>
-      {picked?.base_url && (
-        <details className="ph-advanced">
-          <summary>{t("add.advanced")}</summary>
-          <span className="sub mono">{picked.base_url}</span>
-        </details>
-      )}
+  const group = (label: string, rows: ReactNode[]) => rows.length > 0 && (
+    <div className="pick-group">
+      <div className="pick-label">{label}</div>
+      <div className="pickgrid">{rows}</div>
     </div>
+  );
+  return (
+    <>
+      {providers.length > 8 && <Field label={t("add.provider.search")} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("add.provider.search")} />}
+      {group(t("add.group.gateways"), [...gateways.map(row), ...absent.map((plan) => fresh(OPENCODE_NEW + plan.id, plan.name, planLine(plan), "opencode"))])}
+      {group(t("add.group.providers"), rest.map(row))}
+      {group(t("add.group.own"), [...own.map(row), ...(showLlama ? [fresh(LLAMACPP, t("add.llamacpp"), t("add.llamacpp.sub"), "llamacpp")] : []), ...(showCustom ? [fresh(CUSTOM, t("add.custom"), t("add.custom.sub"), null)] : [])])}
+    </>
   );
 }
 
-/** Step 1: which endpoint the model runs on. */
-function ProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
-  const phone = !useMedia("(min-width: 1024px)");
-  if (phone) return <PhoneProviderRows state={state} chosen={chosen} onPick={onPick} />;
-  return <DesktopProviderStep state={state} chosen={chosen} onPick={onPick} />;
-}
-
-function DesktopProviderStep({ state, chosen, onPick }: { state: OnboardingState | null; chosen: string; onPick: (id: string) => void }) {
-  const providers = state?.providers ?? [];
-  const [filter, setFilter] = useState("");
-  const query = filter.trim().toLocaleLowerCase();
-  const ordered = [...providers.filter((p) => p.ready), ...providers.filter((p) => !p.ready)]
-    .filter((p) => !query || `${providerName(p.id, p.kind, p.name, p.billing)} ${p.id}`.toLocaleLowerCase().includes(query));
-  // Both ways of paying OpenCode stay on offer: a plan with no endpoint yet is a card that adds one.
-  const absent = missingPlans(providers).filter((plan) => !query || plan.name.toLocaleLowerCase().includes(query));
+/** The connection test of the endpoint picked: one press, and what it answered or why it did not. The
+ *  address it asks is here and nowhere else in the flow. */
+function ConnectionTest({ card }: { card: ProviderCard }) {
+  const { test, run, note } = useProviderTest(card.id);
   return (
-    <>
-    {providers.length > 8 && <label className="mfield" style={{ marginBottom: 12 }}>
-      <span>{t("add.provider.search")}</span>
-      <input className="field" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("add.provider.search")} />
-    </label>}
-    <div className="pickgrid">
-      {ordered.map((p) => {
-        const { pill, tone, note } = keyWords(p);
-        const plan = opencodePlanOf(p.kind, p.billing);
-        // An endpoint with no credential is not a choice: picking it produced a list of URLs and
-        // HTTP codes, and the operator had to work backwards from those to "there is no key".
-        const blocked = p.key_held === false;
-        return (
-          // `disabled` would take it out of the tab order, and the sentence under it — why this
-          // endpoint cannot be used — is exactly what a keyboard or screen-reader user needs.
-          // `aria-disabled` says the same thing and keeps the card reachable.
-          <button key={p.id} className={`pick ${chosen === p.id ? "on" : ""} ${blocked ? "blocked" : ""}`} aria-disabled={blocked} onClick={() => !blocked && onPick(p.id)} aria-pressed={chosen === p.id}>
-            <span className="pick-top">
-              <b className="truncate">{providerName(p.id, p.kind, p.name, p.billing)}</b>
-              <span className={`pill ${tone}`}>{pill}</span>
-            </span>
-            {plan && <span className="sub opencode-hint">{t(plan.hint)}</span>}
-            <span className="sub mono truncate">{p.base_url || t("add.noaddress")}</span>
-            {note && <span className="sub faint">{note}</span>}
-          </button>
-        );
-      })}
-      {absent.map((plan) => (
-        <button key={plan.id} className={`pick dashed ${chosen === OPENCODE_NEW + plan.id ? "on" : ""}`} onClick={() => onPick(OPENCODE_NEW + plan.id)} aria-pressed={chosen === OPENCODE_NEW + plan.id}>
-          <span className="pick-top">
-            <b>{plan.name}</b>
-            <span className="pill">{t("add.custom.new")}</span>
-          </span>
-          <span className="sub opencode-hint">{t(plan.hint)}</span>
-        </button>
-      ))}
-      {(!query || "llama.cpp".includes(query)) && <button className={`pick dashed ${chosen === LLAMACPP ? "on" : ""}`} onClick={() => onPick(LLAMACPP)} aria-pressed={chosen === LLAMACPP}>
-        <span className="pick-top">
-          <b>{t("add.llamacpp")}</b>
-          <span className="pill">{t("add.custom.new")}</span>
-        </span>
-        <span className="sub">{t("add.llamacpp.sub")}</span>
-      </button>}
-      {(!query || `${t("add.custom")} OpenAI API`.toLocaleLowerCase().includes(query)) && <button className={`pick dashed ${chosen === CUSTOM ? "on" : ""}`} onClick={() => onPick(CUSTOM)} aria-pressed={chosen === CUSTOM}>
-        <span className="pick-top">
-          <b>{t("add.custom")}</b>
-          <span className="pill">{t("add.custom.new")}</span>
-        </span>
-        <span className="sub">{t("add.custom.sub")}</span>
-      </button>}
+    <div className="pick-test">
+      <Button size="sm" icon="loop" busy={test?.state === "running"} onClick={() => void run()}>{t("prov.test")}</Button>
+      <span className="pick-test-note" role="status" data-tone={note?.tone} data-test={test?.state === "done" ? (test.ok ? "ok" : "failed") : test?.state}>{note?.text ?? ""}</span>
+      {card.base_url && <span className="pick-test-addr mono truncate" title={card.base_url}>{card.base_url}</span>}
     </div>
-    </>
   );
 }
 
@@ -268,23 +212,14 @@ function CustomProvider({ kind, busy, onCreate }: { kind: "llamacpp" | "openai_c
   const [apiKey, setApiKey] = useState("");
   const clean = id.trim().replace(/[^A-Za-z0-9._-]+/g, "-");
   return (
-    <div className="mfields reveal" style={{ marginTop: 12 }}>
-      <label className="mfield">
-        <span>{t("add.custom.name")}</span>
-        <input className="field" value={id} placeholder="workshop" onChange={(e) => setId(e.target.value)} />
-      </label>
-      <label className="mfield wide">
-        <span>{t("add.custom.url")}</span>
-        <input className="field mono" value={baseUrl} placeholder="http://&lt;host&gt;:&lt;port&gt;/v1" onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
-      </label>
-      <label className="mfield">
-        <span>{t("add.custom.key")}</span>
-        <input className="field" type="password" value={apiKey} placeholder="sk-…" onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
-      </label>
-      <div className="mfield end">
-        <button className="btn primary" disabled={busy || !clean || !baseUrl.trim()} onClick={() => onCreate(clean, id.trim(), baseUrl.trim(), apiKey, kind)}>
+    <div className="addmodel-form mfields">
+      <Field label={t("add.custom.name")} value={id} placeholder="workshop" onChange={(e) => setId(e.target.value)} />
+      <Field label={t("add.custom.url")} mono value={baseUrl} placeholder="http://<host>:<port>/v1" onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
+      <Field label={t("add.custom.key")} type="password" value={apiKey} placeholder="sk-…" onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+      <div className="addmodel-form-end">
+        <Button variant="primary" disabled={!clean || !baseUrl.trim()} busy={busy} onClick={() => onCreate(clean, id.trim(), baseUrl.trim(), apiKey, kind)}>
           {busy ? t("add.custom.saving") : t("add.custom.save")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -292,26 +227,25 @@ function CustomProvider({ kind, busy, onCreate }: { kind: "llamacpp" | "openai_c
 
 /** Step 1b for OpenCode: the plan's endpoint, wired to its route; a key only when there is no key proxy to hold it. */
 function OpencodeProvider({ plan, keyproxyBase, busy, onCreate }: { plan: OpencodePlan; keyproxyBase: string; busy: boolean; onCreate: (body: Record<string, string>) => void }) {
-  const phone = !useMedia("(min-width: 1024px)");
   const [apiKey, setApiKey] = useState("");
   const body = opencodeProvider(plan, keyproxyBase, apiKey.trim());
   return (
-    <div className="mfields reveal" style={{ marginTop: 12 }}>
+    <div className="addmodel-form mfields">
       <div className="mfield wide">
         <span className="sub">{t(plan.hint)}</span>
-        {/* On a phone the address waits under Advanced, as it does for an endpoint already there. */}
-        {phone ? <details className="ph-advanced"><summary>{t("add.advanced")}</summary><span className="sub mono">{body.base_url}</span></details> : <span className="sub mono truncate">{body.base_url}</span>}
+        <span className="sub mono truncate">{body.base_url}</span>
       </div>
-      {!keyproxyBase && <label className="mfield wide">
-        <span>{t("opencode.key")}</span>
-        <input className="field" type="password" value={apiKey} placeholder="sk-…" onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
-        <span className="sub">{t("free.key.get")} <a href={OPENCODE_KEY_URL} target="_blank" rel="noopener noreferrer">opencode.ai/auth ↗</a></span>
-      </label>}
+      {!keyproxyBase && (
+        <div className="mfield wide">
+          <Field label={t("opencode.key")} type="password" value={apiKey} placeholder="sk-…" onChange={(e) => setApiKey(e.target.value)} autoComplete="off"
+            hint={<>{t("free.key.get")} <a href={OPENCODE_KEY_URL} target="_blank" rel="noopener noreferrer">opencode.ai/auth ↗</a></>} />
+        </div>
+      )}
       {keyproxyBase && <div className="mfield wide"><span className="sub">{t("free.key.get")} <a href={OPENCODE_KEY_URL} target="_blank" rel="noopener noreferrer">opencode.ai/auth ↗</a></span></div>}
-      <div className="mfield end">
-        <button className="btn primary" disabled={busy || (!keyproxyBase && !apiKey.trim())} onClick={() => onCreate(body)}>
+      <div className="addmodel-form-end">
+        <Button variant="primary" disabled={!keyproxyBase && !apiKey.trim()} busy={busy} onClick={() => onCreate(body)}>
           {busy ? t("add.custom.saving") : t("opencode.save", { name: plan.name })}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -337,51 +271,39 @@ function ModelStep({ entries, loading, error, chosen, typed, onPick, onType, onR
   return (
     <>
       <div className="modelbar">
-        <label className="mfield">
-          {/* The field's name, then how many there are, apart: run together as "Filter 6 models" it
-              read as an instruction to filter six of them. */}
-          <span>{t("add.filter.plain")}{entries && <span className="faint"> · {plural("add.filter.count", entries.length)}</span>}</span>
-          <input className="field" placeholder={t("add.filter.plain")} value={filter} onChange={(e) => setFilter(e.target.value)} disabled={!entries} />
-        </label>
-        <label className="mfield">
-          <span>{t("add.typed")}</span>
-          {/* Prefilled with whatever was picked from the list, and editable from there: an id the
-              endpoint did not list is typed over it, not into an empty box beside it. */}
-          <input className="field mono" placeholder={t("add.typed.hint")} value={typed} onChange={(e) => onType(e.target.value)} spellCheck={false} />
-        </label>
+        {/* The field's name, then how many there are, apart: run together as "Filter 6 models" it
+            read as an instruction to filter six of them. */}
+        <Field label={<>{t("add.filter.plain")}{entries && <span className="faint"> · {plural("add.filter.count", entries.length)}</span>}</>}
+          placeholder={t("add.filter.plain")} value={filter} onChange={(e) => setFilter(e.target.value)} disabled={!entries} />
+        {/* Prefilled with whatever was picked from the list, and editable from there: an id the
+            endpoint did not list is typed over it, not into an empty box beside it. */}
+        <Field label={t("add.typed")} mono placeholder={t("add.typed.hint")} value={typed} onChange={(e) => onType(e.target.value)} spellCheck={false} />
       </div>
-      {loading && <div className="empty calm">{t("add.asking")}</div>}
+      {loading && <div className="addmodel-note">{t("add.asking")}</div>}
       {!loading && error && (
-        <div className="empty calm reveal">
+        <div className="addmodel-note">
           <b>{t("add.nolist")}</b>
           <div className="sub">{error}</div>
           <div className="sub faint">{t("add.nolist.sub")}</div>
-          <button className="btn small" onClick={onRetry}>{t("common.retry")}</button>
+          <Button size="sm" onClick={onRetry}>{t("common.retry")}</Button>
         </div>
       )}
-      {!loading && !error && entries && shown.length === 0 && <div className="empty calm">{t("add.nomatch")}</div>}
+      {!loading && !error && entries && shown.length === 0 && <div className="addmodel-note">{t("add.nomatch")}</div>}
       {!loading && shown.length > 0 && (
-        <div className="modelgrid reveal">
+        <div className="modelgrid pickgrid">
           {shown.map((e) => (
-            <button key={e.id} className={`pick model ${chosen === e.id ? "on" : ""}`} onClick={() => onPick(e)} aria-pressed={chosen === e.id}>
-              <span className="pick-top">
+            <button key={e.id} type="button" className={`pick model ${chosen === e.id ? "on" : ""}`} onClick={() => onPick(e)} aria-pressed={chosen === e.id}>
+              <span className="pick-main">
                 <b className="truncate">{e.name ?? e.id}</b>
-                {chosen === e.id && <Icon name="check" size={16} />}
+                <span className="pick-line mono truncate">{e.id}</span>
               </span>
-              <span className="sub mono truncate">{e.id}</span>
               <span className="mtags">
-                {e.context_length ? <span className="pill">{t("add.pill.context", { n: tokens(e.context_length) })}</span> : null}
-                {e.images ? <span className="pill">{t("add.pill.images")}</span> : null}
-                {e.reasoning ? <span className="pill">{t("add.pill.reasoning")}</span> : null}
-                {e.pricing?.input !== undefined && e.pricing?.output !== undefined ? (
-                  <>
-                  {/* The price always starts its own line: left to wrap, it sat beside the tags on
-                      one card and under them on its neighbour, and the cards stopped matching. */}
-                  <span className="mtags-break" />
-                  <span className="pill num">{t("add.pill.price", { in: money(e.pricing.input), out: money(e.pricing.output) })}</span>
-                  </>
-                ) : null}
+                {e.context_length ? <Badge>{t("add.pill.context", { n: tokens(e.context_length) })}</Badge> : null}
+                {e.images ? <Badge>{t("add.pill.images")}</Badge> : null}
+                {e.reasoning ? <Badge>{t("add.pill.reasoning")}</Badge> : null}
+                {e.pricing?.input !== undefined && e.pricing?.output !== undefined ? <span className="pick-price num">{t("add.pill.price", { in: money(e.pricing.input), out: money(e.pricing.output) })}</span> : null}
               </span>
+              <span className="pick-check" aria-hidden>{chosen === e.id && <Icon name="check" size={16} />}</span>
             </button>
           ))}
         </div>
@@ -583,18 +505,17 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
     }
   }
 
+  const modes = [{ id: "regular" as const, label: t("add.tab.providers") }, { id: "free" as const, label: t("free.tab") }];
   return (
     <div className="addmodel">
-      <div className="segmented" role="tablist" aria-label={t("add.step1")} style={{ marginBottom: 18 }}>
-        <button role="tab" aria-selected={mode === "regular"} className={mode === "regular" ? "on" : ""} onClick={() => setMode("regular")}>{t("add.step1")}</button>
-        <button role="tab" aria-selected={mode === "free"} className={mode === "free" ? "on" : ""} onClick={() => setMode("free")}>{t("free.tab")}</button>
-      </div>
+      <Segmented value={mode} options={modes} onChange={setMode} label={t("add.title")} className="addmodel-mode" />
       {mode === "free" ? <FreeModels onSaved={onSaved} toast={toast} /> : <>
       <Step n={1} title={t("add.step1")} sub={t("add.step1.sub")} active={!provider} done={!!provider}>
         <ProviderStep state={state} chosen={provider} onPick={pickProvider} />
         {provider === CUSTOM && <CustomProvider key={CUSTOM} kind="openai_compat" busy={busy} onCreate={createProvider} />}
         {provider === LLAMACPP && <CustomProvider key={LLAMACPP} kind="llamacpp" busy={busy} onCreate={createProvider} />}
         {newPlan && <OpencodeProvider key={newPlan.id} plan={newPlan} keyproxyBase={state?.keyproxy_base ?? ""} busy={busy} onCreate={(body) => void putProvider(newPlan.id, body)} />}
+        {providerCard && <ConnectionTest card={providerCard} />}
       </Step>
 
       <Step n={2} title={t("add.step2")} sub={t("add.step2.sub")} active={onEndpoint && !model} done={!!model}>
@@ -612,66 +533,52 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
       )}
 
       <Step n={routes || routesAsked ? 4 : 3} title={t("add.step3")} sub={t("add.step3.sub")} active={ready} done={ready}>
-        <div className="mfields">
-          <label className="mfield">
-            <span>{t("add.label")}</span>
-            <input className="field" value={preset.label} placeholder={model ? `${provider}/${model}` : t("add.label.hint")} onChange={(e) => setPreset({ ...preset, label: e.target.value })} />
-          </label>
-          <label className="mfield">
-            <span>{t("add.window")}</span>
-            <input className="field num" type="number" min={8000} step={1000} value={preset.context_window} onChange={(e) => { const v = numInput(e.target.value); if (v !== null) { setPreset({ ...preset, context_window: v }); setWindowTyped(true); } }} />
-            <span className="sub faint" data-testid="add-window-source">
-              {windowTyped ? t("window.typed") : windowSource ? t("window.found", { source: t(`window.by.${windowSource}`) }) : t("window.default")}
-            </span>
-          </label>
-          <label className="mfield">
-            <span>{t("add.output")}</span>
-            <input className="field num" type="number" min={1024} step={1000} value={preset.max_output_tokens} onChange={(e) => { const v = numInput(e.target.value); if (v !== null) setPreset({ ...preset, max_output_tokens: v }); }} />
-          </label>
+        <div className="mfields addmodel-fields">
+          <Field label={t("add.label")} value={preset.label} placeholder={model ? `${provider}/${model}` : t("add.label.hint")} onChange={(e) => setPreset({ ...preset, label: e.target.value })} />
+          <Field label={t("add.window")} className="num" type="number" min={8000} step={1000} value={preset.context_window}
+            onChange={(e) => { const v = numInput(e.target.value); if (v !== null) { setPreset({ ...preset, context_window: v }); setWindowTyped(true); } }}
+            hint={<span data-testid="add-window-source">{windowTyped ? t("window.typed") : windowSource ? t("window.found", { source: t(`window.by.${windowSource}`) }) : t("window.default")}</span>} />
+          <Field label={t("add.output")} className="num" type="number" min={1024} step={1000} value={preset.max_output_tokens}
+            onChange={(e) => { const v = numInput(e.target.value); if (v !== null) setPreset({ ...preset, max_output_tokens: v }); }} />
         </div>
-        {/* Two switches and one picker, each with its own word. They were two filled "thinking on"
-            and "images on" buttons around a segmented picker: two visual languages for "on" in one
-            row, and a word on a button that could be read as the state or as the action. */}
-        <div className="btnrow addmodel-run">
-          <label className="addmodel-opt">
-            <Switch checked={preset.thinking} onChange={(thinking) => setPreset({ ...preset, thinking })} label={t("add.thinking")} />
-            <span>{t("add.thinking")}</span>
-          </label>
-          <div className="segmented inline" role="group" aria-label={t("add.effort")}>
-            {REASONING_EFFORTS.map((e) => (
-              <button key={e} className={preset.reasoning_effort === e ? "on" : ""} disabled={!preset.thinking} onClick={() => setPreset({ ...preset, reasoning_effort: e })}>
-                {t(`add.effort.${e}`)}
-              </button>
-            ))}
+        {/* Two switches and one picker, each with its own word, in one card of rows: the reasoning's
+            effort is a choice that only means something while thinking is on. */}
+        <div className="addmodel-card">
+          <div className="addmodel-row">
+            <label className="addmodel-opt">
+              <Switch checked={preset.thinking} onChange={(thinking) => setPreset({ ...preset, thinking })} label={t("add.thinking")} />
+              <span>{t("add.thinking")}</span>
+            </label>
+            <Segmented value={preset.reasoning_effort} options={REASONING_EFFORTS.map((e) => ({ id: e, label: t(`add.effort.${e}`), disabled: !preset.thinking }))}
+              onChange={(reasoning_effort) => setPreset({ ...preset, reasoning_effort })} label={t("add.effort")} />
           </div>
-          <label className="addmodel-opt" title={t("add.images.title")}>
-            <Switch checked={preset.images} onChange={(images) => setPreset({ ...preset, images })} label={t("add.images")} />
-            <span>{t("add.images")}</span>
-          </label>
+          <div className="addmodel-row" title={t("add.images.title")}>
+            <label className="addmodel-opt">
+              <Switch checked={preset.images} onChange={(images) => setPreset({ ...preset, images })} label={t("add.images")} />
+              <span>{t("add.images")}</span>
+            </label>
+          </div>
+          {onEndpoint && providerKind !== "llamacpp" && !prepaid && (
+            <details className="addmodel-pricing">
+              <summary>{t("add.pricing.title")}</summary>
+              <p className="sub">{t("add.pricing.help")}</p>
+              <div className="mfields">
+                <Field label={t("add.pricing.input")} className="num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.input ?? ""} onChange={(e) => editPrice("input", e.target.value)} />
+                <Field label={t("add.pricing.output")} className="num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.output ?? ""} onChange={(e) => editPrice("output", e.target.value)} />
+                <Field label={t("add.pricing.cache")} className="num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.cache_hit ?? ""} onChange={(e) => editPrice("cache_hit", e.target.value)} />
+                <Field label={t("add.pricing.ceiling")} className="num" type="number" min={1} step={1} value={visibleDraft?.input_limit ?? ""} onChange={(e) => editPrice("input_limit", e.target.value)} />
+                <div className="mfield wide">
+                  <Field label={t("add.pricing.source")} value={visibleDraft?.limit_source ?? ""} onChange={(e) => editPrice("limit_source", e.target.value)} maxLength={500} placeholder={t("add.pricing.sourceHint")} />
+                </div>
+              </div>
+              <p className="sub">{t("add.pricing.windowSeparate")}</p>
+            </details>
+          )}
         </div>
         {/* A prepaid plan has no per-token price to record, and a rate typed here would be counted as dollars spent. */}
         {onEndpoint && prepaid && <p className="sub addmodel-prepaid">{t("add.pricing.subscription")}</p>}
-        {onEndpoint && providerKind !== "llamacpp" && !prepaid && <>
-          {hasSpendCap && <p className="sub">{t("add.pricing.capHint")}</p>}
-          <details className="sheet-section addmodel-pricing">
-            <summary>{t("add.pricing.title")}</summary>
-            <p className="sub">{t("add.pricing.help")}</p>
-            <div className="mfields">
-              <label className="mfield"><span>{t("add.pricing.input")}</span>
-                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.input ?? ""} onChange={(e) => editPrice("input", e.target.value)} /></label>
-              <label className="mfield"><span>{t("add.pricing.output")}</span>
-                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.output ?? ""} onChange={(e) => editPrice("output", e.target.value)} /></label>
-              <label className="mfield"><span>{t("add.pricing.cache")}</span>
-                <input className="field num" type="number" min={0} step="any" disabled={chosenRoutes.length > 0} value={visibleDraft?.cache_hit ?? ""} onChange={(e) => editPrice("cache_hit", e.target.value)} /></label>
-              <label className="mfield"><span>{t("add.pricing.ceiling")}</span>
-                <input className="field num" type="number" min={1} step={1} value={visibleDraft?.input_limit ?? ""} onChange={(e) => editPrice("input_limit", e.target.value)} /></label>
-              <label className="mfield wide"><span>{t("add.pricing.source")}</span>
-                <input className="field" value={visibleDraft?.limit_source ?? ""} onChange={(e) => editPrice("limit_source", e.target.value)} maxLength={500} placeholder={t("add.pricing.sourceHint")} /></label>
-            </div>
-            <p className="sub">{t("add.pricing.windowSeparate")}</p>
-          </details>
-          {priceError && <p className="result-warning" role="alert">{priceError}</p>}
-        </>}
+        {onEndpoint && providerKind !== "llamacpp" && !prepaid && hasSpendCap && <p className="sub">{t("add.pricing.capHint")}</p>}
+        {priceError && <p className="result-warning" role="alert">{priceError}</p>}
       </Step>
 
       <div className="addmodel-foot">
@@ -679,15 +586,10 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
             and a sentence is not monospaced. It wraps rather than truncates: this is the last look
             at what is about to be created, and a phone cut it to "openrouter.anthropi…". */}
         <div className={`sub addmodel-name ${ready ? "mono" : ""}`}>{ready ? presetIdFor(provider, model) : t("add.foot.empty")}</div>
-        <span className="grow" />
-        {onCancel && (
-          <button className="btn" onClick={onCancel}>
-            {t("common.cancel")}
-          </button>
-        )}
-        <button className="btn primary" disabled={!ready || busy} onClick={() => void save()}>
+        {onCancel && <Button onClick={onCancel}>{t("common.cancel")}</Button>}
+        <Button variant="primary" disabled={!ready} busy={busy} onClick={() => void save()}>
           {busy ? t("add.saving") : state?.has_model ? t("add.save") : t("add.save.first")}
-        </button>
+        </Button>
       </div>
       </>}
     </div>
@@ -697,22 +599,19 @@ export function AddModel({ onSaved, onCancel, toast }: { onSaved: (presetId: str
 /**
  * The first-run page: the app opens here until a model exists, because nothing else can work yet.
  *
- * Outside the shell on purpose, the way the login page is. The wide shell is a grid whose first
- * column is the rail's, and a page drawn inside it without a rail sits in the second column with the
- * rail's width of nothing beside it — which is exactly what a 2000 px window showed.
+ * Outside the shell on purpose, the way the login page is: until a model exists the sidebar has
+ * nothing to lead to, and a page drawn inside the shell sat beside a column of destinations that
+ * could not work yet. One centred column, as the start page is: the question, then the steps under it.
  */
 export function OnboardingScreen({ onDone, toast }: { onDone: () => void; toast: (t: string) => void }) {
   useLang();
   return (
     <div className="gate tall">
       <div className="onboard">
+        <div className="onboard-bar"><LangPicker /></div>
         <header className="onboard-head">
-          <img className="onboard-logo" src="/app/icons/icon-192.png" alt="" width={44} height={44} />
-          <div className="grow">
-            <h1>{t("add.title")}</h1>
-            <p className="sub">{t("add.sub")}</p>
-          </div>
-          <LangPicker />
+          <h1>{t("add.title")}</h1>
+          <p className="sub">{t("add.sub")}</p>
         </header>
         <AddModel toast={toast} onSaved={onDone} />
       </div>

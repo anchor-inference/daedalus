@@ -80,11 +80,12 @@ describe("the page", () => {
 
   it("chooses how hard the model thinks on its own, saying what the default follows", async () => {
     await act(async () => root.render(<SessionVisionModel sessionId="s1" detail={{ ...DEFAULT, vision_default_effort: "low" }} toast={() => {}} />));
-    const effort = host.querySelector<HTMLElement>(".task-effort")!;
-    expect(effort.querySelector(".sel-current .sel-name")!.textContent).toBe("Default — as in Settings (Low)");
-    act(() => effort.querySelector<HTMLButtonElement>(".sel-current button")!.click());
-    const options = [...effort.querySelectorAll<HTMLElement>("[role=option]")];
-    expect(options.map((o) => o.dataset.id)).toEqual(["", "none", "low", "medium", "high", "xhigh"]);
+    const effort = host.querySelector<HTMLButtonElement>(".task-effort .dropdown-btn")!;
+    expect(effort.textContent).toBe("Default — as in Settings (Low)");
+    await act(async () => effort.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    const options = [...document.querySelectorAll<HTMLElement>(".dropdown-list [role=option]")];
+    expect(options.map((o) => o.dataset.value)).toEqual(["", "none", "low", "medium", "high", "xhigh"]);
     await act(async () => options[4].click());
     expect(posted).toEqual([{ url: "/api/sessions/s1/vision", body: { effort: "high" } }]);
   });

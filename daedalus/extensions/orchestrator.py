@@ -592,18 +592,18 @@ class Orchestrators:
 
     def _check_model(self, model: str) -> None:
         if model and model not in self.manager.config.presets:
-            raise ProjectError(f"no model preset {model!r}; the presets are in Settings → Models")
+            raise ProjectError(f"no model preset {model!r}; the presets are in Settings → Models and providers")
 
     async def _preflight_model(self, project: Project, model: str | None) -> None:
         """Refuse an unusable first call before publishing an office or model change."""
         config = self.manager.config
         selected = config.orchestrator_preset(project.settings.orchestrator.model if model is None else model)
         if selected is None:
-            raise ProjectError("choose a coordinator model in Settings → Models before enabling it")
+            raise ProjectError("choose a coordinator model in Settings → Models for tasks before enabling it")
         try:
             rungs, preset = self.manager.resolve_model({"preset": selected})
         except (KeyError, RuntimeError, ValueError) as exc:
-            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model in Settings → Models") from exc
+            raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model in Settings → Models for tasks") from exc
         if not rungs:
             raise ProjectError(f"coordinator model {selected!r} is unavailable; choose another model")
         adapter, effective_model = rungs[0]
@@ -626,7 +626,7 @@ class Orchestrators:
             # Enable used to publish a working office that its very first capped call refused.
             raise ProjectError(
                 f"coordinator model {selected!r} cannot run with spending limits: {exc}. "
-                "Correct its price entry or output limit in Settings → Models & providers, or choose another model."
+                "Correct its price entry or output limit in Settings → Models and providers, or choose another model."
             ) from exc
 
     def needs_home(self, project: Project) -> bool:
@@ -812,7 +812,7 @@ class Orchestrators:
         members = await self.manager.staff.list(project.id)
         live = await self.manager.staff.live_sessions(project.id)
         working = sum(1 for s in live.values() if s.status in ACTIVE_STATUSES)
-        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, branch FROM board_tasks WHERE project_id = ? AND removed_at IS NULL ORDER BY priority, updated_at DESC", (project.id,))}
+        tasks = {r["id"]: dict(r) for r in await self.manager.db.fetchall("SELECT id, title, status, priority, assignee_staff_id, assignee_operator, branch FROM board_tasks WHERE project_id = ? AND removed_at IS NULL ORDER BY priority, updated_at DESC", (project.id,))}
         by_id = {m.id: m for m in members}
 
         head = [f"Project: {project.name} · default env {project.settings.default_env or self.manager.projects.local_env} · autonomy {orchestrator.autonomy} · concurrency {orchestrator.concurrency} of cap {orchestrator.concurrency_cap} · {working} working"]
@@ -847,8 +847,8 @@ class Orchestrators:
         still_open = [t for t in tasks.values() if t["status"] not in ("done", "dropped")]
         before = await self._previous_owners([t["id"] for t in still_open if t["assignee_staff_id"] not in by_id])
         open_tasks = [
-            f"{t['id']} {_one_line(t['title'], 80)} ({by_id[t['assignee_staff_id']].name if t['assignee_staff_id'] in by_id else 'unassigned'}, {t['status']})"
-            + (f" — was {before[t['id']]}'s" if t["assignee_staff_id"] not in by_id and t["id"] in before else "")
+            f"{t['id']} {_one_line(t['title'], 80)} ({by_id[t['assignee_staff_id']].name if t['assignee_staff_id'] in by_id else "the operator's own" if t["assignee_operator"] else 'unassigned'}, {t['status']})"
+            + (f" — was {before[t['id']]}'s" if t["assignee_staff_id"] not in by_id and t["id"] in before and not t["assignee_operator"] else "")
             for t in still_open
         ]
         decisions = await self.loops.section(project.id)
@@ -1191,9 +1191,12 @@ class Orchestrators:
             return None
         mine = project.settings.orchestrator.session_id
         p = event.payload
-        if p.get("actor_id") == f"orchestrator:{mine}" or (
-            event.session_id and event.session_id == mine and event.type not in SELF_EVENTS_ALLOWED
-        ):
+        # A task event's session is the chat that created the task, so the operator moving a card the
+        # orchestrator made carries the orchestrator's session id. Only ``actor_id`` says who acted
+        # there; matching the session would leave the orchestrator deaf to the operator's decisions on
+        # its own tasks.
+        own_session = bool(event.session_id) and event.session_id == mine and not event.type.startswith("task.") and event.type not in SELF_EVENTS_ALLOWED
+        if p.get("actor_id") == f"orchestrator:{mine}" or own_session:
             return None
         kind = event.type
         explored = self.app.extensions.get("explorations")
@@ -1427,6 +1430,8 @@ class Orchestrators:
                 # Whole: the error says why the start was refused and what to do about it, and cut at
                 # 200 characters it lost the second half, the part the orchestrator acts on.
                 error = f" ({_one_line(str(p.get('error')), 500)})" if p.get("error") else ""
+                if p.get("assignee_operator"):
+                    return f"{title} is kept by the operator; it is theirs to do, not yours to assign"
                 return f"{title} assigned to {assignee.name}{error}" if assignee else f"{title} is unassigned{error}"
             if kind == "task.accepted":
                 return f"{actor} accepted {title}"

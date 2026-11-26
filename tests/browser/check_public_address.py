@@ -89,6 +89,9 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
         return route.fulfill(status=200, content_type="application/json", body=json.dumps([*SERVICES, NO_PORT]))
     if HOST.tunnel is not None and HOST.tunnel.fulfil(route):
         return None
+    if HOST.tunnel is None and path.endswith("/api/public-address"):
+        # A server: the picture stub answers as a native installation while the page is this section's.
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps({"native": False}))
     return service_stub(route)
 
 
@@ -215,6 +218,12 @@ def run_states(browser, lang: str, width: int, problems: list[str]) -> None:  # 
     context.close()
 
 
+def choose_provider(page, provider: str) -> None:  # type: ignore[no-untyped-def]
+    """The provider is one select: open it, take the option, which is a write to the launcher."""
+    page.locator("#address-provider").click()
+    page.locator(f".dropdown-list [role=option][data-value='{provider}']").click()
+
+
 def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # type: ignore[no-untyped-def]
     """Each provider's shortest setup, and that a token goes one way."""
     words = WORDS[lang]
@@ -225,12 +234,18 @@ def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     context, page, errors = open_section(browser, lang, width, tunnel, windows=True)
     page.wait_for_selector("[data-address]", timeout=15000)
 
-    if page.locator("[data-address-provider]").count() != 4:
+    page.locator("#address-provider").click()
+    page.wait_for_selector(".dropdown-list [role=option]")
+    # The list takes its place on the key stack a moment after it draws; Escape sent before that closes the page.
+    page.wait_for_timeout(300)
+    if page.locator(".dropdown-list [role=option]").count() != 4:
         say("the four providers are not offered")
+    page.keyboard.press("Escape")
+    page.wait_for_selector(".dropdown-list", state="detached")
     if page.locator("[data-token], .settings-block").count():
         say("a quick tunnel asks for something")
 
-    page.locator("[data-address-provider=ngrok]").click()
+    choose_provider(page, "ngrok")
     page.wait_for_selector("#address-ngrok-token")
     if tunnel.puts[-1] != {"provider": "ngrok"}:
         say(f"choosing ngrok sent {tunnel.puts[-1]}")
@@ -273,8 +288,8 @@ def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     if page.locator("#address-ngrok-token").input_value() != "not a token":
         say("a refused token is gone from its field")
 
-    page.locator("[data-address-provider=tailscale]").click()
-    page.wait_for_selector("[data-address-provider=tailscale].on")
+    choose_provider(page, "tailscale")
+    page.wait_for_selector("[data-address-provider=tailscale]")
     if page.locator("[data-token], .settings-block").count():
         say("Tailscale asks for something before its sign-in")
     tunnel.view.update(state="off")
@@ -287,7 +302,7 @@ def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     if tunnel.puts[-1].get("sign_out") is not True:
         say(f"signing out sent {tunnel.puts[-1]}")
 
-    page.locator("[data-address-provider=frp]").click()
+    choose_provider(page, "frp")
     page.wait_for_selector("#address-frp-server")
     page.locator("#address-frp-server").fill("vps.example.test:7000")
     page.locator("#address-frp-domain").click()
@@ -298,7 +313,7 @@ def run_setup(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     sent = {key: value for put in tunnel.puts for key, value in put.items() if key.startswith("frp_")}
     if sent != {"frp_server": "vps.example.test:7000", "frp_domain": "tunnel.example.test"}:
         say(f"frp's fields sent {sent}")
-    if "desktop/README.md#public-address" not in (page.locator("[data-provider=frp] .sub a").get_attribute("href") or ""):
+    if "desktop/README.md#public-address" not in (page.locator("[data-address-provider=frp] .set-hint a").get_attribute("href") or ""):
         say("frp has no link to its documentation")
     if not page.locator("[data-address-defender]").count():
         say("frp on Windows does not mention Defender")
@@ -374,8 +389,8 @@ def run_server(browser, lang: str, width: int, problems: list[str]) -> None:  # 
 
 
 def open_sheet(page: Page, words: dict, index: int = 1) -> None:
-    page.wait_for_selector(".service-row", timeout=15000)
-    page.locator(".service-row").nth(index).locator("button[aria-haspopup='menu']").click()
+    page.wait_for_selector(".pg-item[data-service]", timeout=15000)
+    page.locator(".pg-item[data-service]").nth(index).locator("button[aria-haspopup='menu']").click()
     page.get_by_role("menuitem", name=words["access"], exact=True).or_(page.locator(".menu[role='menu'] button", has_text=words["access"])).first.click()
     page.wait_for_selector("[data-service-phone]", timeout=5000)
 
@@ -430,7 +445,7 @@ def run_phone(browser, lang: str, width: int, problems: list[str]) -> None:  # t
     page.wait_for_selector("[data-service-phone]", state="detached", timeout=3000)
 
     # A service with no port has no Access sheet, so no way to a phone either.
-    page.locator(".service-row").nth(2).locator("button[aria-haspopup='menu']").click()
+    page.locator(".pg-item[data-service]").nth(2).locator("button[aria-haspopup='menu']").click()
     page.wait_for_selector(".menu[role='menu']")
     if page.locator(".menu[role='menu'] button", has_text=words["access"]).count():
         say("a service with no port offers Access")

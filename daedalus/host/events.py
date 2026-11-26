@@ -132,6 +132,15 @@ class SessionJobs(TypedDict):
     running: int
 
 
+class SessionChanges(TypedDict):
+    """The operator reverted or committed files of the session's working tree from its Changes tab, so
+    the open lists of those files read them again. ``commit`` is the new commit's hash."""
+
+    change: Literal["reverted", "committed"]
+    files: int
+    commit: NotRequired[str]
+
+
 class AskOption(TypedDict):
     label: str
     description: str
@@ -208,6 +217,10 @@ class PermissionResolved(TypedDict):
     """``done``: a handoff the operator did themselves (or put aside)."""
     via: str
     by: NotRequired[str]
+    scope: NotRequired[str]
+    """``project`` when the answer was "allow similar calls in this project", which outlives the chat."""
+    rule_id: NotRequired[str]
+    """The project's standing approval the answer created."""
 
 
 class TerminalCreated(TypedDict):
@@ -508,6 +521,8 @@ TaskChange = TypedDict(
         "from": NotRequired[str],
         "to": NotRequired[str],
         "assignee_staff_id": NotRequired[str],
+        "assignee_operator": NotRequired[bool],
+        "due_at": NotRequired[str],
         "actor": NotRequired[str],
         "actor_id": NotRequired[str],
         "result_id": NotRequired[str],
@@ -679,6 +694,11 @@ class NotifySeen(TypedDict):
     summary: NotifySummary
 
 
+class NotifyUnseen(TypedDict):
+    ids: list[int]
+    summary: NotifySummary
+
+
 class NotifyResolved(TypedDict):
     id: int
     request_ref: str
@@ -793,6 +813,7 @@ REGISTRY: dict[str, EventSpec] = {
     "session.bypass": EventSpec(SessionBypass),
     "session.deleted": EventSpec(SessionDeleted),
     "session.jobs": EventSpec(SessionJobs),
+    "session.changes": EventSpec(SessionChanges),
     "ask.pending": EventSpec(AskPending),
     "ask.answered": EventSpec(AskAnswered),
     "ask.routed": EventSpec(AskRouted),
@@ -851,6 +872,7 @@ REGISTRY: dict[str, EventSpec] = {
     "dispatch.stalled": EventSpec(DispatchStalled),
     "notify": EventSpec(Notify),
     "notify.seen": EventSpec(NotifySeen),
+    "notify.unseen": EventSpec(NotifyUnseen),
     "notify.resolved": EventSpec(NotifyResolved),
     # What each window shows is the host's business alone: it decides whether to notify, and a
     # client has no use for another client's focus.

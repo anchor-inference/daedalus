@@ -142,7 +142,8 @@ async def team(context: ToolContext, staff: str | None = None, concurrency: int 
     description=(
         "The project's board. op='list' (open tasks; status narrows it), 'get' (task_id: brief, branch, notes), "
         "'create' (title and the four brief parts: objective, deliverable, boundaries, done_when; priority 1-5, "
-        "depends_on, assignee to queue it), 'update' (task_id and what changes), "
+        "depends_on, assignee to queue it, due: an ISO date or timestamp), 'update' (task_id and what changes; "
+        "due='' clears the date), "
         "'move' (task_id, status: todo|blocked|dropped; with blocked, waiting_on says who or what it "
         "waits for — the operator, someone outside, a date, another task), 'next' (task_id, next_kind: "
         "answer_question|provide_input|review|retry|assign|wait, owner: operator, you, system or a member's name; "
@@ -182,6 +183,7 @@ async def tasks(
     repository: str = "",
     label: str = "",
     issues: list[int] | None = None,
+    due: str | None = None,
 ) -> ToolResult:
     return await _call(
         context, "tasks", op=op, task_id=task_id, title=title, objective=objective, deliverable=deliverable, boundaries=boundaries,
@@ -189,7 +191,7 @@ async def tasks(
         new=new, reason=reason, next_kind=next_kind, owner=owner, client_operation_id=call_id(context),
         expected_entity_revision=expected_entity_revision,
         expected_collection_revision=expected_collection_revision,
-        repository=repository, label=label, issues=issues,
+        repository=repository, label=label, issues=issues, due=due,
     )
 
 

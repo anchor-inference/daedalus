@@ -74,7 +74,7 @@ def run() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.route("**/api/**", stub)
         page.goto(f"{BASE}/agents?token=t&lang=en")
-        page.locator(".project-chip").click()
+        page.locator("[data-action='all-projects']").click()
         page.locator(".projects-row", has_text="Plain").get_by_role("button", name="Settings for Plain").click()
         section = page.locator(".project-environment")
         section.locator("summary").first.click()

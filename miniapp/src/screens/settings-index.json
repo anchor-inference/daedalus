@@ -1,76 +1,64 @@
 {
   "sections": [
     {
-      "id": "appearance", "group": "you", "icon": "eye",
+      "id": "appearance", "group": "general", "icon": "eye",
       "title": { "en": "Appearance", "ru": "Внешний вид" },
       "about": { "en": "The language, the theme and its colours, contrast, and the companion on the screen.", "ru": "Язык, тема и её цвета, контраст и маскот на экране." },
       "synonyms": ["theme", "dark mode", "light mode", "colours", "colors", "тема", "тёмная тема", "светлая тема", "цвета", "оформление"]
     },
     {
-      "id": "text", "group": "you", "icon": "heading",
+      "id": "text", "group": "general", "icon": "heading",
       "title": { "en": "Text & layout", "ru": "Текст и компоновка" },
       "about": { "en": "Typefaces, the size of text and answers, line spacing, the column's width, corners, motion and how messages are drawn.", "ru": "Шрифты, размер текста и ответов, межстрочный интервал, ширина колонки, углы, анимация и вид сообщений." },
       "synonyms": ["typeface", "layout", "вёрстка", "компоновка"]
     },
     {
-      "id": "notifications", "group": "you", "icon": "bell",
+      "id": "notifications", "group": "general", "icon": "bell",
       "title": { "en": "Notifications", "ru": "Уведомления" },
       "about": { "en": "Where each kind of notification goes (in the app, push, desktop, Telegram), quiet hours and devices.", "ru": "Куда приходит каждый вид уведомлений (в приложении, пуш, рабочий стол, Telegram), тихие часы и устройства." },
       "synonyms": ["alerts", "push", "notify", "оповещения", "пуши", "уведомлять"]
     },
     {
-      "id": "voice", "group": "you", "icon": "headset",
-      "title": { "en": "Voice mode", "ru": "Голосовой режим" },
-      "about": { "en": "The companion you talk to: whether it is on, the model behind it, and the voice that reads its answers aloud.", "ru": "Компаньон, с которым говорите голосом: включён ли он, его модель и голос, которым он читает ответы." },
-      "synonyms": ["voice mode", "companion", "TTS", "speech synthesis", "read aloud", "voice", "голосовой режим", "компаньон", "озвучка", "синтез речи", "голос"]
-    },
-    {
-      "id": "dictation", "group": "you", "icon": "mic",
-      "title": { "en": "Voice input", "ru": "Голосовой ввод" },
-      "about": { "en": "What turns your voice notes and dictation in the chat into text: the engine, its fallback, and a cloud endpoint.", "ru": "Чем голосовые сообщения и диктовка в чате превращаются в текст: движок, запасной вариант и облачный адрес." },
-      "synonyms": ["dictation", "voice notes", "speech to text", "STT", "ASR", "transcription", "диктовка", "голосовые", "речь в текст", "расшифровка", "распознавание"]
-    },
-    {
-      "id": "speech-models", "group": "you", "icon": "download",
-      "title": { "en": "Recognition models", "ru": "Модели распознавания" },
-      "about": { "en": "The speech recognition models that run on this machine: downloading one, the one in use, its language and threads.", "ru": "Модели распознавания речи на этой машине: загрузка, модель в работе, её язык и потоки." },
-      "synonyms": ["speech models", "whisper", "local model", "download model", "речевые модели", "локальная модель", "скачать модель"]
-    },
-    {
-      "id": "navigation", "group": "you", "icon": "sliders",
+      "id": "navigation", "group": "general", "icon": "sliders",
       "title": { "en": "Navigation", "ru": "Навигация" },
-      "about": { "en": "The rail, the More launcher and the phone drawer: which screens they list and in what order.", "ru": "Боковая панель, «Ещё» и меню телефона: какие экраны в них и в каком порядке." },
+      "about": { "en": "The sidebar and the More launcher (a phone's drawer is the same sidebar): which screens they list and in what order.", "ru": "Боковая панель (на телефоне это то же меню) и «Ещё»: какие экраны в них и в каком порядке." },
       "synonyms": ["rail", "sidebar", "menu", "drawer", "боковая панель", "меню", "панель навигации"]
     },
     {
-      "id": "desktop", "group": "you", "icon": "apps",
+      "id": "desktop", "group": "general", "icon": "apps",
       "title": { "en": "Desktop app", "ru": "Настольное приложение" },
       "about": { "en": "Only inside the desktop app: the Quick Chat and appshot shortcuts, and whether closing the window hides it to the tray.", "ru": "Только в настольном приложении: горячие клавиши Quick Chat и снимка экрана, сворачивание окна в трей при закрытии." },
       "synonyms": ["desktop", "shortcut", "hotkey", "global shortcut", "quick chat", "appshot", "screenshot", "tray", "горячая клавиша", "горячие клавиши", "быстрый чат", "снимок экрана", "скриншот", "трей"]
     },
     {
-      "id": "security", "group": "you", "icon": "key",
-      "title": { "en": "Security", "ru": "Безопасность" },
-      "about": { "en": "How this app signs in, two-factor codes, the secrets the agent may use, and signing out everywhere.", "ru": "Как входит это приложение, двухфакторные коды, секреты, доступные агенту, и выход на всех устройствах." },
-      "synonyms": ["login", "sign in", "secrets", "2FA", "two-factor", "вход", "секреты", "пароль", "двухфакторная"]
+      "id": "voice", "group": "voice", "icon": "headset",
+      "title": { "en": "Voice mode", "ru": "Голосовой режим" },
+      "about": { "en": "The companion you talk to: whether it is on, the model behind it, and the voice that reads its answers aloud.", "ru": "Компаньон, с которым говорите голосом: включён ли он, его модель и голос, которым он читает ответы." },
+      "synonyms": ["voice mode", "companion", "TTS", "speech synthesis", "read aloud", "voice", "голосовой режим", "компаньон", "озвучка", "синтез речи", "голос"]
+    },
+    {
+      "id": "dictation", "group": "voice", "icon": "mic",
+      "title": { "en": "Voice input", "ru": "Голосовой ввод" },
+      "about": { "en": "What turns your voice notes and dictation in the chat into text: the engine, its fallback, and a cloud endpoint.", "ru": "Чем голосовые сообщения и диктовка в чате превращаются в текст: движок, запасной вариант и облачный адрес." },
+      "synonyms": ["dictation", "voice notes", "speech to text", "STT", "ASR", "transcription", "диктовка", "голосовые", "речь в текст", "расшифровка", "распознавание"]
+    },
+    {
+      "id": "speech-models", "group": "voice", "icon": "download",
+      "title": { "en": "Recognition models", "ru": "Модели распознавания" },
+      "about": { "en": "The speech recognition models that run on this machine: downloading one, the one in use, its language and threads.", "ru": "Модели распознавания речи на этой машине: загрузка, модель в работе, её язык и потоки." },
+      "synonyms": ["speech models", "whisper", "local model", "download model", "речевые модели", "локальная модель", "скачать модель"]
     },
     {
       "id": "models", "group": "models", "icon": "model",
-      "title": { "en": "Models", "ru": "Модели" },
-      "about": { "en": "The models sessions use: which one opens a session, the fallbacks and their order, and adding a model.", "ru": "Модели сессий: какая открывает сессию, запасные и их порядок, добавление модели." },
-      "synonyms": ["model", "LLM", "default model", "fallback", "модель", "нейросеть", "модель по умолчанию", "запасная модель"]
+      "title": { "en": "Models and providers", "ru": "Модели и провайдеры" },
+      "about": { "en": "The endpoints models run on and the models of each: which one opens a session, its reasoning, the fallbacks in their order, a provider's key and address, and the check that it answers.", "ru": "Адреса, на которых работают модели, и модели каждого: какая открывает сессию, её рассуждение, запасные по порядку, ключ и адрес провайдера и проверка, что он отвечает." },
+      "synonyms": ["model", "LLM", "default model", "fallback", "provider", "client", "endpoint", "API key", "test connection", "модель", "нейросеть", "модель по умолчанию", "запасная модель", "провайдер", "клиент", "ключ API", "проверить подключение"]
     },
     {
       "id": "tasks", "group": "models", "icon": "spawn",
       "title": { "en": "Models for tasks", "ru": "Модели для задач" },
       "about": { "en": "The models given particular jobs: subagents, the orchestrators, images, the review of actions, and what happens when one fails.", "ru": "Модели для отдельных работ: субагенты, оркестраторы, картинки, проверка действий и что делать, если такая модель не отвечает." },
       "synonyms": ["subagents", "orchestrator", "vision", "image model", "reviewer", "субагенты", "оркестратор", "картинки", "модель для картинок", "проверка"]
-    },
-    {
-      "id": "providers", "group": "models", "icon": "cloud",
-      "title": { "en": "Providers", "ru": "Клиенты" },
-      "about": { "en": "The provider endpoints models are reached through: their addresses and API keys, and adding one.", "ru": "Клиенты провайдеров, через которые идут модели: адреса, ключи API и добавление нового." },
-      "synonyms": ["provider", "client", "API key", "endpoint", "OpenRouter", "провайдер", "клиент", "ключ API", "адрес"]
     },
     {
       "id": "accounts", "group": "models", "icon": "user",
@@ -91,61 +79,61 @@
       "synonyms": ["free", "free models", "no cost", "бесплатно", "бесплатные модели"]
     },
     {
-      "id": "chat", "group": "agent", "icon": "inbox",
+      "id": "budget", "group": "models", "icon": "chart",
+      "title": { "en": "Budget", "ru": "Бюджет" },
+      "about": { "en": "Spend caps per day, per run, in total and per provider, the counters, and alerts on a low balance.", "ru": "Потолки трат за день, за запуск, всего и по провайдерам, счётчики и предупреждения о низком балансе." },
+      "synonyms": ["budget", "spend", "cost", "money", "balance", "бюджет", "траты", "расходы", "деньги", "баланс"]
+    },
+    {
+      "id": "chat", "group": "autonomy", "icon": "inbox",
       "title": { "en": "Chat", "ru": "Чат" },
       "about": { "en": "How the chat helps you: the suggested next message, autopilot, and the profile of how you write.", "ru": "Как чат помогает: подсказка следующего сообщения, автопилот и профиль того, как вы пишете." },
       "synonyms": ["chat", "autopilot", "suggestion", "predict", "чат", "автопилот", "подсказка"]
     },
     {
-      "id": "rules", "group": "agent", "icon": "pen",
+      "id": "rules", "group": "autonomy", "icon": "pen",
       "title": { "en": "Working rules", "ru": "Правила работы" },
       "about": { "en": "The standing instructions every session reads, and changing them with a model.", "ru": "Постоянные инструкции, которые читает каждая сессия, и их правка моделью." },
       "synonyms": ["rules", "instructions", "system prompt", "правила", "инструкции", "системный промпт"]
     },
     {
-      "id": "approvals", "group": "agent", "icon": "checkcircle",
+      "id": "approvals", "group": "autonomy", "icon": "checkcircle",
       "title": { "en": "Approvals", "ru": "Одобрения" },
       "about": { "en": "Which actions the agent takes alone and which wait for you, their review, and how its changes to its own code are approved.", "ru": "Какие действия агент делает сам, а какие ждут вас, их проверка и одобрение изменений агентом собственного кода." },
       "synonyms": ["approval", "permissions", "confirm", "self-change", "одобрение", "разрешения", "подтверждение", "самоизменение"]
     },
     {
-      "id": "memory", "group": "agent", "icon": "bulb",
-      "title": { "en": "Memory", "ru": "Память" },
-      "about": { "en": "What the agent remembers: generating memory from chats and the model that does it, its daily budget, and the sensitive subjects it refuses.", "ru": "Что агент запоминает: память из чатов и модель, которая её составляет, дневной бюджет и чувствительные темы, которые он не сохраняет." },
-      "synonyms": ["memory", "remember", "learning", "sensitive", "память", "запоминать", "обучение", "чувствительное"]
-    },
-    {
-      "id": "memory-upkeep", "group": "agent", "icon": "archive",
-      "title": { "en": "Memory upkeep", "ru": "Обслуживание памяти" },
-      "about": { "en": "Sorting notes into categories and topics, tidying duplicates, and importing, exporting or resetting memory.", "ru": "Раскладка заметок по категориям и темам, уборка дубликатов, импорт, экспорт и сброс памяти." },
-      "synonyms": ["categories", "topics", "duplicates", "import", "export", "reset memory", "категории", "темы", "дубликаты", "импорт", "экспорт", "сбросить память"]
-    },
-    {
-      "id": "translation", "group": "agent", "icon": "globe",
-      "title": { "en": "Translation", "ru": "Перевод" },
-      "about": { "en": "The language the agent answers in, and talking to it in another one: your language, the agent's, and the model that translates between them.", "ru": "Язык ответов агента и разговор с ним на другом языке: ваш язык, язык агента и модель, которая переводит между ними." },
-      "synonyms": ["translate", "translation", "translator", "language", "перевод", "переводчик", "перевести", "язык"]
-    },
-    {
-      "id": "budget", "group": "agent", "icon": "chart",
-      "title": { "en": "Budget", "ru": "Бюджет" },
-      "about": { "en": "Spend caps per day, per run, in total and per provider, the counters, and alerts on a low balance.", "ru": "Потолки трат за день, за запуск, всего и по клиентам, счётчики и предупреждения о низком балансе." },
-      "synonyms": ["budget", "spend", "cost", "money", "balance", "бюджет", "траты", "расходы", "деньги", "баланс"]
-    },
-    {
-      "id": "limits", "group": "agent", "icon": "hand",
+      "id": "limits", "group": "autonomy", "icon": "hand",
       "title": { "en": "Limits", "ru": "Лимиты" },
       "about": { "en": "How far one run may go: its iterations, the subagents at once, the size of a workspace, and the memory the agent's commands on this machine may use.", "ru": "Насколько далеко заходит один запуск: итерации, субагенты одновременно, размер рабочей папки и память, которую могут занять команды агента на этой машине." },
       "synonyms": ["limit", "iterations", "subagents", "disk", "лимит", "итерации", "субагенты", "диск"]
     },
     {
-      "id": "context", "group": "agent", "icon": "compact",
+      "id": "context", "group": "autonomy", "icon": "compact",
       "title": { "en": "Context", "ru": "Контекст" },
       "about": { "en": "The summary that takes the place of a long run's earlier messages: when it is written, what it keeps and the model that writes it.", "ru": "Сводка, которая заменяет ранние сообщения длинного запуска: когда она пишется, что сохраняет и какая модель её пишет." },
       "synonyms": ["context", "compaction", "контекст", "сжатие"]
     },
     {
-      "id": "schedules", "group": "agent", "icon": "clock",
+      "id": "memory", "group": "autonomy", "icon": "bulb",
+      "title": { "en": "Memory", "ru": "Память" },
+      "about": { "en": "What the agent remembers: generating memory from chats and the model that does it, its daily budget, and the sensitive subjects it refuses.", "ru": "Что агент запоминает: память из чатов и модель, которая её составляет, дневной бюджет и чувствительные темы, которые он не сохраняет." },
+      "synonyms": ["memory", "remember", "learning", "sensitive", "память", "запоминать", "обучение", "чувствительное"]
+    },
+    {
+      "id": "memory-upkeep", "group": "autonomy", "icon": "archive",
+      "title": { "en": "Memory upkeep", "ru": "Обслуживание памяти" },
+      "about": { "en": "Sorting notes into categories and topics, tidying duplicates, and importing, exporting or resetting memory.", "ru": "Раскладка заметок по категориям и темам, уборка дубликатов, импорт, экспорт и сброс памяти." },
+      "synonyms": ["categories", "topics", "duplicates", "import", "export", "reset memory", "категории", "темы", "дубликаты", "импорт", "экспорт", "сбросить память"]
+    },
+    {
+      "id": "translation", "group": "autonomy", "icon": "globe",
+      "title": { "en": "Translation", "ru": "Перевод" },
+      "about": { "en": "The language the agent answers in, and talking to it in another one: your language, the agent's, and the model that translates between them.", "ru": "Язык ответов агента и разговор с ним на другом языке: ваш язык, язык агента и модель, которая переводит между ними." },
+      "synonyms": ["translate", "translation", "translator", "language", "перевод", "переводчик", "перевести", "язык"]
+    },
+    {
+      "id": "schedules", "group": "autonomy", "icon": "clock",
       "title": { "en": "Scheduled runs", "ru": "Запуски по расписанию" },
       "about": { "en": "Runs the agent starts on a clock: where scheduled runs post, approving the agent's schedules, and the heartbeat check-in.", "ru": "Запуски, которые агент начинает по часам: куда пишут запуски по расписанию, одобрение расписаний агента и пульс." },
       "synonyms": ["schedule", "scheduler", "cron", "heartbeat", "check-in", "расписание", "пульс", "проверка"]
@@ -205,6 +193,12 @@
       "synonyms": ["tunnel", "ngrok", "tailscale", "funnel", "cloudflare", "cloudflared", "frp", "public url", "port forwarding", "туннель", "публичная ссылка", "проброс портов", "белый адрес"]
     },
     {
+      "id": "security", "group": "system", "icon": "key",
+      "title": { "en": "Security", "ru": "Безопасность" },
+      "about": { "en": "How this app signs in, two-factor codes, the secrets the agent may use, and signing out everywhere.", "ru": "Как входит это приложение, двухфакторные коды, секреты, доступные агенту, и выход на всех устройствах." },
+      "synonyms": ["login", "sign in", "secrets", "2FA", "two-factor", "вход", "секреты", "пароль", "двухфакторная"]
+    },
+    {
       "id": "components", "group": "system", "icon": "plug",
       "title": { "en": "Components", "ru": "Компоненты" },
       "about": { "en": "Optional pieces of the installation: what is installed and what a download would add.", "ru": "Необязательные части установки: что уже стоит и что добавит загрузка." },
@@ -219,7 +213,7 @@
     {
       "id": "about", "group": "system", "icon": "settings",
       "title": { "en": "About", "ru": "О системе" },
-      "about": { "en": "Versions, providers, the desktop app's updates, and signing out of this browser.", "ru": "Версии, клиенты, обновления настольного приложения и выход из этого браузера." },
+      "about": { "en": "Versions, providers, the desktop app's updates, and signing out of this browser.", "ru": "Версии, провайдеры, обновления настольного приложения и выход из этого браузера." },
       "synonyms": ["version", "update", "версия", "обновление"]
     }
   ],
@@ -269,8 +263,8 @@
     {
       "section": "appearance", "anchor": "appearance.colors", "config": null,
       "title": { "en": "Colours", "ru": "Цвета" },
-      "about": { "en": "Override the theme's background, surface, text, accent and send button colours; a change stays until you reset.", "ru": "Заменить цвета темы: фон, поверхность, текст, акцент и кнопку отправки; правка держится до сброса." },
-      "synonyms": ["colours", "colors", "accent colour", "accent color", "background colour", "text colour", "цвета", "акцент", "цвет фона", "цвет текста", "палитра"]
+      "about": { "en": "Override the theme's background, surface and text colours; a change stays until you reset.", "ru": "Заменить цвета темы: фон, поверхность и текст; правка держится до сброса." },
+      "synonyms": ["colours", "colors", "background colour", "text colour", "цвета", "цвет фона", "цвет текста", "палитра"]
     },
     {
       "section": "appearance", "anchor": "appearance.wash", "config": null,
@@ -357,21 +351,15 @@
       "synonyms": ["pet model", "mascot model", "companion model", "модель маскота", "реплики маскота"]
     },
     {
-      "section": "navigation", "anchor": "navigation.rail", "config": "navigation.rail",
-      "title": { "en": "Desktop navigation", "ru": "Навигация на компьютере" },
-      "about": { "en": "Which screens sit on the rail, which in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны на боковой панели, какие в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
-      "synonyms": ["rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
-    },
-    {
-      "section": "navigation", "anchor": "navigation.drawer", "config": "navigation.drawer",
-      "title": { "en": "Phone menu", "ru": "Меню телефона" },
-      "about": { "en": "The screens in the phone's drawer and their order; the rest wait under More.", "ru": "Экраны в меню телефона и их порядок; остальные ждут в «Ещё»." },
-      "synonyms": ["drawer", "phone menu", "mobile menu", "hamburger", "меню телефона", "мобильное меню", "выдвижное меню", "гамбургер"]
+      "section": "navigation", "anchor": "navigation.pinned", "config": "navigation.pinned",
+      "title": { "en": "Sidebar navigation", "ru": "Навигация в боковой панели" },
+      "about": { "en": "Which screens are pinned at the top of the sidebar, which wait in the More launcher and which are hidden; drag them or choose a place and an icon.", "ru": "Какие экраны закреплены вверху боковой панели, какие ждут в «Ещё», какие скрыты; перетащите их или выберите место и иконку." },
+      "synonyms": ["pinned", "pin a screen", "rail", "sidebar", "side panel", "More launcher", "More menu", "hide screen", "reorder", "icons", "боковая панель", "сайдбар", "меню Ещё", "скрыть экран", "порядок", "иконки"]
     },
     {
       "section": "navigation", "anchor": "navigation.reset", "config": null,
       "title": { "en": "Reset to default", "ru": "Сбросить по умолчанию" },
-      "about": { "en": "Put the rail, the More launcher and the phone drawer back the way they came.", "ru": "Вернуть боковую панель, «Ещё» и меню телефона к исходному виду." },
+      "about": { "en": "Put the sidebar's pinned rows and the More launcher back the way they came.", "ru": "Вернуть закреплённые строки боковой панели и «Ещё» к исходному виду." },
       "synonyms": ["reset navigation", "default menu", "restore menu", "сбросить навигацию", "вернуть меню", "по умолчанию"]
     },
     {
@@ -466,14 +454,14 @@
     },
     {
       "section": "dictation", "anchor": "asr.provider", "config": "asr.provider",
-      "title": { "en": "Speech recognition provider", "ru": "Клиент для распознавания речи" },
-      "about": { "en": "Which configured provider the cloud transcriber calls, or a custom endpoint of its own.", "ru": "Какой из настроенных клиентов вызывает облачная расшифровка, или собственный адрес." },
+      "title": { "en": "Speech recognition provider", "ru": "Провайдер распознавания речи" },
+      "about": { "en": "Which configured provider the cloud transcriber calls, or a custom endpoint of its own.", "ru": "Какой из настроенных провайдеров вызывает облачная расшифровка, или собственный адрес." },
       "synonyms": ["Whisper provider", "STT provider", "ASR endpoint", "transcription API", "OpenAI Whisper", "провайдер распознавания", "клиент для расшифровки", "Whisper"]
     },
     {
       "section": "dictation", "anchor": "asr.url", "config": "asr.url",
       "title": { "en": "Speech recognition endpoint", "ru": "Адрес сервиса распознавания" },
-      "about": { "en": "The base URL of a custom speech-to-text endpoint, when no provider is chosen.", "ru": "Базовый адрес собственного сервиса распознавания речи, если клиент не выбран." },
+      "about": { "en": "The base URL of a custom speech-to-text endpoint, when no provider is chosen.", "ru": "Базовый адрес собственного сервиса распознавания речи, если провайдер не выбран." },
       "synonyms": ["STT URL", "Whisper URL", "transcription endpoint", "base URL", "адрес распознавания", "эндпоинт распознавания"]
     },
     {
@@ -575,7 +563,7 @@
     {
       "section": "models", "anchor": "models.add", "config": null,
       "title": { "en": "Add a model", "ru": "Добавить модель" },
-      "about": { "en": "Connect a new model: a provider plus a model id, with its window and thinking settings.", "ru": "Подключить новую модель: клиент плюс идентификатор модели, с окном контекста и рассуждением." },
+      "about": { "en": "Connect a new model: a provider plus a model id, with its window and thinking settings.", "ru": "Подключить новую модель: провайдер плюс идентификатор модели, с окном контекста и рассуждением." },
       "synonyms": ["add model", "new model", "connect model", "OpenRouter", "DeepSeek", "добавить модель", "новая модель", "подключить модель"]
     },
     {
@@ -615,8 +603,8 @@
       "synonyms": ["main orchestrator", "dispatcher", "router", "coordinator", "главный оркестратор", "диспетчер", "координатор"]
     },
     {
-      "section": "providers", "anchor": "providers.list", "config": "providers.*.api_key",
-      "title": { "en": "Providers (clients)", "ru": "Клиенты (провайдеры)" },
+      "section": "models", "anchor": "providers.list", "config": "providers.*.api_key",
+      "title": { "en": "Providers", "ru": "Провайдеры" },
       "about": { "en": "The endpoints models run on: address, API key and temperature of each, and adding a new one.", "ru": "Адреса, на которых работают модели: адрес, ключ API и температура каждого, и добавление нового." },
       "synonyms": ["provider", "API key", "base URL", "endpoint", "OpenRouter key", "vLLM", "llama.cpp", "провайдер", "ключ API", "клиент", "адрес API", "эндпоинт"]
     },
@@ -1369,6 +1357,12 @@
       "title": { "en": "What the agent may do alone", "ru": "Что агенту можно делать самому" },
       "about": { "en": "For each kind of action (pushing, deleting, spending, writing outside the workspace…) whether it runs, asks you first or is refused, and whether a model reviews it.", "ru": "Для каждого вида действий (push, удаление, траты, запись вне рабочей папки…) — выполняется ли оно, спрашивает ли сначала вас или запрещено, и проверяет ли его модель." },
       "synonyms": ["action rules", "permissions", "ask before", "allow push", "правила действий", "разрешения", "спрашивать перед", "разрешить push"]
+    },
+    {
+      "section": "approvals", "anchor": "approvals.project", "config": null,
+      "title": { "en": "Standing approvals in projects", "ru": "Постоянные разрешения в проектах" },
+      "about": { "en": "What a chat allowed for every chat of its project, listed per project, and taking one back so every chat asks again.", "ru": "Что чат разрешил для всех чатов своего проекта, списком по проектам, и отзыв разрешения, чтобы каждый чат снова спрашивал." },
+      "synonyms": ["project approvals", "allow in this project", "revoke approval", "standing grant", "разрешения проекта", "разрешать в этом проекте", "отозвать разрешение", "постоянное разрешение"]
     },
     {
       "section": "accounts", "anchor": "accounts", "config": null,

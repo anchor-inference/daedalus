@@ -208,19 +208,19 @@ def main() -> int:
                 page = context.new_page()
                 page.route("**/api/**", stub)
                 page.goto(f"{BASE}/agents?view=chats&token=t&scheme={scheme}&lang={lang}")
-                expect(page.locator(".ph-row").first).to_be_visible(timeout=15000)
+                expect(page.locator(".list-row").first).to_be_visible(timeout=15000)
 
                 def sheet_pick(name: str, page=page):  # type: ignore[no-untyped-def]
-                    return page.locator(".ph-actions .ph-mrow", has_text=name).first
+                    return page.locator(".menu-sheet .menu-row", has_text=name).first
 
                 # The leader's sheet lists no subagents either; the chat's own menu has their tile.
-                page.locator(f"[data-session='{shots.S1}'] .ph-row-more").click()
-                rows = page.locator(".ph-actions .ph-mrow").all_inner_texts()
+                page.locator(f"[data-session='{shots.S1}'] .list-row-more").click()
+                rows = page.locator(".menu-sheet .menu-row").all_inner_texts()
                 check(not any(name in " ".join(rows) for name in ("link-check", "photo-alt", "price-audit")), f"{lang} phone {scheme}: a chat's sheet lists no subagents")
                 page.keyboard.press("Escape")
                 page.wait_for_timeout(300)
 
-                page.locator(f"[data-session='{shots.S6}'] .ph-row-more").click()
+                page.locator(f"[data-session='{shots.S6}'] .list-row-more").click()
                 sheet_pick(words["make"]).click()
                 field = page.locator("#make-project-name")
                 expect(field).to_be_visible(timeout=5000)

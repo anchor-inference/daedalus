@@ -1,15 +1,16 @@
-import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openPathOf } from "./subagents";
 import { SchedulesDialogHost } from "./schedules/host";
 import { api, SessionList, telegram, TerminalList } from "./api";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
 import { SessionPicker } from "./sessionpicker";
 import type { OnboardingState } from "./screens/AddModel";
-import { HeldRoute, holdReplacements, ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
-import { Counts, Palette, PaletteItem, go, screenTitle, useMedia, useShortcuts } from "./shell";
+import { ORCHESTRATION, ORCHESTRATION_LIST, PROJECTS_PAGE, type Route, back, migrateLegacyLocation, navigate, newAgentPath, parse, pathFor, projectHome, projectPagePath, projectSessionPath, recallScroll, rememberScroll, sessionPath, useRoute } from "./router";
+import { Counts, ICONS, PaletteItem, besideSession, chatStatus, go, goKey, screenTitle, useMedia, useShortcuts } from "./shell";
+import { Palette } from "./palette";
 import { AppDrawer } from "./drawer";
-import { closeDrawer } from "./ui/phone";
-import { Sidebar, useSidebar } from "./sidebar";
+import { closeDrawer } from "./ui/primitives";
+import { KEYS, Sidebar, SidebarFrame, UnfoldButton, useSidebar } from "./sidebar";
 import { NavMenu } from "./navmenu";
 import { useRecordVisit } from "./navfrequent";
 import { shortcutFor } from "./navigation";
@@ -40,7 +41,6 @@ import { MainEntry } from "./main/MainEntry";
 import { Mode, modeHome, modeOf, rememberMode, storedMode } from "./mode";
 import { applyAppearance } from "./appearance";
 import { OrchestrationList, OrchestrationSidebar, useOrchestrationWaiting } from "./orchestration";
-import { Rail } from "./rail";
 import { useNav } from "./usenav";
 import { currentId } from "./navconfig";
 import { SessionScreen, chunk, chunkVerdict, mayReload, retried, whenIdle } from "./chunks";
@@ -66,11 +66,12 @@ const CalendarScreen = lazy(retried(() => import("./calendar/Calendar"), (m) => 
 const CanvasScreen = lazy(retried(() => import("./canvas/CanvasList"), (m) => ({ default: m.CanvasScreen })));
 const UsageScreen = lazy(retried(() => import("./screens/Usage"), (m) => ({ default: m.UsageScreen })));
 const SettingsScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.SettingsScreen })));
-const HealthScreen = lazy(retried(() => import("./screens/Settings"), (m) => ({ default: m.HealthScreen })));
+const HealthScreen = lazy(retried(() => import("./screens/Health"), (m) => ({ default: m.HealthScreen })));
 const MemoryScreen = lazy(retried(() => import("./screens/Memory"), (m) => ({ default: m.MemoryScreen })));
 const TerminalsScreen = lazy(retried(() => import("./screens/Terminals"), (m) => ({ default: m.TerminalsScreen })));
 const BrowserFullScreen = lazy(retried(() => import("./screens/BrowserFull"), (m) => ({ default: m.BrowserFullScreen })));
 const HarnessesScreen = lazy(retried(() => import("./screens/Harnesses"), (m) => ({ default: m.HarnessesScreen })));
+const PrimitivesScreen = lazy(retried(() => import("./screens/Primitives"), (m) => ({ default: m.PrimitivesScreen })));
 const ServicesScreen = lazy(retried(() => import("./screens/Services"), (m) => ({ default: m.ServicesScreen })));
 const PageHostScreen = lazy(retried(() => import("./screens/PageHost"), (m) => ({ default: m.PageHostScreen })));
 const LoginScreen = lazy(retried(() => import("./screens/Login"), (m) => ({ default: m.LoginScreen })));
@@ -144,9 +145,9 @@ function sessionStore(): Storage | null {
   }
 }
 
-/** The sidebar's width: its default, and the range a drag is held to. 288 rather than 272 since its
- *  rows went to two lines: a Russian chat title was cut at eighteen characters in the narrower one. */
-const SIDEBAR_W = 288;
+/** The sidebar's width: its default, and the range a drag is held to. The default is the 300 px the
+ *  approved design draws; the operator's own drag still wins and is remembered. */
+const SIDEBAR_W = 300;
 const SIDEBAR_W_MIN = 232;
 const SIDEBAR_W_MAX = 360;
 
@@ -154,53 +155,17 @@ export function App() {
   useLang();
   const live = useRoute();
   const wide = useWide();
-  // Settings is a dialog over the screen it was opened from, so on a desktop the shell goes on
-  // drawing that screen (`route` below) while the address is Settings' (`live`). Opened from
-  // scratch — a reload, a link from outside — there is no such screen and the mode's home is drawn
-  // under it. A phone has no "under": Settings is a full-screen stack there and `route` is the address.
-  const overlay = wide && live.screen === "settings";
-  const beneath = useRef<{ route: Route; href: string; depth: number } | null>(null);
-  if (live.screen !== "settings") beneath.current = { route: live, href: window.location.pathname + window.location.search + window.location.hash, depth: historyDepth() };
-  const homeRoute = useMemo(() => {
-    const [path, search = ""] = modeHome(storedMode(), wide).split("?");
-    return parse(path, search ? `?${search}` : "");
-  }, [wide]);
-  const route = overlay ? beneath.current?.route ?? homeRoute : live;
-  // The screen under the dialog choosing its own entry (`replace`) changes that screen, not the address.
-  const [, redraw] = useState(0);
-  useEffect(() => {
-    if (!overlay) return;
-    holdReplacements((path) => {
-      const [pathname, search = ""] = path.split("#")[0].split("?");
-      const next = parse(pathname, search ? `?${search}` : "");
-      if (next.screen === "settings") return false;
-      // Opened from scratch there is no entry of the app's under the dialog (-1): closing then goes to
-      // this address rather than back through the history.
-      beneath.current = { route: next, href: path, depth: beneath.current?.depth ?? -1 };
-      redraw((n) => n + 1);
-      return true;
-    });
-    return () => holdReplacements(null);
-  }, [overlay]);
-  // Focus goes back to whatever opened the dialog when it closes. Noted here, as the shell decides to
-  // draw it: the shell turns inert under the dialog in that same commit, before the dialog's lazy code
-  // has even arrived, and the browser drops the focus from an inert control onto the body.
-  const opener = useRef<HTMLElement | null>(null);
-  const wasOverlay = useRef(false);
-  if (overlay && !wasOverlay.current) opener.current = document.activeElement as HTMLElement | null;
-  wasOverlay.current = overlay;
-  useEffect(() => {
-    if (overlay) return;
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected) requestAnimationFrame(() => back.focus({ preventScroll: true }));
-  }, [overlay]);
-  // Closing goes back through the history to the screen under the dialog, however many sections
-  // were opened inside it; with nothing of the app's under it, it goes to the mode's home instead.
+  // Settings is a page of its own on a desktop: its list of sections stands where the sidebar was, so
+  // the shell is not drawn under it. Where the operator was before it opened is kept, for its Back.
+  const route = live;
+  const beneath = useRef<{ href: string; depth: number } | null>(null);
+  if (live.screen !== "settings") beneath.current = { href: window.location.pathname + window.location.search + window.location.hash, depth: historyDepth() };
+  // Back goes through the history to where Settings was opened from, however many sections were
+  // opened inside it; opened from scratch (a reload, a link from outside) it goes to the mode's home.
   const closeSettings = useCallback(() => {
     const under = beneath.current;
     const now = historyDepth();
-    if (under && under.depth >= 0 && under.depth < now) window.history.go(under.depth - now);
+    if (under && under.depth < now) window.history.go(under.depth - now);
     else navigate(under?.href ?? modeHome(storedMode(), wide));
   }, [wide]);
   // Which mode the shell is in: the route's, where the route belongs to one, and otherwise the one the
@@ -221,7 +186,8 @@ export function App() {
   }, [routeMode, lastMode]);
   const mode = routeMode ?? lastMode;
   const [picking, setPicking] = useState(false);
-  const [palette, setPalette] = useState(false);
+  // The palette is open while this is a string: what it starts with typed in (empty from Ctrl K).
+  const [palette, setPalette] = useState<string | null>(null);
   // Which project the operator is looking at ("" is all of them). A lens over every list of agents
   // rather than a destination, so it lives in the shell and not in the route.
   const [project, setProject] = useState(storedProject);
@@ -233,7 +199,7 @@ export function App() {
     setProject(id);
   }, []);
   const clearProject = useCallback(() => pickProject(""), [pickProject]);
-  // The sidebar: the current mode's column beside the rail, or folded away with the rail alone left.
+  // The sidebar: the current mode's column, or folded away with a button in the corner to bring it back.
   const [folded, flipSidebar] = useSidebar(readSidebar, rememberSidebar);
   const [sidebarWidth, setSidebarWidth] = usePaneWidth("sidebar", SIDEBAR_W, SIDEBAR_W_MIN, SIDEBAR_W_MAX);
   const shell = useRef<HTMLDivElement>(null);
@@ -250,9 +216,9 @@ export function App() {
     }
     flipSidebar();
   }, [folded, flipSidebar]);
-  // An open canvas is a focus mode. The editor needs the width, and the column beside the rail was a
-  // second left menu next to the canvas's own tools. The rail stays; its fold button shows the column
-  // for this visit only, so the folding the operator chose for every other page is left alone.
+  // An open canvas is a focus mode. The editor needs the width, and the column beside it was a second
+  // left menu next to the canvas's own tools. The corner's unfold button shows the column for this
+  // visit only, so the folding the operator chose for every other page is left alone.
   const canvasOpen = route.screen === "canvas" && !!route.detail;
   const [columnShown, setColumnShown] = useState(false);
   useEffect(() => {
@@ -262,7 +228,8 @@ export function App() {
   const sidebarToggle = useCallback(() => (canvasOpen ? setColumnShown((open) => !open) : toggleSidebar()), [canvasOpen, toggleSidebar]);
   const [menu, setMenu] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const openPalette = useCallback(() => setPalette(true), []);
+  const openPalette = useCallback(() => setPalette(""), []);
+  const searchPalette = useCallback((query: string) => setPalette(query), []);
   const offline = useOffline();
   useEffect(prefetchSession, []);
   // In orchestration mode a project, or the main chat from inside one, is what the operator opens
@@ -572,35 +539,43 @@ export function App() {
       await openFreeTerminal(env, env === "container" ? place?.path : home || undefined, place?.projectId ?? null, showToast);
     };
     const terminalItems: PaletteItem[] = [
-      ...(listing?.terminals ?? []).filter((r) => r.status === "running").map((r) => ({ id: `t-${r.id}`, label: t("term.palette.open", { title: r.title }), hint: r.cwd, icon: "terminal" as const, run: () => navigate(pathFor("terminals", r.id)) })),
+      ...(listing?.terminals ?? []).filter((r) => r.status === "running").map((r): PaletteItem => ({ id: `t-${r.id}`, group: "go", label: t("term.palette.open", { title: r.title }), hint: r.cwd, icon: "terminal", run: () => navigate(pathFor("terminals", r.id)) })),
       // Before the first listing nothing is known about the environments: offer the container one,
       // which is the one an installation has; the host one only once it is known to answer.
-      ...(!listing || envUp("container") ? [{ id: "new-term-container", label: t("term.palette.container"), icon: "terminal" as const, run: () => void newTerminal("container")() }] : []),
-      ...(envUp("host") ? [{ id: "new-term-host", label: t("term.palette.host"), icon: "lock" as const, run: () => void newTerminal("host")() }] : []),
+      ...(!listing || envUp("container") ? [{ id: "new-term-container", group: "actions" as const, label: t("term.palette.container"), icon: "terminal" as const, run: () => void newTerminal("container")() }] : []),
+      ...(envUp("host") ? [{ id: "new-term-host", group: "actions" as const, label: t("term.palette.host"), icon: "lock" as const, run: () => void newTerminal("host")() }] : []),
     ];
     // Both modes' places are offered whichever mode is open: a project with an orchestrator opens in
     // orchestration mode, a lens is Agents mode's, and each item says which by where it leads.
     const orchestratedIds = new Set(projectList.filter((p) => p.settings.orchestrator?.enabled).map((p) => p.id));
+    const projectsOpen = projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived);
     return [
-      { id: "new-agent", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(newAgentPath(project)) },
-      { id: "mode", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
-      { id: "main", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
-      { id: "new-project", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
-      { id: "import-session", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
-      { id: "projects", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
+      { id: "new-chat", group: "actions", label: t("ph.newchat"), icon: "compose", right: KEYS.newChat, run: () => navigate(pathFor("agents")) },
+      { id: "new-agent", group: "actions", label: t("shell.search.newagent"), icon: "plus", run: () => navigate(newAgentPath(project)) },
+      { id: "mode", group: "actions", label: t(mode === "agents" ? "mode.to.orchestration" : "mode.to.agents"), icon: mode === "agents" ? "compass" : "bots", run: () => navigate(modeHome(mode === "agents" ? "orchestration" : "agents", wide)) },
+      { id: "main", group: "go", label: t("main.title"), icon: "compass", run: () => navigate(ORCHESTRATION) },
+      { id: "new-project", group: "actions", label: t(mode === "orchestration" ? "np.orch.title" : "np.title"), icon: "plus", run: () => openNewProject() },
+      { id: "import-session", group: "actions", label: t("imp.palette"), hint: t("imp.entry.hint"), icon: "download", run: () => openImport() },
+      { id: "projects", group: "go", label: t("shell.projects"), hint: agentProjects.find((p) => p.id === project)?.name ?? t("shell.projects.all"), icon: "folder", run: () => { if (wide) navigate(PROJECTS_PAGE); else { navigate(pathFor("agents")); setSwitching(true); } } },
       // "Work in {name}" read like opening the project, and quietly narrowed the column instead; the
       // items now say what they do, and the one that lifts a lens is offered while one is on.
-      ...(project ? [{ id: "show-all-projects", label: t("shell.search.showall"), hint: agentProjects.find((p) => p.id === project)?.name, icon: "grid" as const, run: clearProject }] : []),
-      ...agentProjects.map((p) => ({ id: `p-${p.id}`, label: t("projects.lens", { name: p.name }), hint: projectPath(p), icon: "folder" as const, run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `open-${p.id}`, label: t("focus.palette", { name: p.name }), icon: "conductor" as const, run: () => navigate(projectHome(p.id)) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `team-${p.id}`, label: t("shell.search.team", { name: p.name }), icon: "bots" as const, run: () => navigate(projectPagePath(p.id, "team")) })),
-      ...projectList.filter((p) => !p.system && !p.settings.ephemeral && !p.settings.archived).map((p) => ({ id: `board-${p.id}`, label: t("shell.search.board", { name: p.name }), icon: "board" as const, run: () => navigate(projectPagePath(p.id, "board")) })),
-      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s) => ({ id: `go-${s}`, label: t("shell.search.goto", { name: screenTitle(s) }), icon: "back" as const, run: () => navigate(pathFor(s)) })),
+      ...(project ? [{ id: "show-all-projects", group: "actions" as const, label: t("shell.search.showall"), hint: agentProjects.find((p) => p.id === project)?.name, icon: "grid" as const, run: clearProject }] : []),
+      ...agentProjects.map((p): PaletteItem => ({ id: `p-${p.id}`, group: "actions", label: t("projects.lens", { name: p.name }), hint: projectPath(p), icon: "folder", run: () => { pickProject(p.id); navigate(pathFor("agents")); } })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `open-${p.id}`, group: "projects", label: t("focus.palette", { name: p.name }), icon: "conductor", run: () => navigate(projectHome(p.id)) })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `team-${p.id}`, group: "projects", label: t("shell.search.team", { name: p.name }), icon: "bots", run: () => navigate(projectPagePath(p.id, "team")) })),
+      ...projectsOpen.map((p): PaletteItem => ({ id: `board-${p.id}`, group: "projects", label: t("shell.search.board", { name: p.name }), icon: "board", run: () => navigate(projectPagePath(p.id, "board")) })),
+      // A screen is a place to go, under its own name and, where it has one, the key that goes there.
+      ...visibleScreens(SCREENS, selfdev).filter((s) => !nav.hidden.has(s)).map((s): PaletteItem => ({ id: `go-${s}`, group: "go", label: screenTitle(s), icon: ICONS[s], right: goKey(s), run: () => navigate(pathFor(s)) })),
       // A page is a destination like a screen, offered under its own name and glyph.
-      ...nav.shown.filter((it) => it.kind === "page").map((it) => ({ id: `go-${it.id}`, label: t("shell.search.goto", { name: it.title }), icon: it.icon, iconPath: it.iconPath, run: () => navigate(it.path) })),
-      // An orchestrated session opens inside its project, not in the Agents list.
-      ...sessions.filter((s) => !s.metadata?.dispatcher).map((s) => ({ id: `s-${s.id}`, label: s.title, hint: orchestratedIds.has(s.project_id) ? `${s.project} · ${s.model ?? ""}` : s.model ?? "", icon: orchestratedIds.has(s.project_id) ? "conductor" as const : "bots" as const, run: () => (orchestratedIds.has(s.project_id) ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id)) })),
+      ...nav.shown.filter((it) => it.kind === "page").map((it): PaletteItem => ({ id: `go-${it.id}`, group: "go", label: it.title, icon: it.icon, iconPath: it.iconPath, right: t("palette.right.page"), run: () => navigate(it.path) })),
       ...terminalItems,
+      // An orchestrated session opens inside its project, not in the Agents list.
+      // The leaders first: a helper is found by its name but is not one of the chats to come back to.
+      ...[...sessions.filter((s) => !s.metadata?.subagent_of), ...sessions.filter((s) => s.metadata?.subagent_of)].filter((s) => !s.metadata?.dispatcher).map((s): PaletteItem => {
+        const orchestrated = orchestratedIds.has(s.project_id);
+        const run = () => (orchestrated ? navigate(orchestratedSessionPath(s.id, s.project_id)) : open(s.id));
+        return { id: `s-${s.id}`, group: "chats", label: s.title, hint: orchestrated ? `${s.project} · ${s.model ?? ""}` : s.project, icon: orchestrated ? "conductor" : "bots", ...chatStatus(s), run, beside: () => besideSession(s.id, run) };
+      }),
     ];
   };
 
@@ -621,7 +596,7 @@ export function App() {
 
   if (authed === null) return <div className="app"><div className="empty">{t("common.loading")}</div></div>;
   if (authed === false) {
-    // Outside the shell on purpose: the shell's wide layout reserves the rail's column, and a login page has no rail.
+    // Outside the shell on purpose: the shell's wide layout reserves the sidebar's column, and a login page has no sidebar.
     return (
       <Suspense fallback={<div className="gate"><div className="empty">{t("common.loading")}</div></div>}>
         <LoginScreen onDone={() => setAuthed(true)} />
@@ -631,7 +606,7 @@ export function App() {
   if (onboarding === null) return <div className="app"><div className="empty">{t("common.loading")}</div></div>;
   if (!onboarding.has_model) {
     // Outside the shell, like the login page: the wide shell is a grid whose first column belongs
-    // to the rail, and a screen drawn in it without one sits beside the rail's width of nothing.
+    // to the sidebar, and a screen drawn in it without one sits beside the sidebar's width of nothing.
     return (
       <>
         <Suspense fallback={<div className="gate"><div className="empty">{t("common.loading")}</div></div>}>
@@ -669,7 +644,7 @@ export function App() {
         {route.screen === "agents" && <StartScreen onOpen={open} toast={showToast} project={project} projects={agentProjects} onPickProject={pickProject} />}
         {route.screen === "companion" && <CompanionScreen tab={route.detail} onOpen={open} toast={showToast} />}
         {route.screen === "inbox" && <InboxScreen onOpen={open} toast={showToast} />}
-        {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} />}
+        {route.screen === "board" && <BoardScreen onOpen={open} toast={showToast} selected={route.detail} project={projectList.find((p) => p.id === project) ?? null} projects={projectList} query={route.query} />}
         {route.screen === "changes" &&
           (selfdev === "off" ? (
             // In a screen of its own so it takes the page's height and sits in its middle, as every
@@ -691,6 +666,7 @@ export function App() {
         {route.screen === "services" && <ServicesScreen onOpen={open} toast={showToast} />}
         {route.screen === "page" && route.detail && <PageHostScreen slug={route.detail} toast={showToast} />}
         {route.screen === "harnesses" && <HarnessesScreen toast={showToast} />}
+        {route.screen === "primitives" && <PrimitivesScreen />}
         {route.screen === "memory" && <MemoryScreen toast={showToast} />}
         {route.screen === "usage" && <UsageScreen onOpen={open} />}
         {route.screen === "health" && <HealthScreen toast={showToast} />}
@@ -716,46 +692,48 @@ export function App() {
   // inside it is a detail with a back of its own and no bar under it. Everywhere else a phone has no
   // bottom bar at all: the destinations are in the drawer, which every top bar's hamburger opens.
   const projectBar = !wide && focusProject ? phoneTab(focusView(route.page, route.inner)) : null;
+  if (wide && route.screen === "settings") {
+    // A page that takes the window: the list of its sections is where the sidebar was. The layers
+    // that belong to the whole app (toasts, the palette, a pairing request) stay over it.
+    return (
+      <div ref={shell} className="settings-shell">
+        <MaintenanceNotice />
+        {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
+        <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
+        {palette !== null && <Palette items={paletteItems} initialQuery={palette} onClose={() => setPalette(null)} />}
+        <NotificationToasts />
+        <PairingHost />
+        {/* The companion stays on the screen: Appearance is where it is switched on, and seen. */}
+        <PetHost needsReply={notifications.needs_you > 0} activity={route.screen} />
+        <UpdateHost />
+        <ToastHost />
+        <ConfirmHost />
+      </div>
+    );
+  }
   return (
-    <HeldRoute.Provider value={overlay ? route : null}>
-    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${canvasOpen ? "focus-mode" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
+    <div ref={shell} className={`app ${projectBar ? "project-phone" : ""} ${canvasOpen ? "focus-mode" : ""} ${wide && columnFolded ? "sidebar-folded" : ""}`} style={wide ? { ["--sidebar-w" as string]: `${columnFolded ? 0 : sidebarWidth}px` } : undefined}>
       {wide && (
-        // Under the Settings dialog the shell is out of reach — for the pointer (the backdrop), for Tab
-        // (the dialog's own trap) and for a screen reader, which otherwise read the chat beneath it.
-        <div className={`desktop-column ${columnFolded ? "folded" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}><Rail
-          screen={live.screen}
-          detail={live.detail}
-          mode={mode}
-          collapsed={columnFolded}
-          onToggle={sidebarToggle}
-          counts={counts}
-          waiting={waiting}
-          selfdev={selfdev}
-          nav={nav}
-          menuOpen={menu}
-          onMenu={() => setMenu((m) => !m)}
-          menuButton={menuButton}
-        />
-        <div className="desktop-context">
-      {wide && !columnFolded && focusProject && (
+        <SidebarFrame value={{ mode, screen: live.screen, detail: live.detail, waiting, nav, menuOpen: menu, onMenu: () => setMenu((m) => !m), menuButton, onToggle: sidebarToggle, onPalette: openPalette }}>
+        {columnFolded ? <div className="sidebar-corner"><UnfoldButton onToggle={sidebarToggle} /></div> : (
+        <div className="desktop-column">
+      {focusProject && (
         <ErrorBoundary key={focusProject}>
         <Suspense fallback={<nav className="sidebar project-sidebar" />}>
           <ProjectSidebar
             projectId={focusProject}
             view={focusView(route.page, route.inner)}
             terminal={route.page === "terminals" ? route.query.get("t") : null}
-            onToggle={toggleSidebar}
-              toast={showToast}
+            toast={showToast}
             pinned={pinned}
           />
         </Suspense>
         </ErrorBoundary>
       )}
-      {wide && !columnFolded && !focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} onToggle={sidebarToggle} />}
-      {wide && !columnFolded && !focusProject && mode === "agents" && (
+      {!focusProject && mode === "orchestration" && <OrchestrationSidebar onMain={mainChat} />}
+      {!focusProject && mode === "agents" && (
         <Sidebar
           session={sessionId}
-          onToggle={sidebarToggle}
           projects={agentProjects}
           project={project}
           onProjects={openProjects}
@@ -764,23 +742,19 @@ export function App() {
           toast={showToast}
         />
       )}
-        </div>{!columnFolded && <PaneHandle side="right" drag={sidebarDrag} />}</div>
+        <PaneHandle side="right" drag={sidebarDrag} />
+        </div>
+        )}
+        </SidebarFrame>
       )}
-      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} search={paletteItems} />}
-      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`} inert={overlay || undefined} aria-hidden={overlay || undefined}>
+      {wide && menu && <NavMenu current={currentId(route.screen, route.detail)} nav={nav} selfdev={selfdev} onClose={() => setMenu(false)} opener={menuButton.current} onSearchAll={searchPalette} />}
+      <div ref={main} className={`main ${sessionId || focusChat || terminalOpen || canvasOpen ? "chat-open" : ""}`}>
         <MaintenanceNotice />
         {offline && <div className="offline-strip" role="status">{t("app.offline")}</div>}
         <ChangeStrip caps={caps} />
         <Suspense fallback={<div className="empty">{t("common.loading")}</div>}>{content}</Suspense>
       </div>
-      {overlay && (
-        <ErrorBoundary key="settings">
-          <Suspense fallback={null}>
-            <SettingsScreen toast={showToast} section={live.detail} onClose={closeSettings} />
-          </Suspense>
-        </ErrorBoundary>
-      )}
-      {palette && <Palette items={paletteItems()} onClose={() => setPalette(false)} />}
+      {palette !== null && <Palette items={paletteItems} initialQuery={palette} onClose={() => setPalette(null)} />}
       {switching && <ProjectSwitcher projects={agentProjects} archived={archivedProjects} current={project} onPick={pickProject} onClose={() => setSwitching(false)} toast={showToast} />}
       {/* A project just made has no chat yet: its folder opens in the sidebar so it is seen at once.
           It used to become the lens as well, which narrowed the whole column to one empty project and
@@ -790,12 +764,13 @@ export function App() {
       <ImportHost />
       {projectBar?.bar && focusProject && (
         <ErrorBoundary key={`tabs-${focusProject}`}>
-          <Suspense fallback={<nav className="tabbar five project-tabs" aria-hidden />}>
+          <Suspense fallback={<nav className="project-tabs" aria-hidden />}>
             <ProjectTabs projectId={focusProject} current={projectBar.tab} />
           </Suspense>
         </ErrorBoundary>
       )}
-      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} projects={agentProjects} onProjects={() => setSwitching(true)} search={paletteItems} />}
+      {!wide && <AppDrawer mode={mode} nav={nav} waiting={waiting} selfdev={selfdev} onPalette={openPalette} onSearchAll={searchPalette} mainOpen={mainChat}
+        session={sessionId} projects={agentProjects} project={project} onProjects={() => setSwitching(true)} onClearProject={clearProject} onOpen={open} toast={showToast} />}
       {picking && sessionId && <SessionPicker title={t("app.beside.title")} exclude={sessionId} onPick={(id) => { navigate(sessionPath(sessionId, id)); setPicking(false); }} onClose={() => setPicking(false)} />}
       <NotificationToasts />
       <PairingHost />
@@ -805,7 +780,6 @@ export function App() {
       <ToastHost />
       <ConfirmHost />
     </div>
-    </HeldRoute.Provider>
   );
 }
 
@@ -824,7 +798,7 @@ function useAppBadge(unseen: number): void {
   }, [unseen]);
 }
 
-/** Whether the layout is the wide one (the rail and the sidebar beside the screen): the same breakpoint as the stylesheet. */
+/** Whether the layout is the wide one (the sidebar beside the screen): the same breakpoint as the stylesheet. */
 function useWide(): boolean {
   return useMedia("(min-width: 1024px)");
 }

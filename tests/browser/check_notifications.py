@@ -1,4 +1,4 @@
-"""Toasts, the bell and the Inbox as the notification centre, driven by the host's event stream.
+"""Toasts, the Inbox row's count and the Inbox as the notification centre, driven by the host's event stream.
 
 Everything but the stream and the notifications is the screenshot stub's installation. The stream is
 a small server here that holds the connection open and writes the frames this script tells it to
@@ -13,8 +13,8 @@ What is checked, in order:
 - Close all empties the stack; "Don't show pop-ups" switches them off for this device, after which
   none is drawn, and the switch in Settings → Notifications turns them back on;
 - in a conversation the stack stays clear of the composer and its send button;
-- the bell's badge counts them;
-- a permission request: the popover shows it under "Needs you" with Allow and Deny; Allow posts
+- the sidebar's Inbox row counts them;
+- a permission request: the Inbox shows it under "Needs you" with Allow and Deny; Allow posts
   ``…/act {action: "allow"}``, and the ``notify.resolved`` that follows takes it off the list;
 - a notification about the session on screen raises no toast, and one about another session does;
 - on a phone: one banner at the top, the Inbox tab's badge, and "Needs you" first on the Inbox.
@@ -104,6 +104,10 @@ class Centre:
             return [e for e in rows if e["needs_you"]]
         if name == "unseen":
             return [e for e in rows if not e["seen"] and e["level"] != "quiet"]
+        if name == "problems":
+            return [e for e in rows if e["tone"] in ("warning", "error")]
+        if name == "done":
+            return [e for e in rows if e["category"] == "run_finished"]
         return rows
 
 
@@ -112,7 +116,7 @@ def now_iso() -> str:
 
 
 def notification(id_: int, title: str, *, session: str | None, category: str = "run_finished", level: str = "normal", tone: str = "ok", project: str | None = None, request: str | None = None) -> dict:
-    actions = [{"id": "allow", "label": "Allow", "style": "primary", "quick": True}, {"id": "deny", "label": "Deny", "style": "default", "quick": True}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}] if request else []
+    actions = [{"id": "allow", "label": "Allow", "style": "primary", "quick": True, "description": "Allows this one action, once, and the agent carries on."}, {"id": "deny", "label": "Deny", "style": "default", "quick": True, "description": "Keeps it refused; nothing runs."}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}] if request else []
     return {
         "id": id_, "at": now_iso(), "updated_at": now_iso(), "category": category, "kind": category, "level": level, "tone": tone, "title": title,
         "body": "Exec: npm install sharp" if request else "", "link": f"/app/agents/{session}" if session else "", "session_id": session, "run_id": None,
@@ -153,6 +157,74 @@ def overlap(a: dict, b: dict) -> bool:
     return a["x"] < b["x"] + b["width"] and b["x"] < a["x"] + a["width"] and a["y"] < b["y"] + b["height"] and b["y"] < a["y"] + a["height"]
 
 
+def desktop_inbox(browser, route_api) -> list[str]:  # type: ignore[no-untyped-def]
+    problems: list[str] = []
+    finished = notification(21, "Bakery finished", session=S3)
+    permission = notification(22, "Bakery asks to run a command", session=S1, category="permission", level="urgent", tone="warning", request=f"policy:{S1}:cmd")
+    question = notification(23, "Keep the usual 8?", session=S2, category="question", tone="warning", request=f"ask:{S2}:q1")
+    question["body"] = "The digest has 14 items this week."
+    question["actions"] = [{"id": "answer:0", "label": "Keep 8", "style": "primary", "quick": True}, {"id": "open", "label": "Open", "style": "ghost", "quick": False}]
+    spend = notification(24, "DeepSeek balance below $5", session=None, category="spend", tone="warning")
+    spend["seen"] = True
+    Centre.entries[:] = [finished, permission, question, spend]
+    Centre.acted.clear()
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+    context.route("**/api/**", route_api)
+    page = context.new_page()
+    page.goto(f"{BASE}/inbox?token=t&lang=en", wait_until="commit")
+    page.wait_for_selector(".inbox-row", timeout=20000)
+    tabs = page.eval_on_selector_all(".inbox-tabs [data-tab]", "els => els.map(e => e.dataset.tab)")
+    if tabs != ["all", "needs", "problems", "done"]:
+        problems.append(f"the Inbox's views are {tabs}, not all, needs, problems and done")
+    if "Unread" in page.locator(".pagehead").inner_text():
+        problems.append("the Inbox still offers an Unread view")
+    groups = page.eval_on_selector_all(".inbox-group", "els => els.map(e => [e.dataset.group, e.querySelectorAll('.inbox-row').length])")
+    # The two requests and the stub's two change proposals that wait for a decision.
+    if groups[:1] != [["waiting", 4]]:
+        problems.append(f"the first group is not what waits for the operator: {groups}")
+    # What waits is not read by opening it; what finished is.
+    page.locator(".inbox-row[data-notice='22']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n22']")
+    if page.locator(".inbox-pane .inbox-outcomes-row").count() != 2:
+        problems.append("the permission's table of outcomes does not carry the two buttons the host described")
+    page.wait_for_timeout(300)
+    if permission["seen"]:
+        problems.append("opening a request that waits marked it read")
+    page.locator(".inbox-row[data-notice='21']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n21']")
+    if not wait(page, lambda: finished["seen"], 3):
+        problems.append("opening a finished entry did not mark it read")
+    if page.locator(".inbox-pane .inbox-outcomes").count():
+        problems.append("an entry whose buttons the host did not describe draws a table of outcomes")
+    page.locator(".inbox-pane button[aria-label='Mark unread']").click()
+    if not wait(page, lambda: not finished["seen"], 3):
+        problems.append("Mark unread did not reach the host")
+    if not wait(page, lambda: page.locator(".inbox-row[data-notice='21'].unread").count() == 1, 3):
+        problems.append("the row did not turn unread after the host said so")
+    # A question is answered in one's own words; a permission has no such line.
+    page.locator(".inbox-row[data-notice='22']").click()
+    page.wait_for_selector(".inbox-pane[data-item='n22']")
+    if page.locator(".inbox-reply").count():
+        problems.append("a permission offers a free answer the host refuses")
+    page.locator(".inbox-row[data-notice='23']").click()
+    page.wait_for_selector(".inbox-reply-input")
+    page.locator(".inbox-reply-input").fill("keep 8 and add the shopfront")
+    page.locator(".inbox-reply-input").press("Enter")
+    if not wait(page, lambda: Centre.acted[-1:] == [(23, {"action": "answer", "value": "keep 8 and add the shopfront"})], 3):
+        problems.append(f"the free answer was sent as {Centre.acted}")
+    if not wait(page, lambda: page.locator(".inbox-pane .inbox-outcome").count() == 1, 3):
+        problems.append("the answered question did not give way to its outcome")
+    # The views.
+    page.locator(".inbox-tabs [data-tab='done']").click()
+    if not wait(page, lambda: page.locator(".inbox-row").count() == 1, 3):
+        problems.append(f"the Finished view lists {page.locator('.inbox-row').count()} entries, not one")
+    page.locator(".inbox-tabs [data-tab='problems']").click()
+    if not wait(page, lambda: page.locator(".inbox-row").count() == 3, 3):
+        problems.append(f"the Errors view lists {page.locator('.inbox-row').count()} entries, not three")
+    context.close()
+    return problems
+
+
 def run() -> int:
     problems: list[str] = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), EventServer)
@@ -178,6 +250,12 @@ def run() -> int:
                 if body.get("all") or e["id"] in (body.get("ids") or []):
                     e["seen"] = True
             return route.fulfill(status=200, content_type="application/json", body=json.dumps({"marked": 1, "summary": Centre.summary()}))
+        if rel == "/api/notifications/unseen" and request.method == "POST":
+            body = json.loads(request.post_data or "{}")
+            back = [e for e in Centre.entries if e["id"] in (body.get("ids") or []) and e["seen"]]
+            for e in back:
+                e["seen"] = False
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"marked": len(back), "summary": Centre.summary()}))
         if rel.startswith("/api/notifications/") and rel.endswith("/act") and request.method == "POST":
             id_ = int(rel.split("/")[3])
             body = json.loads(request.post_data or "{}")
@@ -197,7 +275,7 @@ def run() -> int:
             context.route("**/api/**", route_api)
             page = context.new_page()
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
-            page.wait_for_selector(".sidebar .bell", timeout=20000)
+            page.wait_for_selector(".sidebar [data-nav='inbox']", timeout=20000)
             if not wait(page, lambda: len(Streams.open) == 1, 10):
                 problems.append("the app did not open the event stream")
                 raise RuntimeError
@@ -218,9 +296,9 @@ def run() -> int:
                 problems.append(f"the two waiting toasts are not counted: {more.inner_text() if more.count() else 'no line'}")
             if not page.locator(".notice-toasts [data-close-all]").count():
                 problems.append("a stack of three has no Close all")
-            badge = page.locator(".sidebar .bell .bell-badge")
+            badge = page.locator(".sidebar [data-nav='inbox'] .sb-nav-n")
             if not wait(page, lambda: badge.count() and badge.inner_text() == "5", 3):
-                problems.append(f"the bell's badge says {badge.inner_text() if badge.count() else 'nothing'}, not 5")
+                problems.append(f"the Inbox row's count says {badge.inner_text() if badge.count() else 'nothing'}, not 5")
             page.wait_for_timeout(int((TOAST_S - 1) * 1000))
             if len(toasts(page)) != 3:
                 problems.append("a toast left before its time")
@@ -279,7 +357,7 @@ def run() -> int:
             if page.locator(".notice-toast").count():
                 problems.append("a pop-up was drawn with pop-ups switched off")
             if not wait(page, lambda: badge.count() and badge.inner_text() == str(Centre.summary()["unseen"]), 3):
-                problems.append("with pop-ups off the bell stopped counting")
+                problems.append("with pop-ups off the Inbox row stopped counting")
             page.goto(f"{BASE}/settings/notifications?token=t&lang=en", wait_until="commit")
             # A switch now, not a button labelled with its own state: its state is aria-checked.
             switch = page.locator("[data-popups-card] [role=switch]")
@@ -290,34 +368,36 @@ def run() -> int:
             if page.evaluate("() => localStorage.getItem('daedalus.notice.popups')") is not None:
                 problems.append("the switch in Settings did not turn pop-ups back on")
             page.goto(f"{BASE}/agents?token=t&lang=en", wait_until="commit")
-            page.wait_for_selector(".sidebar .bell", timeout=20000)
+            page.wait_for_selector(".sidebar [data-nav='inbox']", timeout=20000)
             if not wait(page, lambda: len(Streams.open) >= 1, 10):
                 problems.append("the stream did not come back after Settings")
             page.wait_for_timeout(1500)
             page.mouse.move(700, 300)
 
-            # A permission request, answered from the bell's popover.
+            # A permission request, answered from the Inbox the sidebar's row opens.
             arrive(notification(6, "Bakery site: photos is waiting for permission", session=S2, category="permission", level="urgent", tone="warning", project=P1, request=f"policy:{S2}:exec"))
             if not wait(page, lambda: toasts(page) == ["6"], 3):
                 problems.append("the permission request raised no toast")
             page.locator(".notice-toast[data-notice='6'] button[aria-label='Dismiss']").click()
-            page.locator(".sidebar .bell").click()
-            needs = page.locator(".bell-pop .needs-you .notice-row[data-notice='6']")
+            page.locator(".sidebar [data-nav='inbox']").click()
+            page.wait_for_url("**/app/inbox**")
+            waiting = ".inbox-group[data-group='waiting'] .inbox-row[data-notice='6']"
+            needs = page.locator(waiting)
             try:
                 needs.wait_for(timeout=5000)
             except Exception:  # noqa: BLE001
-                problems.append("the popover does not show the permission under Needs you")
+                problems.append("the Inbox does not show the permission among what waits for the operator")
                 raise RuntimeError from None
-            if needs.locator("[data-action='allow']").count() != 1 or needs.locator("[data-action='deny']").count() != 1:
-                problems.append("the permission in the popover has no Allow and Deny")
-            needs.locator("[data-action='allow']").click()
+            needs.click()
+            pane = page.locator(".inbox-pane[data-item='n6']")
+            pane.wait_for(timeout=5000)
+            if pane.locator("[data-action='allow']").count() != 1 or pane.locator("[data-action='deny']").count() != 1:
+                problems.append("the permission in the Inbox has no Allow and Deny")
+            pane.locator("[data-action='allow']").click()
             if not wait(page, lambda: Centre.acted == [(6, {"action": "allow"})], 3):
                 problems.append(f"Allow posted {Centre.acted}, not one allow for entry 6")
-            if not wait(page, lambda: page.locator(".bell-pop .needs-you").count() == 0, 4):
-                problems.append("the answered permission is still under Needs you")
-            page.keyboard.press("Escape")
-            if page.locator(".bell-pop").count():
-                problems.append("Escape did not close the popover")
+            if not wait(page, lambda: page.locator(waiting).count() == 0, 4):
+                problems.append("the answered permission still waits for the operator")
 
             # The conversation on screen says it itself; another one still gets a toast.
             page.goto(f"{BASE}/agents/{S1}?token=t&lang=en", wait_until="commit")
@@ -380,6 +460,11 @@ def run() -> int:
                     break
                 time.sleep(0.05)
 
+            # The Inbox on a desktop: four views and no Unread, a list that opens an entry beside it, an entry
+            # read by opening it except while it waits, mark unread answered by the host, a question answered in
+            # one's own words, and a table of outcomes only for the buttons the host described.
+            problems += desktop_inbox(browser, route_api)
+
             # The phone: one banner, the home bell's badge, and Needs you first on the Inbox.
             Centre.entries[:] = [e for e in Centre.entries if e["id"] < 6]
             phone = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, color_scheme="dark", is_mobile=True, has_touch=True)
@@ -405,7 +490,7 @@ def run() -> int:
                         problems.append(f"the phone's banner covers {name}: {box} over {other}")
             # The home's bell is the Inbox on a phone and carries its unseen count (so does the drawer).
             bell = page.locator(".ph-top a.ph-ib[href$='/inbox']")
-            tab = bell.locator(".ph-badge")
+            tab = bell.locator(".iconbtn-badge")
             if not wait(page, lambda: tab.count() and tab.inner_text() == str(Centre.summary()["unseen"]), 3):
                 problems.append(f"the bell's badge is {tab.inner_text() if tab.count() else 'missing'}, not {Centre.summary()['unseen']}")
             bell.click()

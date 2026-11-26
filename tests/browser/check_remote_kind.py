@@ -1,9 +1,10 @@
 """Remote chats in a real browser: the Remote tab, the marks, and a remote chat's header.
 
 A remote chat is started by daedalus-cli in a folder on one of the operator's computers; its tools run
-there and everything else stays on the server. The column's tabs gain Remote beside All, Chats,
-Computer and Browser, with the same rules: the kind is the chat's origin, and a terminal attached to
-any chat right now is a live mark that lists it under Remote while it lasts. Rows name the computer.
+there and everything else stays on the server. The sidebar's Show menu offers Remote beside every
+kind, Chats, Computer and Browser, with the same rules: the kind is the chat's origin, and a terminal
+attached to any chat right now is a live mark that lists it under Remote while it lasts. A row's
+tooltip names the computer.
 
 Opened, a remote chat's header names the computer, its folder and the link: connected, reconnecting,
 or — when the computer dropped while a tool waited on it — the turn paused, said by a banner under the
@@ -125,28 +126,29 @@ def main() -> int:
                 page.goto(f"{BASE}/agents?token=t&scheme={scheme}&lang={lang}")
                 side = page.locator("nav.sidebar")
                 expect(side.locator(".sb-row").first).to_be_visible(timeout=15000)
-                tabs = side.locator(".kind-tabs [role=tab]")
-                labels = tabs.evaluate_all("els => els.map((b) => b.querySelector('span').textContent)")
                 if scheme == "dark":
-                    check(labels == words["tabs"], f"{lang}: the column's tabs are {labels}")
-                    clipped = side.evaluate("el => [...el.querySelectorAll('.kind-tab')].filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent)")
-                    check(clipped == [], f"{lang}: no tab's label is cut at the column's width ({clipped})")
-                    plate = side.locator(f"[data-session='{SR}'] > .sb-plate")
+                    side.locator(".sb-chats-menu").click()
+                    labels = page.get_by_role("menuitemcheckbox").evaluate_all("els => els.map((b) => b.querySelector('.menu-row-t').textContent)")
+                    check(labels[1:5] == words["tabs"][1:], f"{lang}: the Show menu lists {labels[:5]}")
+                    page.keyboard.press("Escape")
+                    plate = side.locator(f"[data-session='{SR}'] .sb-kind")
                     classes = (plate.get_attribute("class") or "").split()
                     check(plate.get_attribute("data-kind") == "remote" and "kind-live" in classes and "kind-borrowed" not in classes,
                           f"{lang}: the remote chat's plate carries the Remote mark, live while its terminal is connected ({classes})")
                     check(plate.get_attribute("title") == words["live"], f"{lang}: its tooltip says a terminal is connected now ({plate.get_attribute('title')})")
-                    meta = side.locator(f"[data-session='{SR}'] .sb-l2").inner_text()
-                    check(DEVICE in meta, f"{lang}: the row names its computer ({meta!r})")
-                    borrowed = (side.locator(f"[data-session='{shots.S6}'] > .sb-plate").get_attribute("class") or "").split()
+                    meta = side.locator(f"[data-session='{SR}']").get_attribute("title") or ""
+                    check(DEVICE in meta, f"{lang}: the row's tooltip names its computer ({meta!r})")
+                    borrowed = (side.locator(f"[data-session='{shots.S6}'] .sb-kind").get_attribute("class") or "").split()
                     check(all(c in borrowed for c in ("kind-remote", "kind-live", "kind-borrowed")), f"{lang}: an ordinary chat with a terminal attached borrows the mark, hollow ({borrowed})")
-                side.locator("[data-kind-tab=remote]").click()
+                side.locator(".sb-chats-menu").click()
+                page.get_by_role("menuitemcheckbox").nth(4).click()
+                page.keyboard.press("Escape")
                 page.wait_for_timeout(350)
                 listed = side.locator("[data-session]").evaluate_all("els => els.map((e) => e.dataset.session)")
                 if scheme == "dark":
                     check(sorted(listed) == sorted([SR, shots.S6]), f"{lang}: Remote keeps the remote chat and the chat a terminal is attached to ({listed})")
-                    pill = side.evaluate("el => { const p = el.querySelector('.kind-tabs-pill').getBoundingClientRect(); const b = el.querySelector('[data-kind-tab=remote]').getBoundingClientRect(); return Math.abs(p.left - b.left) < 2 && Math.abs(p.width - b.width) < 2; }")
-                    check(pill, f"{lang}: the underline stands under Remote")
+                    said = side.locator(".sb-chats-menu .sb-sec-filter").inner_text()
+                    check(said == words["tabs"][4], f"{lang}: the Chats label says Remote ({said!r})")
                 shot(page, f"desktop-remote-tab-{scheme}-{lang}")
 
                 side.locator(f"[data-session='{SR}']").click()
@@ -204,19 +206,19 @@ def main() -> int:
                 page.goto(f"{BASE}/agents?view=chats&token=t&scheme={scheme}&lang={lang}")
                 expect(page.locator(".ph-kinds").first).to_be_visible(timeout=15000)
                 if scheme == "dark":
-                    labels = page.locator(".ph-kinds [role=tab]").evaluate_all("els => els.map((b) => b.querySelector('span').textContent)")
+                    labels = page.locator(".ph-kinds [role=tab]").evaluate_all("els => els.map((b) => b.querySelector('.tab-label').textContent)")
                     check(labels == words["tabs"], f"{lang}: the phone's Chats page has the tabs ({labels})")
                     check(page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"{lang}: the five tabs fit the phone's width")
-                    clipped = page.evaluate("[...document.querySelectorAll('.ph-kinds .kind-tab')].filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent)")
+                    clipped = page.evaluate("[...document.querySelectorAll('.ph-kinds .tab')].filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent)")
                     check(clipped == [], f"{lang}: no phone tab's label is cut ({clipped})")
-                page.locator(".ph-kinds [data-kind-tab=remote]").click()
+                page.locator(".ph-kinds [data-tab=remote]").click()
                 page.wait_for_timeout(300)
                 if scheme == "dark":
                     listed = page.locator("[data-session]").evaluate_all("els => [...new Set(els.map((e) => e.dataset.session))]")
                     check(sorted(listed) == sorted([SR, shots.S6]), f"{lang}: the phone's Remote tab keeps the same two chats ({listed})")
                     check(DEVICE in page.locator(f"[data-session='{SR}']").first.inner_text(), f"{lang}: the phone's row names its computer")
                 shot(page, f"phone-remote-tab-{scheme}-{lang}")
-                page.locator(".ph-kinds [data-kind-tab=all]").click()
+                page.locator(".ph-kinds [data-tab=all]").click()
                 set_state("paused")
                 page.goto(f"{BASE}/agents/{SR}?token=t&scheme={scheme}&lang={lang}")
                 banner = page.locator(".remote-paused")

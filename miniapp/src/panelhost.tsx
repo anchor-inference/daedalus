@@ -1,20 +1,19 @@
-// The right panel: the session's workspace beside the conversation. Over everything a strip with the
-// session's state (its model, how full the context is, what it cost) that stays on every tab, so the two
-// numbers the operator watches are never a scroll or a click away; under it the tabs — Details, Files,
-// Preview, Jobs, Notes, and Subagents, Browser, Questions when there are any — then the open tab. A drag
-// handle on its left edge, pin, expand-to-full and close.
-// On a desktop it is a column of the chat grid; on a phone the same tabs in a full-height sheet.
-// The state is a value (panel.ts); this file draws it and wires the pointer and the keys.
+// The right panel: the session's workspace beside the conversation, at the window's full height. Its
+// tabs are the Overview, always first, and the tools the operator opened, each closable; the "+" opens
+// any other tool the chat has, grouped and searchable, and the Overview lists the same tools as rows,
+// each with what is behind it. A drag handle on its left edge, a menu for pinning and covering the chat,
+// and close. On a desktop it is a column beside the conversation; on a phone the same tabs in a
+// full-height sheet. The state is a value (panel.ts); this file draws it and wires the pointer and keys.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { Sheet, toast as statusToast, useLayer } from "./ui/dialogs";
+import { OverflowMenu, Popover } from "./ui/primitives";
 import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { Icon, IconName } from "./icons";
 import {
   PANEL_CLOSED,
   TAB_FITS,
-  fitsFor,
   widestFit,
   type TabFit,
   PANEL_TABS,
@@ -25,12 +24,14 @@ import {
   applyPanelQuery,
   canGoBack,
   canGoForward,
-  boundPanelPct,
-  clampPanelPct,
+  clampPanelPx,
   closePanel,
   closeEntry,
+  closeTool,
   crumbsOf,
   currentEntry,
+  firstTab,
+  groupTools,
   isCurrent,
   openBeside,
   openEntries,
@@ -41,15 +42,15 @@ import {
   goForward,
   openFile,
   openSubagent,
+  openTask,
   openTab,
   panelQuery,
-  readPanelPct,
+  readPanelPx,
   readPanelQuery,
-  readPanelTab,
-  rememberPanelPct,
-  rememberPanelTab,
+  readPanelState,
+  rememberPanel,
+  rememberPanelPx,
   routeTabsFor,
-  tabsFor,
   toggleExpanded,
   togglePanel,
 } from "./panel";
@@ -67,6 +68,8 @@ import "./panel.css";
 export type PanelHostProps = {
   state: PanelState;
   onTab: (tab: PanelTab) => void;
+  /** A tool's tab closed with its ×, Delete or a middle click. */
+  onCloseTool?: (tab: PanelTab) => void;
   onClose: () => void;
   onExpand: () => void;
   onBack: () => void;
@@ -75,34 +78,42 @@ export type PanelHostProps = {
   root: string;
   /** Where the current file downloads from, for open-in-new. */
   downloadUrl: (entry: PanelEntry) => string;
-  /** The tabs offered, in order; a session's own four unless the panel is inside a project. */
+  /** The tools offered, in order, the Overview first (panel.ts, `tabsFor`). */
   tabs?: PanelTab[];
-  /** The Details, Files and Jobs tabs, rendered by the screen that owns their data. */
+  /** Tools drawn as tabs whether or not they were opened, while they want the operator (questions
+   *  waiting): a tab that needs an answer is not one the operator has to go and find. */
+  attention?: PanelTab[];
+  /** Tools drawn as tabs after the opened ones while they hold something, though nobody opened them
+   *  and nothing waits on an answer: the chat's own board while it has open tasks. They never take
+   *  the active tab and never open a closed panel, which is why a tool that wants an answer is not
+   *  one of them. */
+  alongside?: PanelTab[];
+  /** The Details, Files and Terminal tabs, rendered by the screen that owns their data. */
   details?: (ids: string) => ReactNode;
   files?: ReactNode;
   jobs?: ReactNode;
-  /** The tabs whose bodies are not a session's own: a project's board, brief, wake-ups and folders in
-   *  its focus mode, and the questions waiting for the operator. */
+  /** Every other tool's body: the Overview, the chat's changes, its context and spend, what it kept and
+   *  was given, and a project's board, brief, wake-ups and folders in its focus mode. */
   pages?: Partial<Record<PanelTab, ReactNode>>;
-  /** A number on a tab: subagents working on Details, jobs on Jobs. */
-  badges?: Partial<Record<PanelTab, number>>;
+  /** A number on a tab: helpers working, jobs running, notes kept; or a short figure of its own,
+   *  the board's "3/5". */
+  badges?: Partial<Record<PanelTab, number | string>>;
   /** A dot on a tab instead of a number: the agent busy in its browser, or waiting for the operator. */
   marks?: Partial<Record<PanelTab, "busy" | "attn">>;
+  /** What the "+" menu says beside a tool that is not open: its count or its share ("3/5", "21%"). */
+  figures?: Partial<Record<PanelTab, string>>;
   /** Phones: the tabs in a full sheet instead of a column. */
   sheet?: boolean;
-  /** Phones: what the sheet is about, over its tabs: the chat's title and a line under it. */
-  sheetTitle?: ReactNode;
-  sheetSub?: ReactNode;
   /** Desktop: what dragging the left edge does. */
   drag?: PaneDrag;
-  /** The session's state over every tab: its model, its context, its cost, its menu (panelstrip.tsx). */
-  strip?: ReactNode;
-  /** Whether the panel stays open in every chat, and the button that says so. */
+  /** Whether the panel stays open in every chat, and the switch for it. */
   pinned?: boolean;
   onPin?: () => void;
   /** The open files' tabs: show one, close one. */
   onShowEntry?: (entry: PanelEntry) => void;
   onCloseEntry?: (entry: PanelEntry) => void;
+  /** Where the panel is, for the tab a tool's close falls back to. */
+  context?: PanelContext;
 };
 
 /** What the panel keeps for itself: a reload counter for the viewer, the phone-width toggle,
@@ -135,11 +146,7 @@ export function Panel(props: PanelHostProps) {
   if (shown.tab === null) return null;
   if (sheet) {
     return (
-      <Sheet size="full" className={`panel-sheet ${local.closing ? "panel-closing" : ""}`} ariaLabel={t("panel.label")} onClose={props.onClose} head={<>
-        {props.sheetTitle && <div className="panel-sheet-title"><b className="truncate">{props.sheetTitle}</b>{props.sheetSub && <span className="truncate">{props.sheetSub}</span>}</div>}
-        {props.strip && <div className="panel-sheet-strip">{props.strip}</div>}
-        <Tabs {...shownProps} local={local} inSheet />
-      </>}>
+      <Sheet size="full" className={`panel-sheet ${local.closing ? "panel-closing" : ""}`} ariaLabel={t("panel.label")} onClose={props.onClose} head={<Tabs {...shownProps} local={local} inSheet />}>
         <FileTabs {...shownProps} local={local} />
         <Toolbar {...shownProps} local={local} />
         <Body {...shownProps} local={local} />
@@ -170,7 +177,6 @@ function Column(props: HostProps) {
   return (
     <aside ref={box} inert={props.local.closing} className={`panel ${props.local.closing ? "panel-closing" : ""} ${state.expanded ? "full" : ""} ${visible ? "shown" : ""} ${props.local.narrow ? "phone-width" : ""}`} aria-label={t("panel.label")}>
       {props.drag && !state.expanded && <PaneHandle side="right" drag={props.drag} />}
-      {props.strip}
       <Tabs {...props} />
       {!splitOf(props) && <FileTabs {...props} />}
       {!splitOf(props) && <Toolbar {...props} />}
@@ -179,7 +185,24 @@ function Column(props: HostProps) {
   );
 }
 
-const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder", questions: "ask", browser: "globe", sources: "link", agents: "bots" };
+export const TAB_ICON: Record<PanelTab, IconName> = {
+  overview: "grid", details: "info", files: "folder", preview: "eye", jobs: "terminal", notes: "note", subagents: "spawn", board: "board", brief: "pen", wakeups: "clock", folders: "folder",
+  questions: "ask", browser: "globe", sources: "link", agents: "bots", changes: "changes", context: "gauge", usage: "coin", memory: "brain", canvas: "pen", attachments: "attach",
+};
+
+/** The tabs drawn: the Overview, the tools that want the operator, then the ones opened and the ones
+ *  that hold something, each once and only while the chat still offers it (a kept Changes tab in a chat
+ *  that is not a repository is not drawn). */
+export function shownTabs(state: Pick<PanelState, "open" | "tab">, offered: readonly PanelTab[], attention: readonly PanelTab[] = [], alongside: readonly PanelTab[] = []): PanelTab[] {
+  const out: PanelTab[] = ["overview"];
+  for (const tab of [...attention, ...state.open, ...alongside, ...(state.tab ? [state.tab] : [])]) {
+    if (!out.includes(tab) && offered.includes(tab)) out.push(tab);
+  }
+  // A tab on screen that the chat does not list (a link naming it before the listing arrived) is
+  // still drawn, so the body under it has a tab to belong to.
+  if (state.tab && !out.includes(state.tab)) out.push(state.tab);
+  return offered.includes("overview") ? out : out.filter((tab) => tab !== "overview");
+}
 
 /** Which fit the strip draws: the widest that fits, chosen again whenever the strip's width or what it
  *  holds changes. Every fit is tried on the strip's own class list and measured in one go, and React
@@ -192,9 +215,8 @@ const TAB_ICON: Record<PanelTab, IconName> = { details: "settings", files: "fold
  *  pointer (check_pane_resize.py). The resize observer reports once a frame, after layout and before the
  *  paint, which is both the coalescing and the moment to measure; flushSync is kept there so a changed
  *  fit is drawn in the same frame and the overflowing one never paints. */
-function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, content: string): TabFit {
-  const order = fitsFor(inSheet);
-  const [fit, setFit] = useState<TabFit>(order[0]);
+function useTabFit(strip: RefObject<HTMLDivElement | null>, content: string): TabFit {
+  const [fit, setFit] = useState<TabFit>(TAB_FITS[0]);
   const drawn = useRef(fit);
   drawn.current = fit;
   const measure = useCallback((): TabFit => {
@@ -204,21 +226,23 @@ function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, co
     const draw = (which: TabFit) => {
       for (const other of TAB_FITS) el.classList.toggle(`fit-${other}`, other === which);
     };
-    const chosen = widestFit(order, (which) => {
+    // The row the strip sits in: the strip may take what the "+" and the panel's own buttons leave.
+    const row = el.parentElement;
+    const chosen = widestFit(TAB_FITS, (which) => {
       draw(which);
-      return el.scrollWidth <= el.clientWidth + 1;
+      return el.scrollWidth <= el.clientWidth + 1 && (!row || row.scrollWidth <= row.clientWidth + 1);
     });
     // Hand the class list back as React drew it, so React's own record of it stays true.
     draw(drawn.current);
     return chosen;
-  }, [strip, order]);
+  }, [strip]);
   // What the strip holds changed (a tab, a badge, the language): choose again before the paint.
   useLayoutEffect(() => {
     const chosen = measure();
     if (chosen !== drawn.current) setFit(chosen);
   }, [measure, content]);
   useEffect(() => {
-    const el = strip.current;
+    const el = strip.current?.parentElement;
     if (!el || typeof ResizeObserver === "undefined") return;
     let width = Math.round(el.clientWidth);
     const observer = new ResizeObserver(([entry]) => {
@@ -234,60 +258,120 @@ function useTabFit(strip: RefObject<HTMLDivElement | null>, inSheet: boolean, co
   return fit;
 }
 
-function Tabs({ state, onTab, onClose, onExpand, badges, marks, inSheet, local, pinned, onPin, tabs = PANEL_TABS }: HostProps & { inSheet?: boolean }) {
+function Tabs(props: HostProps & { inSheet?: boolean }) {
+  const { state, onTab, onCloseTool, onClose, onExpand, badges, marks, inSheet, local, pinned, onPin, tabs = PANEL_TABS, attention, alongside } = props;
   const strip = useRef<HTMLDivElement>(null);
+  const shown = shownTabs(state, tabs, attention, alongside);
   // What the strip holds and how long its words are: a new tab, a badge, the open tab, the language.
-  const fit = useTabFit(strip, !!inSheet, `${tabs.join()}|${state.tab}|${JSON.stringify(badges ?? {})}|${tabs.map((tab) => t(`panel.tab.${tab}`)).join()}`);
-  // On a phone the sheet's eight tabs are wider than the screen: fade the edge with more behind it,
-  // and bring the open tab into view, or a sheet opened on Folders showed a lone "F" at the edge.
+  const fit = useTabFit(strip, `${shown.join()}|${state.tab}|${JSON.stringify(badges ?? {})}|${shown.map((tab) => t(`panel.tab.${tab}`)).join()}`);
   useEdgeFade(strip, state.tab);
   useEffect(() => {
     strip.current?.querySelector<HTMLElement>(".panel-tab.on")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [state.tab]);
+  const closable = (tab: PanelTab) => !!onCloseTool && tab !== "overview" && state.open.includes(tab);
   const onKey = (e: React.KeyboardEvent) => {
-    const i = tabs.indexOf(state.tab!);
+    const i = shown.indexOf(state.tab!);
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+      const next = shown[(i + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
       onTab(next);
       strip.current?.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus();
       e.preventDefault();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && state.tab && closable(state.tab)) {
+      onCloseTool!(state.tab);
+      e.preventDefault();
+      window.requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(".panel-tab.on")?.focus());
     }
   };
+  const addButton = useRef<HTMLButtonElement>(null);
+  const [adding, setAdding] = useState(false);
+  const menu = [
+    ...(onPin ? [{ label: t(pinned ? "panel.unpin" : "panel.pin"), icon: "pushpin" as IconName, checked: !!pinned, onSelect: onPin }] : []),
+    { label: t(state.expanded ? "panel.restore" : "panel.expand"), icon: (state.expanded ? "panel" : "expand") as IconName, kbd: state.expanded ? "Esc" : "Ctrl ⇧ .", onSelect: onExpand },
+  ];
   return (
     <div className="panel-tabs">
       <div ref={strip} className={`panel-tablist fit-${fit}`} data-fit={fit} role="tablist" aria-label={t("panel.label")} onKeyDown={onKey}>
-        {tabs.map((tab) => {
+        {shown.map((tab) => {
           const n = badges?.[tab] ?? 0;
           const label = t(`panel.tab.${tab}`);
+          const on = state.tab === tab;
           // The name rides on the button itself: a narrow panel draws the tab as its icon alone, and
           // with the word hidden the tab was announced, and hovered, as nothing but its count.
           return (
-            <button key={tab} role="tab" id={`${local.ids}-tab-${tab}`} aria-controls={`${local.ids}-body`} data-tab={tab} className={`panel-tab ${state.tab === tab ? "on" : ""}`} aria-selected={state.tab === tab} aria-label={label} title={label} tabIndex={state.tab === tab ? 0 : -1} onClick={() => onTab(tab)}>
-              <Icon name={TAB_ICON[tab]} size={14} />
-              <span>{label}</span>
-              {n > 0 && <span className={`count ${tab === "questions" ? "attn" : ""}`}>{n}</span>}
-              {marks?.[tab] && <span className={`tab-mark ${marks[tab]}`} aria-hidden="true" />}
-            </button>
+            <span key={tab} className={`panel-tabwrap ${on ? "on" : ""} ${closable(tab) && on ? "closable" : ""}`} role="presentation">
+              <button role="tab" id={`${local.ids}-tab-${tab}`} aria-controls={`${local.ids}-body`} data-tab={tab} className={`panel-tab ${on ? "on" : ""}`} aria-selected={on} aria-label={label} title={label} tabIndex={on ? 0 : -1} onClick={() => onTab(tab)}
+                onAuxClick={(e) => { if (e.button === 1 && closable(tab)) { e.preventDefault(); onCloseTool!(tab); } }}>
+                <Icon name={TAB_ICON[tab]} size={16} />
+                <span className="panel-tab-word">{label}</span>
+                {n !== 0 && <span className={`count ${tab === "questions" ? "attn" : ""}`}>{n}</span>}
+                {marks?.[tab] && <span className={`tab-mark ${marks[tab]}`} aria-hidden="true" />}
+              </button>
+              {closable(tab) && on && <button type="button" className="panel-tab-close" tabIndex={-1} aria-label={t("panel.tab.close", { name: label })} title={t("panel.tab.close", { name: label })} onClick={() => onCloseTool!(tab)}><Icon name="close" size={12} /></button>}
+            </span>
           );
         })}
       </div>
+      <button ref={addButton} type="button" className={`iconbtn panel-add ${adding ? "on" : ""}`} aria-label={t("panel.add")} title={t("panel.add.title")} aria-haspopup="menu" aria-expanded={adding} onClick={() => setAdding((open) => !open)}>
+        <Icon name="plus" size={16} />
+      </button>
+      {adding && <ToolMenu {...props} anchor={addButton.current} onClose={() => setAdding(false)} />}
+      <span className="grow" />
       {!inSheet && (
         <div className="panel-actions">
-          {onPin && (
-            <button className={`iconbtn small panel-pin ${pinned ? "on" : ""}`} onClick={onPin} aria-pressed={!!pinned} aria-label={t(pinned ? "panel.unpin" : "panel.pin")} title={t(pinned ? "panel.unpin.title" : "panel.pin.title")}>
-              <Icon name="pushpin" size={16} />
-            </button>
-          )}
-          <button className={`iconbtn small ${state.expanded ? "on" : ""}`} onClick={onExpand} aria-label={t(state.expanded ? "panel.restore" : "panel.expand")} title={t(state.expanded ? "panel.restore" : "panel.expand")} aria-pressed={state.expanded}>
-            <Icon name={state.expanded ? "panel" : "expand"} size={16} />
-          </button>
-          <button className="iconbtn small" onClick={onClose} aria-label={t("panel.close")} title={t("panel.close")}>
+          <OverflowMenu items={menu} label={t("panel.menu")} className="panel-menu" />
+          <button className="iconbtn panel-close" onClick={onClose} aria-label={t("panel.close")} title={t("panel.close")}>
             <Icon name="close" size={16} />
           </button>
         </div>
       )}
     </div>
   );
+}
+
+/** The "+" menu: every tool the chat can open in the panel, under its group, with a search over the
+ *  names. An open tool says so; one that is not says what is behind it, as its tab's figure would. */
+function ToolMenu({ tabs = PANEL_TABS, state, onTab, figures, badges, context = "session", anchor, onClose }: HostProps & { anchor: HTMLElement | null; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const groups = useMemo(() => {
+    const words = query.trim().toLowerCase();
+    return groupTools(tabs.filter((tab) => tab !== "overview"), context)
+      .map((g) => ({ ...g, tabs: g.tabs.filter((tab) => !words || toolName(tab, context).toLowerCase().includes(words) || t(`panel.tab.${tab}`).toLowerCase().includes(words)) }))
+      .filter((g) => g.tabs.length > 0);
+  }, [tabs, context, query]);
+  const pick = (tab: PanelTab) => { onClose(); onTab(tab); };
+  return (
+    <Popover anchor={anchor} onClose={onClose} label={t("panel.add.menu")} side="bottom" align="start" width={300} className="panel-tools">
+      <label className="panel-tools-search">
+        <Icon name="search" size={16} />
+        <input type="text" className="model-search" value={query} placeholder={t("panel.add.menu")} aria-label={t("panel.add.menu")} onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && groups[0]?.tabs[0]) { e.preventDefault(); pick(groups[0].tabs[0]); } }} />
+      </label>
+      {groups.length === 0 && <div className="panel-tools-none">{t("panel.add.none")}</div>}
+      {groups.map((g) => (
+        <div key={g.group} role="group" aria-label={t(`panel.group.${g.group}`)}>
+          <div className="panel-tools-group">{t(`panel.group.${g.group}`)}</div>
+          {g.tabs.map((tab) => {
+            const open = state.open.includes(tab) || state.tab === tab;
+            const hint = open ? t("panel.add.open") : figures?.[tab] ?? (badges?.[tab] ? String(badges[tab]) : "");
+            return (
+              <button key={tab} type="button" role="menuitem" className={`menu-row panel-tools-row ${open ? "open" : ""}`} data-tool={tab} onClick={() => pick(tab)}>
+                <Icon name={TAB_ICON[tab]} size={16} />
+                <span className="grow">{toolName(tab, context)}</span>
+                {hint && <span className="panel-tools-hint">{hint}</span>}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </Popover>
+  );
+}
+
+/** A tool's name in the menu, which may say more than its tab has room for: the chat's own board. */
+function toolName(tab: PanelTab, context: PanelContext): string {
+  if (tab === "board" && context !== "orchestrator" && context !== "member") return t("panel.tool.board");
+  if (tab === "browser") return t("panel.tool.browser");
+  return t(`panel.tab.${tab}`);
 }
 
 /** The Preview tab's toolbar: history, the breadcrumb, open-in-new, phone width, download. The
@@ -433,6 +517,8 @@ function Body(props: HostProps) {
 export type PanelControls = {
   state: PanelState;
   open: (tab: PanelTab) => void;
+  /** A tool's tab closed; the panel stays open on the tab beside it. */
+  closeTool: (tab: PanelTab) => void;
   close: () => void;
   toggle: () => void;
   expand: () => void;
@@ -441,6 +527,8 @@ export type PanelControls = {
   openFile: (entry: PanelEntry) => void;
   /** The Subagents tab on one helper's conversation, or on the list with null. */
   openSubagent: (sub: string | null) => void;
+  /** The Board tab on one task, or on its list with null. */
+  openTask: (task: string | null) => void;
   /** A file opened beside the one on screen, as a tab of its own. */
   openBeside: (entry: PanelEntry) => void;
   showEntry: (entry: PanelEntry) => void;
@@ -461,15 +549,16 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
   const { route, beside, pane, context = "session", at, closed, shown } = opts;
   // What the route may name, the Browser tab included; what a panel opens on by itself is `first`.
   const tabs = routeTabsFor(context);
-  const first = tabsFor(context)[0];
+  const first = firstTab(context);
   const [state, setState] = useState<PanelState>(() => {
+    const kept = readPanelState(window.innerWidth, undefined, context);
+    const start = { ...PANEL_CLOSED, open: kept.open };
     const fromRoute = route ? readPanelQuery(route, tabs) : null;
-    if (fromRoute) return applyPanelQuery(PANEL_CLOSED, fromRoute, base);
+    if (fromRoute) return applyPanelQuery(start, fromRoute, base);
     // The second pane keeps its panel closed until asked while the window has room for one only.
-    if (pane === "right" && window.innerWidth < DUAL_BOTH_MIN) return PANEL_CLOSED;
-    if (closed) return PANEL_CLOSED;
-    const tab = readPanelTab(window.innerWidth, undefined, context);
-    return tab ? openTab(PANEL_CLOSED, tab) : PANEL_CLOSED;
+    if (pane === "right" && window.innerWidth < DUAL_BOTH_MIN) return start;
+    if (closed) return start;
+    return kept.tab ? openTab(start, kept.tab) : start;
   });
   const last = useRef<PanelTab | null>(state.tab);
   if (state.tab) last.current = state.tab;
@@ -488,7 +577,7 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
   const commit = useCallback(
     (next: PanelState, push = false) => {
       setState(next);
-      rememberPanelTab(next.tab, undefined, context);
+      rememberPanel(next, undefined, context);
       if (!route) return;
       const q = panelQuery(next);
       written.current = queryString(q);
@@ -505,7 +594,7 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
     written.current = incoming;
     setState((s) => {
       const next = applyPanelQuery(s, q, base);
-      rememberPanelTab(next.tab, undefined, context);
+      rememberPanel(next, undefined, context);
       return next;
     });
     // `tabs` is derived from `context`, which is what the effect depends on.
@@ -536,6 +625,7 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
   return {
     state,
     open,
+    closeTool: useCallback((tab: PanelTab) => commit(closeTool(stateRef.current, tab)), [commit]),
     close: useCallback(() => commit(closePanel(stateRef.current)), [commit]),
     toggle: useCallback(() => {
       const s = stateRef.current;
@@ -577,9 +667,19 @@ export function usePanel(sessionId: string, base: string, opts: { route: URLSear
       rememberPanelPinned(!was);
       // The open tab is written again under the new pin, so a panel pinned while open is the one the
       // next chat opens on.
-      if (!was && stateRef.current.tab) rememberPanelTab(stateRef.current.tab, undefined, context);
+      if (!was && stateRef.current.tab) rememberPanel(stateRef.current, undefined, context);
       return !was;
     }), [context]),
+    openTask: useCallback(
+      (task: string | null) => {
+        const s = stateRef.current;
+        if (s.tab === null) announce();
+        // A card opened is a step the browser's Back can undo; leaving it for the list replaces that
+        // entry rather than stacking a second list on top of the first.
+        commit(openTask(s, task), s.tab === null || (task !== null && s.task !== task));
+      },
+      [commit, announce],
+    ),
     openSubagent: useCallback(
       (sub: string | null) => {
         const s = stateRef.current;
@@ -630,26 +730,26 @@ function queryString(q: Record<string, string | null>): string {
     .join("&");
 }
 
-/** The panel's share of the chat area, dragged and remembered as a percentage. The drag writes
- *  `--panel-w` on the chat area itself while the pointer moves (see PaneDrag); the state follows once,
- *  when it lets go. */
-export function usePanelWidth(area: RefObject<HTMLElement | null>): [number, PaneDrag] {
-  const [pct, setPct] = useState(() => readPanelPct());
+/** The panel's width as the operator dragged it, in pixels, or null for the stylesheet's own. The drag
+ *  writes `--panel-w` on the chat itself while the pointer moves (see PaneDrag); the state follows
+ *  once, when it lets go. `area` is the chat the panel stands in, the header included. */
+export function usePanelWidth(area: RefObject<HTMLElement | null>): [number | null, PaneDrag] {
+  const [px, setPx] = useState<number | null>(() => readPanelPx());
   const areaWidth = () => area.current?.clientWidth || window.innerWidth;
-  const share = (w: number) => (w / Math.max(1, areaWidth())) * 100;
   const drag: PaneDrag = {
-    // What is on the page, not the stored share: the stylesheet holds the panel to 360 px at least.
-    begin: () => area.current?.querySelector<HTMLElement>(":scope > .panel")?.getBoundingClientRect().width ?? (areaWidth() * pct) / 100,
-    show: (w) => area.current?.style.setProperty("--panel-w", `${boundPanelPct(share(w), areaWidth()).toFixed(3)}%`),
+    // What is on the page, not the stored width: the stylesheet holds the panel between its bounds.
+    begin: () => area.current?.querySelector<HTMLElement>(":scope > .panel, :scope > .chat-body > .panel")?.getBoundingClientRect().width ?? px ?? 440,
+    show: (w) => area.current?.style.setProperty("--panel-w", `${clampPanelPx(w, areaWidth()) ?? w}px`),
     commit: (w) => {
-      const next = clampPanelPct(share(w), areaWidth());
-      rememberPanelPct(next);
-      setPct(next);
+      const next = clampPanelPx(w, areaWidth());
+      if (next === null) return;
+      rememberPanelPx(next);
+      setPx(next);
       // React writes the same value back only when it differs from the last render's; a drag that
-      // ends where it began would otherwise leave the unrounded share on the page.
-      area.current?.style.setProperty("--panel-w", `${next}%`);
+      // ends where it began would otherwise leave the unrounded width on the page.
+      area.current?.style.setProperty("--panel-w", `${next}px`);
     },
     sign: -1,
   };
-  return [pct, drag];
+  return [px, drag];
 }

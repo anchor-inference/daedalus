@@ -7,9 +7,13 @@ import { SidePanel } from "./sidepanel/SidePanel";
 import { VisitApp } from "./visitapp";
 import { installShareTransport, shareToken } from "./visit";
 import { installFileDrop } from "./filedrop";
+// The app's two faces, bundled into hashed assets: the service worker keeps them after the first
+// open, and no font host is ever asked. Each sheet declares one variable face per script with its
+// unicode range, so a browser fetches only the files for the letters it draws (Latin, Cyrillic).
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./ui/styles.css";
 import "./ui/desktop.css";
-import "./ui/phone.css";
 
 // A live link's page (/v/<token>/ on the services door) puts every request under its token before
 // anything asks for one, and is not an installable app: it is one conversation, for as long as the link lasts.

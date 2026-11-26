@@ -13,7 +13,7 @@ import { navigate, pathFor, projectSessionPath, projectStaffPath } from "../rout
 import { invalidate, useOffline } from "../store";
 import { confirmAsync, errorText } from "../ui";
 import type { MenuItem } from "../ui/dialogs";
-import { EmptyState, ListRow, SectionHeader } from "../ui/phone";
+import { Badge, Button, IconButton, Row } from "../ui/primitives";
 import { firstWait, splitTeam, staffTone, waitKey, type StaffTone } from "../project/focus";
 import { spendLine, staffUsage, type ProjectUsage } from "../project/usage";
 import { EditingNow } from "./editing";
@@ -103,8 +103,11 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
   if (members.length === 0 && oneOff.length === 0) {
     return (
       <>
-        <EmptyState icon="bots" title={t("ph.team.empty")} body={t("ph.team.empty.sub")}
-          action={onHire && !team.project.ephemeral && !team.project.system ? <button type="button" className="ph-btn accent" onClick={onHire}><Icon name="plus" size={18} />{t("ph.team.hire")}</button> : undefined} />
+        <div className="empty">
+          <b>{t("ph.team.empty")}</b>
+          <div>{t("ph.team.empty.sub")}</div>
+          {onHire && !team.project.ephemeral && !team.project.system && <Button variant="primary" icon="plus" onClick={onHire}>{t("ph.team.hire")}</Button>}
+        </div>
         {empty}
       </>
     );
@@ -132,7 +135,7 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
     ];
     const wait = firstWait(member);
     return (
-      <ListRow
+      <Row
         key={member.id}
         className="ph-srow-member"
         data={{ staff: member.id }}
@@ -142,7 +145,7 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
             <b>{member.name}</b>
             {!member.one_off && member.role && <span className="ph-member-role">{member.role}</span>}
             <HarnessBadge harness={member.harness} />
-            {member.env === "host" && <span className="ph-tag warn ph-host"><Icon name="lock" size={12} />{t("term.env.host")}</span>}
+            {member.env === "host" && <Badge tone="attention" className="ph-host"><Icon name="lock" size={12} />{t("term.env.host")}</Badge>}
           </span>
         }
         label={member.name}
@@ -168,8 +171,8 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
     <>
       {!big && members.length > 0 && (
         <section>
-          <SectionHeader count={members.length}>{t("ph.team.staff")}</SectionHeader>
-          <div className="ph-list" role="list">{members.map(row)}</div>
+          <Label count={members.length}>{t("ph.team.staff")}</Label>
+          <div className="staff-list" role="list">{members.map(row)}</div>
         </section>
       )}
       {big && grouped(members).map((group) => {
@@ -179,30 +182,41 @@ export function PhoneTeamList({ projectId, team, tasks, usage, toast, onEdit, on
         const visible = !shown ? [] : all || group.members.length <= FOLD_AT + 1 ? group.members : group.members.slice(0, FOLD_AT);
         return (
           <section key={group.key} data-group={group.key}>
-            <SectionHeader tone={group.key === "problems" ? "bad" : undefined} count={group.members.length}
-              action={group.key === "problems" ? undefined : <button type="button" className="ph-ib" aria-expanded={shown} aria-label={t(shown ? "ph.team.fold" : "ph.team.unfold", { group: t(`ph.team.group.${group.key}`) })} onClick={() => setOpen((o) => ({ ...o, [group.key]: !shown }))}><Icon name={shown ? "up" : "down"} size={18} /></button>}>
+            <Label tone={group.key === "problems" ? "bad" : undefined} count={group.members.length}
+              action={group.key === "problems" ? undefined : <IconButton icon={shown ? "up" : "down"} expanded={shown} label={t(shown ? "ph.team.fold" : "ph.team.unfold", { group: t(`ph.team.group.${group.key}`) })} onClick={() => setOpen((o) => ({ ...o, [group.key]: !shown }))} />}>
               {t(`ph.team.group.${group.key}`)}
-            </SectionHeader>
-            <div className="ph-list" role="list">{visible.map(row)}</div>
+            </Label>
+            <div className="staff-list" role="list">{visible.map(row)}</div>
             {shown && !all && group.members.length > FOLD_AT + 1 && (
-              <button type="button" className="ph-showmore" onClick={() => setMore((m) => ({ ...m, [group.key]: true }))}>
-                <span>{plural(`ph.team.more.${group.key}`, group.members.length - FOLD_AT)}</span><Icon name="down" size={16} />
-              </button>
+              <Button variant="quiet" icon="down" className="ph-showmore" onClick={() => setMore((m) => ({ ...m, [group.key]: true }))}>
+                {plural(`ph.team.more.${group.key}`, group.members.length - FOLD_AT)}
+              </Button>
             )}
           </section>
         );
       })}
       {oneOff.length > 0 && (
         <section>
-          <SectionHeader count={oneOff.length}>{t("focus.oneoff")}</SectionHeader>
-          <div className="ph-list" role="list">{oneOff.map(row)}</div>
+          <Label count={oneOff.length}>{t("focus.oneoff")}</Label>
+          <div className="staff-list" role="list">{oneOff.map(row)}</div>
         </section>
       )}
       {(team.editing?.length ?? 0) > 0 && (
         <section>
-          <EditingNow editing={team.editing ?? []} heading={<SectionHeader count={team.editing?.length}>{t("team.editing.section")}</SectionHeader>} />
+          <EditingNow editing={team.editing ?? []} heading={<Label count={team.editing?.length}>{t("team.editing.section")}</Label>} />
         </section>
       )}
     </>
+  );
+}
+
+/** A group's label over its card, as the team page's: grey words and the count, an action at the end. */
+function Label({ children, count, action, tone }: { children: ReactNode; count?: ReactNode; action?: ReactNode; tone?: "bad" }) {
+  return (
+    <div className={`orch-label ${tone ?? ""}`.trim()}>
+      <span>{children}</span>
+      {count !== undefined && count !== null && <span className="orch-label-n">{count}</span>}
+      {action && <><span className="grow" />{action}</>}
+    </div>
   );
 }

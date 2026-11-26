@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import type { Settings, WorkloadsLoad } from "../api";
 import { plural, t } from "../i18n";
 import { useQuery } from "../store";
-import { Row } from "../settingsrow";
+import { Row, SetBlock, SetGroup } from "../settingsrow";
 
 export const DEFAULT_CAP = 20;
 
@@ -39,9 +39,7 @@ export function TerminalCap({ s, save, onDraft }: { s: Settings; save: (patch: P
   }
 
   return (
-    <div className="card terminal-cap">
-      <div className="section-title">{t("settings.cap.title")}</div>
-      <div className="sub">{t("settings.cap.sub")}</div>
+    <SetGroup title={t("settings.cap.title")} help={t("settings.cap.sub")} className="terminal-cap">
       <Row title={t("settings.cap.label")} htmlFor="terminal-cap" data-setting="terminals.running_cap" desc={load.data?.terminals ? plural("settings.cap.running", load.data.terminals.running) : undefined}>
         <span className="settings-num">
           <input
@@ -62,7 +60,7 @@ export function TerminalCap({ s, save, onDraft }: { s: Settings; save: (patch: P
           <span className="settings-unit" />
         </span>
       </Row>
-      {value === null && <div className="sub push-error">{t("settings.cap.invalid")}</div>}
-    </div>
+      {value === null && <SetBlock><span className="set-hint push-error">{t("settings.cap.invalid")}</span></SetBlock>}
+    </SetGroup>
   );
 }

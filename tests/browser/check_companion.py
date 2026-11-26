@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import api_stub  # noqa: E402
 import screenshots as shots  # noqa: E402
 from api_stub import expect_app  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = shots.BASE
 TABS = {
@@ -84,7 +85,7 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     check(field.count() == 1, f"{where}: the conversation opens on its transcript with a field to type in")
     field.fill("what is on today")
     field.press("Enter")
-    page.wait_for_timeout(400)
+    until(page, lambda: any(p == "/api/companion/message" for m, p, b in posted))
     sent = [(m, p, b) for m, p, b in posted if p == "/api/companion/message"]
     check(len(sent) == 1 and sent[0][2].get("text") == "what is on today" and sent[0][2].get("source") == "app", f"{where}: a typed message goes to /api/companion/message ({sent})")
     check(not [p for m, p, b in posted if p == "/api/companion/say"], f"{where}: and not as an utterance")
@@ -95,12 +96,13 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
 
     # Pause, from the menu; the banner it leaves resumes.
     menu("pause")
-    page.wait_for_timeout(400)
+    # The page draws the pause after the host has answered the post, so the banner is waited for too.
+    until(page, lambda: ("POST", "/api/companion/pause", {"paused": True}) in posted and page.locator(".companion-paused").count() == 1 and page.locator(".companion-state.state-paused").count() == 1)
     check(("POST", "/api/companion/pause", {"paused": True}) in posted, f"{where}: Pause pauses it")
     check(page.locator(".companion-state.state-paused").count() == 1, f"{where}: and the header says so")
     check(page.locator(".companion-paused").count() == 1, f"{where}: with a line saying what pausing means")
     page.locator(".companion-paused button").click()
-    page.wait_for_timeout(400)
+    until(page, lambda: ("POST", "/api/companion/pause", {"paused": False}) in posted)
     check(("POST", "/api/companion/pause", {"paused": False}) in posted, f"{where}: and its button resumes")
 
     # Goals: listed, added, paused, deleted.
@@ -120,7 +122,7 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     check(page.locator(".companion-goal-form").count() == 0, f"{where}: and the sheet closes")
     first = page.locator(".companion-goal").first
     first.locator(".companion-goal-actions button").first.click()
-    page.wait_for_timeout(400)
+    until(page, lambda: any(m == "PATCH" and b.get("status") == "paused" for m, p, b in posted))
     check(any(m == "PATCH" and b.get("status") == "paused" for m, p, b in posted), f"{where}: and can be paused from its card")
 
     # The other tabs, and the two sheets of the menu, draw without an error.
@@ -148,8 +150,8 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     page.wait_for_selector(".companion-editor", timeout=5000)
     page.locator(".companion-editor input.field").fill("Iris")
     page.locator(".companion-swatch").nth(2).click()
-    page.locator(".companion-editor .btnrow .btn:not(.ghost)").click()
-    page.wait_for_timeout(500)
+    page.locator(".companion-editor-foot .btn:not(.ghost)").click()
+    until(page, lambda: any(m == "PUT" and p == "/api/companion" for m, p, b in posted))
     saved = [b for m, p, b in posted if m == "PUT" and p == "/api/companion"]
     check(bool(saved) and saved[-1].get("name") == "Iris" and saved[-1]["avatar"]["color"] == "#2bb673", f"{where}: the name and the colour are saved ({saved[-1:]})")
     page.wait_for_function("document.querySelector('.pagehead h1').innerText.includes('Iris')", timeout=8000)
@@ -161,12 +163,17 @@ def run(browser, check, lang: str, viewport: dict, where: str) -> None:  # type:
     check(page.locator(".voice-read").count() == 1, f"{where}: closing the sheets with Escape left the conversation on its transcript")
     page.locator(".voice-compose-btn.mic").click()
     page.wait_for_selector(".voice-stage", timeout=10000)
-    page.wait_for_timeout(500)
+    # The stage is drawn before the call is posted, and on a busy machine the post came more than
+    # half a second later: the fixed wait that stood here failed the check without a fault in the app.
+    for _ in range(50):
+        if ("POST", "/api/companion/call", {"on": True}) in posted:
+            break
+        page.wait_for_timeout(100)
     check(("POST", "/api/companion/call", {"on": True}) in posted, f"{where}: the microphone opens a call on the server")
     check(page.locator(".voice-compose-btn.hangup").count() == 1, f"{where}: and the button turns into Hang up")
     check(page.locator(".pagehead .ic-mic, .pagehead [aria-label='Call'], .pagehead [aria-label='Позвонить']").count() == 0, f"{where}: with no second microphone in the header")
     page.locator(".voice-compose-btn.hangup").click()
-    page.wait_for_timeout(400)
+    until(page, lambda: ("POST", "/api/companion/call", {"on": False}) in posted)
     check(("POST", "/api/companion/call", {"on": False}) in posted, f"{where}: hanging up closes it")
 
     check(not errors, f"{where}: no page errors ({errors[:2]})")

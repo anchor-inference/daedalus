@@ -2,8 +2,8 @@ import { useContextActions } from "../ui/context-menu";
 import { Component, Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { api, ApiError, AsrStatus, type AutopilotMark, type AutopilotStatus, ModelFallback, ProviderUsage, type TurnAccount, Schedule, SessionCheckpoints, SlashCommand, SkillEntry, MessageView, RunOutcome, type RunSpeed, SessionDetail, Compacting, type SessionFolder, type Question, type SessionTranslation, type MessageTranslation, type TranslatingMessage } from "../api";
-import { Chevron, Dot, Status, copyText, fmtInt, statusWord, timeAgo } from "../ui/components";
-import { MenuItem, OverflowMenu, confirmDialog, Overlay, toast as actionToast } from "../ui/dialogs";
+import { Chevron, Dot, Status, copyText, fmtInt, fmtUsd, statusWord, timeAgo } from "../ui/components";
+import { MenuItem, OverflowMenu, Sheet, confirmDialog, toast as actionToast } from "../ui/dialogs";
 import { absDate, absTime, clock, commandPreview, duration, fullTime, plainPreview, shortDateTime, stamp, waitingWords } from "../format";
 import { useMinute } from "../minute";
 import { HostMark } from "../runon";
@@ -11,7 +11,7 @@ import { PrivateBadge, isPrivate } from "../privatechat";
 import { isProject } from "../grouping";
 import { readPrefs, type Prefs } from "../appearance";
 import { EVIDENCE_EVENT, EvidenceRequest, codeBlock, renderCached, renderMarkdown } from "../md";
-import { confirmAsync, errorText, fmtBytes, haptic } from "../ui";
+import { confirmAsync, errorText, fmtBytes, fmtTok, haptic } from "../ui";
 import { Icon, IconName } from "../icons";
 import { AuthImg, FilePreview, PreviewSource, canPreview, downloadHref, fileGlyph, previewKind, sessionBase } from "../preview";
 import { followSession } from "../sessionstream";
@@ -22,12 +22,13 @@ import { uiStep } from "../computerstep";
 import { Explorer } from "../explorerpanel";
 import { DiffView } from "../previewparts";
 import { looksLikeDiff } from "../diff";
-import { KeptFiles, TurnFiles } from "../artifact";
+import { KeptFiles, LineFigures, TurnFiles } from "../artifact";
 import { MessageAttachments } from "../attachcards";
-import { placeOf, turnFiles, turnPages } from "../turnfiles";
+import { lineChange, placeOf, sumLines, turnFiles, turnPages } from "../turnfiles";
 import { PageCards } from "../pagecard";
 import { ScheduleCard, scheduleCardIds } from "../schedulecard";
 import { openSchedules } from "../schedules/host";
+import type { CanvasItem } from "../canvas/model";
 import { useScheduleActions } from "../schedules/actions";
 import { WidgetFrames } from "../widgetframe";
 import { drawnWidgets } from "../widget";
@@ -69,10 +70,11 @@ import { excerptOf, messageBody, uploadText } from "../project/goalmodel";
 import { QuestionsLine, QuestionsPanel } from "../questions/QuestionsPanel";
 import { AskRecord } from "../questions/AskRecord";
 import { useQuestions, type QuestionScope } from "../questions/data";
-import { StaffHeader, StaffMessages, useMember } from "../project/staff";
+import { StaffControls, StaffFacts, StaffHeader, StaffMessages, StaffWho, useMember } from "../project/staff";
 import { BriefPage, FoldersPage, WakeupsPage } from "../project/pages";
 import { worktreesKey, type Listing as WorktreeListing } from "../project/ProjectWorktrees";
 import { worktreeFolders } from "../project/worktreefolders";
+import { ChatBoard, boardNow, boardTally } from "../board/ChatBoard";
 import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
@@ -93,7 +95,8 @@ import { FullResult, ToolResultView } from "../toolresult";
 import { SettingsChangeCard, settingsChangeIds } from "../settingschange";
 import { useQuery } from "../store";
 import { sentMessageReachedTranscript } from "../pending-message";
-import { Banner, IconButton } from "../ui/phone";
+import { Banner } from "../ui/primitives";
+import { IconButton } from "../ui/primitives";
 import { SecretChip } from "../secrets";
 import { RawHtml } from "../rawhtml";
 import { SourcesButton, SourcesPanel, hydrateRich, useTurnSources } from "../sources";
@@ -109,7 +112,9 @@ import { COMPOSE_EVENT, ComposeTarget, type ComposeRequest } from "../annotate/c
 import { noticeFromEvent, raiseFromError, raiseSettingNotice, SettingNoticeLines, settingRef } from "../settinglink";
 import { MoveLive, useFolderMove } from "../project/moves";
 import { MoveFolderSheet, movable } from "../project/MoveFolder";
-import { PanelStrip } from "../panelstrip";
+import { AttachmentsPane, CanvasPane, ChangesPane, ContextPane, MemoryPane, UsagePane, changesSummary, spendToday, useChatBoard, useChatChanges } from "../panelpanes";
+import { Overview, type OverviewRow, type OverviewStatus } from "../paneloverview";
+import { providerLabel } from "../details";
 import type { ProjectEnvironments, QuickAgentRow, QuickWait } from "../api";
 import { notesKey, type NotesListing } from "../notes/model";
 
@@ -203,7 +208,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // embedded session reports itself, without anybody reading the address.
   usePresenceScope({ session: id || undefined });
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const sessionCanvases = useQuery<{ items: { id: string }[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
+  const sessionCanvases = useQuery<{ items: CanvasItem[] }>(`/api/canvases?session_id=${encodeURIComponent(id)}`, { pollMs: 15000, staleMs: 0 }).data?.items;
   // `translating` is the agent's language while the words are with the translator, "" once they are not;
   // `acked` once the host said it has them, after which only its own list keeps them "translating".
   const [sendingMessages, setSendingMessages] = useState<SendingMessage[]>([]);
@@ -259,7 +264,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     setSourcesOf(turnKey);
     panel.open("sources");
   }, [panel.open]);
-  const panelTabs = tabsNow.current = tabsFor(panelContext, { browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
+  // Whether the chat has a Changes tool at all is the detail's `repository`, read from the folder's
+  // HEAD file; the changes themselves (git, through the folder's terminal daemon) are read only once the
+  // tool is open, and then also feed the Overview's row.
+  const hasChanges = detail?.repository === true;
+  const chatChanges = useChatChanges(id && !visit && !bare && !embedded && hasChanges && panel.state.open.includes("changes") ? id : null, detail?.status);
+  // The chat's own board is a tab of an ordinary chat and the main chat; an orchestrator's and a member's
+  // Board tab is their project's. A guest's visit, a prompt coach's and a side question's chat have none.
+  const boardOffered = !visit && !bare && !embedded && panelContext !== "orchestrator" && panelContext !== "member";
+  const panelTabs = tabsNow.current = tabsFor(panelContext, { board: boardOffered, changes: hasChanges, browser: hasBrowser || panel.state.tab === "browser", preview: panel.state.stack.length > 0, subagents: (detail?.subagents?.length ?? 0) > 0 || panel.state.tab === "subagents", questions: sideWaiting > 0 || panel.state.tab === "questions", sources: sourcesOf !== null || panel.state.tab === "sources", agents: agentTalks.length > 0 || guestHeld.length > 0 || panel.state.tab === "agents" });
   // A conversation with another agent that starts, a reply that comes, a message that waits for the operator:
   // the Agents tab opens on that change, once. A phone opens no sheet over the chat for it, as it opens none
   // for a subagent; the approval sits over the composer there and the tab is a tile.
@@ -268,6 +281,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   useAgentsAutoOpen(id, agentTalks, talksLoaded, !phone && !embedded && !bare && pane !== "right", openAgents);
   const browserShown = pipGroup(browsers.groups);
   const runningSubagents = detail?.subagents?.filter((child) => child.running).length ?? 0;
+  // What the chat and its helpers put on the board. A helper's own chat reads its leader's board (the
+  // host answers with it), and it cannot name the leader's other helpers, so it hears every task event.
+  const boardFamily = useMemo(() => (detail?.subagent_of ? [] : [id, ...(detail?.subagents ?? []).map((child) => child.session_id)]), [id, detail?.subagent_of, detail?.subagents]);
+  const chatBoard = useChatBoard(id && !visit && !bare && !embedded ? id : null, boardFamily);
+  const boardFigures = boardTally(chatBoard.tasks);
   // Every way the conversation names a helper — its SubAgent step, its report, the reminder about the
   // idle ones — opens it here, beside the leader, rather than taking the leader off the screen.
   const subagentsNow = useRef(detail?.subagents);
@@ -328,7 +346,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     reply: orchestrating ? (target) => { setReply(id, target); composer.current?.focus(); } : undefined,
   } : null), [focus?.projectId, orchestrating, toast, id]);
   const body = useRef<HTMLDivElement>(null);
-  const [panelPct, dragPanel] = usePanelWidth(body);
+  // The panel stands beside the whole chat, its header included, so its width is the chat's to hold.
+  const chatBox = useRef<HTMLDivElement>(null);
+  const [panelPx, dragPanel] = usePanelWidth(chatBox);
   // The session's terminals: the dock under the conversation on a desktop, a sheet and a full-screen
   // view on a phone. Listed here because the header's button, the dock and the delete dialog all count them.
   const sessionTerminals = useSessionTerminals(id);
@@ -1496,10 +1516,9 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     }
   }
 
-  // The picker hangs from the control that opened it. The panel strip's chip used to call this bare, and
-  // the list opened beside the composer's pill at the far side of the window from the chip.
+  // The picker hangs from the control that opened it: the panel's model line opens it under itself, not
+  // beside the composer's pill at the far side of the window.
   const openPicker = (anchor?: HTMLElement | null) => composer.current?.openModel(anchor);
-  const stripModel = useRef<HTMLButtonElement>(null);
 
   async function chooseModel(body: ModelChoice) {
     try {
@@ -1770,6 +1789,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     ...(panelTabs.includes("preview") && panel.state.stack.length > 0 ? [{ id: "preview", icon: "eye" as IconName, label: t("panel.tab.preview"), onSelect: () => panel.open("preview") }] : []),
     ...(panelTabs.includes("jobs") && hasDetails ? [{ id: "jobs", icon: "clock" as IconName, label: t("panel.tab.jobs"), onSelect: () => panel.open("jobs") }] : []),
     ...(panelTabs.includes("notes") ? [{ id: "notes", icon: "note" as IconName, label: t("panel.tab.notes"), count: notesCount || undefined, onSelect: () => panel.open("notes") }] : []),
+    ...(boardOffered ? [{ id: "board", icon: "board" as IconName, label: t("panel.tab.board"), count: boardFigures.open || undefined, onSelect: () => panel.open("board") }] : []),
     ...(panelTabs.includes("subagents") ? [{ id: "subagents", icon: "spawn" as IconName, label: t("panel.tab.subagents"), count: detail?.subagents?.length || undefined, onSelect: () => panel.openSubagent(null) }] : []),
     ...(panelTabs.includes("agents") ? [{ id: "agents", icon: "bots" as IconName, label: t("panel.tab.agents"), count: talksWaiting || undefined, attn: guestHeld.length > 0 || agentTalks.some((talk) => talk.held > 0), onSelect: openAgents }] : []),
     ...(hasDetails ? [{ id: "mcp", icon: "plug" as IconName, label: t("session.mcp"), onSelect: () => { setDetailsFocus("mcp"); panel.open("details"); } }] : []),
@@ -1789,13 +1809,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     if (!ok) toast(id);
     return ok;
   };
-  // The session's menu: one list for the chat header's ⋯ and the panel strip's ⋯, so what one does to the
-  // session is found in the same place from either side. The rare things the Details tab used to carry
-  // as buttons in its cards — change the model, move the folder, copy the id, clear, delete — are here.
-  // The strip's copy differs in one thing: its "Change model" opens the picker under the strip's own chip,
-  // not under the composer's pill on the other side of the window.
-  const sessionMenuFrom = (modelAnchor?: { current: HTMLElement | null }): MenuItem[] => visit ? [
-    ...(hasDetails ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
+  // The session's menu, the chat header's ⋯. The rare things the Details tab used to carry as buttons in
+  // its cards — change the model, move the folder, copy the id, clear, delete — are here.
+  const sessionMenu: MenuItem[] = visit ? [
+    ...(hasDetails ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker() }] : []),
     ...(hasDetails
       ? [
           "-" as const,
@@ -1810,7 +1827,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { label: t("session.compact"), icon: "compact", onSelect: compact, disabled: busy },
   ] : [
     { label: t("session.rename"), icon: "pen", onSelect: () => setEditingTitle(detail?.title ?? "") },
-    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker(modelAnchor?.current) }] : []),
+    ...(hasDetails && !orchestrating ? [{ label: t("session.model.menu"), icon: "model" as IconName, onSelect: () => openPicker() }] : []),
     // A session in a project's focus mode stays in its project; the orchestrator's chat has no
     // files or jobs of its own to show.
     ...(focus ? [] : [{ label: t("session.project.move"), icon: "folder" as IconName, onSelect: () => setMoving(true) }]),
@@ -1842,8 +1859,6 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     { label: t("session.clear"), icon: "trash", onSelect: clearHistory, disabled: busy, danger: true },
     { label: t("session.delete"), icon: "trash", onSelect: remove, danger: true },
   ];
-  const sessionMenu = sessionMenuFrom();
-  const stripMenu = sessionMenuFrom(stripModel);
   // A visitor's menus keep what stays inside the session; the host refuses the rest whatever is pressed.
   const phoneRows: SessionRow[] = phone && !pane && visit ? [
     { icon: "copy", label: t("session.copyid"), onSelect: () => void copySessionId() },
@@ -1874,6 +1889,45 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The folder the chat works in, while it is being carried between the container and the host.
   const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
   const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
+  // The panel's Overview: the chat's state in one line, what it runs on, and a row a tool with what is
+  // behind it; the "+" menu says the same figures beside the tools that are not open.
+  const changedFiles = chatChanges.data?.repository ? chatChanges.data.files : [];
+  const overviewStatus: OverviewStatus = compacting ? { tone: "live", word: t("status.compacting") }
+    : status === "running" ? { tone: "live", word: t("status.running"), since: detail?.run_started_at }
+    : status === "waiting" || (questionsShown && waiting > 0) ? { tone: "attn", word: t("status.waiting"), since: status === "waiting" ? detail?.run_started_at : null }
+    : status === "failed" ? { tone: "bad", word: t("status.failed") }
+    : { tone: "idle", word: waitingLine || t(detail?.messages.length ? "panel.ov.idle" : "panel.ov.fresh") };
+  const overviewMeta = detail ? <>
+    {orchestrating ? <span>{shortModel(detail.fallback?.to ?? detail.model, 32)}</span>
+      : <button type="button" className="ov-model" onClick={(e) => openPicker(e.currentTarget)} aria-haspopup="menu" title={t("strip.model.title", { model: detail.fallback?.to ?? detail.model })}>{shortModel(detail.fallback?.to ?? detail.model, 32)}</button>}
+    {effortText && <span>{effortText}</span>}
+    <span className={detail.bypass ? "attn" : undefined}>{t(detail.bypass ? "panel.ov.bypass" : "panel.ov.asks")}</span>
+    {detail.branch && <span>{t("panel.ov.branch", { branch: detail.branch })}</span>}
+  </> : null;
+  const runningHelpers = detail?.subagents?.filter((child) => child.running) ?? [];
+  const boardTag = `${boardFigures.done}/${boardFigures.all}`;
+  const overviewRows: OverviewRow[] = !detail ? [] : [
+    ...(questionsShown && waiting > 0 ? [{ tab: "questions" as PanelTab, name: t("panel.tab.questions"), text: plural("questions.line", waiting), tag: String(waiting), tone: "attn" as const }] : []),
+    ...(changedFiles.length ? [{ tab: "changes" as PanelTab, name: t("panel.tab.changes"), text: changesSummary(changedFiles), tag: `+${chatChanges.data!.added} −${chatChanges.data!.removed}`, tone: "add" as const }] : []),
+    ...(boardOffered && boardFigures.all > 0 ? [{ tab: "board" as PanelTab, name: t("panel.tab.board"), text: boardNow(chatBoard.tasks), tag: boardTag }] : []),
+    ...(panelTabs.includes("subagents") && detail.subagents?.length ? [{ tab: "subagents" as PanelTab, name: t("panel.tab.subagents"), text: (runningHelpers[0] ?? detail.subagents[0]).name ?? plural("panel.ov.helpers", detail.subagents.length), tag: runningHelpers.length ? t("panel.ov.running", { n: runningHelpers.length }) : String(detail.subagents.length), tone: runningHelpers.length ? "live" as const : undefined }] : []),
+    ...(panelTabs.includes("browser") && browserShown ? [{ tab: "browser" as PanelTab, name: t("panel.tab.browser"), text: t(browserShown.needs_you ? "panel.ov.browser.you" : browserShown.acting ? "panel.ov.browser.acting" : "panel.ov.browser.idle"), tone: browserShown.needs_you ? "attn" as const : undefined }] : []),
+    ...(panel.state.stack.length > 0 ? [{ tab: "preview" as PanelTab, name: t("panel.tab.preview"), text: panel.state.stack[panel.state.at]?.path ?? "" }] : []),
+    ...(panelTabs.includes("files") ? [{ tab: "files" as PanelTab, name: t("panel.tab.files"), text: detail.workspace_name || detail.project?.name || detail.workspace }] : []),
+    ...(panelTabs.includes("notes") ? [{ tab: "notes" as PanelTab, name: t("panel.tab.notes"), text: notesCount ? plural("panel.ov.notes", notesCount) : t("panel.ov.notes.none"), tag: notesCount ? String(notesCount) : undefined }] : []),
+    ...(sessionCanvases?.length ? [{ tab: "canvas" as PanelTab, name: t("panel.tab.canvas"), text: sessionCanvases[0].title || t("panel.canvas.untitled"), tag: String(sessionCanvases.length) }] : []),
+    ...(detail.context ? [{ tab: "context" as PanelTab, name: t("panel.tab.context"), text: detail.context.window > 0 ? t("strip.context.of", { used: fmtTok(detail.context.tokens), window: fmtTok(detail.context.window) }) : fmtTok(detail.context.tokens), tag: contextPct !== null ? `${contextPct}%` : undefined, tone: contextPct !== null && contextPct >= 80 ? "attn" as const : undefined }] : []),
+    { tab: "usage" as PanelTab, name: t("panel.tab.usage"), text: detail.usage.usd_today != null ? `${fmtUsd(detail.usage.usd)} · ${spendToday(detail.usage).short}` : fmtUsd(detail.usage.usd) },
+  ].filter((row) => panelTabs.includes(row.tab));
+  const panelFigures: Partial<Record<PanelTab, string>> = {
+    ...(changedFiles.length ? { changes: String(changedFiles.length) } : {}),
+    ...(detail?.subagents?.length ? { subagents: String(runningHelpers.length || detail.subagents.length) } : {}),
+    ...(contextPct !== null ? { context: `${contextPct}%` } : {}),
+    ...(boardOffered && boardFigures.all > 0 ? { board: boardTag } : {}),
+    ...(notesCount ? { notes: String(notesCount) } : {}),
+    ...(sessionCanvases?.length ? { canvas: String(sessionCanvases.length) } : {}),
+    ...(questionsShown && waiting ? { questions: String(waiting) } : {}),
+  };
   // A remote chat names its computer and folder, and says when the computer is not there; a turn held
   // for it is a pause, not work, so the live bar steps aside for the banner that says what to do.
   const remote = remoteOf(detail);
@@ -1888,26 +1942,33 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
     : waitingLine ? <StateSub tone="running">{waitingLine}</StateSub>
     : ahead ? <span>{t("session.compacting.ahead", { what: compactionStage(ahead) })}</span>
     : remote ? <span className="ph-chat-remote">{remotePlace(remote)}</span>
-    : detail ? <span className={detail.fallback ? "ph-chat-fallback" : undefined}>{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText ? ` · ${effortText}` : ""}</span>
+    : detail?.fallback ? <span className="ph-chat-fallback">{shortModel(detail.fallback.to, 28)}</span>
     : null;
+  // Over the title: the chat it helps, or the project it lives in, as the desktop's header leads with,
+  // and like it not when the project's name is the chat's own.
+  const phoneOver = detail?.subagent_of ? (detail.leader_title ?? t("session.leader.word"))
+    : detail && isProject(detail.project) && detail.project.name !== detail.title ? detail.project.name
+    : undefined;
   const phoneChip = phone && browserShown
     ? <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />
     : phone && questionScope && waiting > 0
-      ? <IconButton icon="ask" label={plural("questions.line", waiting)} badge={waiting} className="questions-headbtn attn" onClick={() => panel.open("questions")} />
+      ? <IconButton icon="ask" label={plural("questions.line", waiting)} badge={waiting} className="ph-ib questions-headbtn attn" onClick={() => panel.open("questions")} />
       : null;
   return (
     <FocusChatContext.Provider value={focusChat}>
     <ComposeTarget.Provider value={id}>
-    <div className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""}`}>
+    <div ref={chatBox} className={`chat ${pane ? `pane pane-${pane}` : ""} ${focus ? `in-project ${focus.kind}` : ""} ${panel.state.tab && !phone ? "with-panel" : ""} ${panel.state.expanded && !phone ? "panel-full" : ""}`} style={panelPx ? { ["--panel-w" as string]: `${panelPx}px` } : undefined}>
       {bare ? null : phone && !pane ? <>
         <SessionTopBar
           title={detail?.title ?? "…"}
-          // The phone's bar has no room beside the title: the BYPASS mark rides at the head of the second line,
-          // as the share tag does, so a session that asks nobody is told apart on a phone too.
+          over={phoneOver}
+          // The phone's bar has no room beside the title: the BYPASS mark rides at the head of the line
+          // under it, so a session that asks nobody is told apart on a phone too.
           sub={detail?.bypass ? <><BypassMark on /> {phoneSub}</> : phoneSub}
           back={main || focus?.kind === "member" ? onBack : undefined}
           onTitle={hasDetails ? () => { setDetailsFocus("session"); panel.open("details"); } : undefined}
-          chip={phoneChip}
+          chip={phoneChip ?? undefined}
+          onPanel={visit ? undefined : () => panel.open(panel.state.tab ?? "details")}
           onMenu={() => setPhoneSheet("menu")}
           shared={!visit && detail?.share && detail.share.mode !== "local" ? (detail.share.mode === "public" ? "public" : "key") : null}
           secret={isPrivate(detail)}
@@ -1921,7 +1982,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             <Icon name={pane === "right" ? "close" : "back"} />
           </button>
         )}
-        <div className="grow chat-identity" style={{ minWidth: 0 }}>
+        {/* One line, as every page's header: where the chat lives, then its title, then what the run is
+            doing in the meta size. The model and its thinking left the header for the composer, which
+            names them beside the field they apply to; two lines in 52 px read as a second toolbar. */}
+        <div className="grow chat-identity">
+          {detail?.subagent_of ? (
+            <>
+              <button className="leader-link chat-crumb" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
+                <span className="truncate">{detail.leader_title ?? t("session.leader.word")}</span>
+              </button>
+              <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
+            </>
+          ) : detail && isProject(detail.project) && detail.project.name !== detail.title ? (
+            <>
+              <span className="chat-crumb truncate chat-sub-project">{detail.project.name}</span>
+              <span className="chat-crumb-sep" aria-hidden><Icon name="forward" size={14} /></span>
+            </>
+          ) : null}
           {editingTitle !== null ? (
             <input
               className="title-edit"
@@ -1934,6 +2011,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                 if (e.key === "Escape") setEditingTitle(null);
               }}
             />
+          ) : staffId ? (
+            // A member's session is named by the member, as its own page is: one header, not the
+            // chat's title over a second bar that said who it was.
+            <StaffWho staffId={staffId} />
           ) : (
             <span className="chat-title-line">
               <span className="chat-title truncate">{detail?.title ?? "…"}</span>
@@ -1942,37 +2023,23 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               <PrivateBadge on={isPrivate(detail)} />
             </span>
           )}
-          {detail?.subagent_of ? (
-            <button className="leader-link" onClick={() => onOpen?.(detail.subagent_of!)} title={t("session.leader")}>
-              ↳ {detail.leader_title ?? t("session.leader.word")}
-            </button>
-          ) : detail && (
-            // The second line says what the phone's title button says: the project, the model and its
-            // thinking, and the live state, which the line carries itself rather than a bar beside it.
+          {detail && (
             <span className="chat-sub">
-              {isProject(detail.project) && detail.project.name !== detail.title && <><span className="truncate chat-sub-project">{detail.project.name}</span><span className="sep">·</span></>}
-              <span className="truncate chat-sub-model">{shortModel(detail.fallback?.to ?? detail.model, 28)}{effortText && <span className="chat-sub-effort"> {effortText}</span>}</span>
-              {detail.imported && <><span className="sep">·</span><span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span></>}
-              {remote && remoteNow && <><span className="sep">·</span><RemoteHead b={remote} state={remoteNow} /></>}
-              {compacting ? null : (busy || saving) && !remotePaused ? <><span className="sep">·</span><LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} onJump={jumpToBottom} /></>
-                : status === "failed" ? <><span className="sep">·</span><span className="head-status failed" role="status"><b>{statusWord(status)}</b></span></>
-                : waitingLine ? <><span className="sep">·</span><button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button></> : null}
-              {ahead && <><span className="sep">·</span><AheadStatus c={ahead} /></>}
-              {folderMove && <><span className="sep">·</span><MoveLive job={folderMove} compact /></>}
+              {detail.imported && <span className="truncate chat-sub-from">{t("imp.head.from", { name: harnessMeta(detail.imported.harness, detail.imported.harness_name).name })}</span>}
+              {remote && remoteNow && <RemoteHead b={remote} state={remoteNow} />}
+              {compacting ? <CompactionBar c={compacting} />
+                : (busy || saving) && !remotePaused ? <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail.workspace} since={detail.run_started_at} onJump={jumpToBottom} />
+                : status === "failed" ? <span className="head-status failed" role="status"><b>{statusWord(status)}</b></span>
+                : waitingLine ? <button type="button" className="head-status jobs-pending" onClick={() => (jobsPending > 0 ? panel.open("jobs") : panel.openSubagent(null))}>{waitingLine}</button> : null}
+              {ahead && <AheadStatus c={ahead} />}
+              {folderMove && <MoveLive job={folderMove} compact />}
             </span>
           )}
         </div>
-        {compacting ? (
-          <CompactionBar c={compacting} />
-        ) : !detail || detail.subagent_of ? (
-          busy || saving ? (
-            <LiveBar status={status} saving={saving} base={tail} live={live} workspace={detail?.workspace} onJump={jumpToBottom} />
-          ) : status === "failed" ? (
-            <span className="head-status failed" role="status"><Dot status={status} /><b>{statusWord(status)}</b></span>
-          ) : null
-        ) : null}
+        {!detail && (busy || saving) && <LiveBar status={status} saving={saving} base={tail} live={live} onJump={jumpToBottom} />}
         {offline && <span className="head-status offline">{t("session.reconnecting")}</span>}
         <div className="head-actions">
+          {staffId && <StaffControls projectId={focus!.projectId} staffId={staffId} toast={toast} />}
           {!visit && <LiveLinkChip sessionId={id} onOpen={() => setSharing(true)} />}
           {!visit && detail?.share && detail.share.mode !== "local" && (
             <button type="button" className={`chip ${detail.share.mode === "public" ? "bad" : "attn"}`} onClick={() => setSharing(true)}>
@@ -1990,10 +2057,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             </button>
           )}
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
-          <ChatSearch sessionId={id} onPick={openMessage} />
           {!visit && !!sessionCanvases?.length && <a className="btn small" href={pathFor("canvas", null, { session: id })} aria-label={`${t("canvas.session")} (${sessionCanvases.length})`} onClick={(event) => { event.preventDefault(); navigate(pathFor("canvas", null, { session: id })); }}><Icon name="grid" size={16} /> {phone ? sessionCanvases.length : `${t("canvas.session")} (${sessionCanvases.length})`}</a>}
           {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
           <TerminalButton dock={terminalDock} phone={phone} />
+          {/* Search, the panel and the menu close the row in that order on every chat, the three a
+              header always has; the buttons before them appear only when there is something to show. */}
+          <ChatSearch sessionId={id} onPick={openMessage} />
           {!phone && <button className={`iconbtn ${panel.state.tab ? "on" : ""}`} onClick={panel.toggle} aria-label={t("panel.toggle")} title={t("panel.toggle.title")} aria-pressed={!!panel.state.tab}>
             <Icon name="panel" />
           </button>}
@@ -2001,11 +2070,12 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
         </div>
         {(busy || saving || compacting) && <HeadProgress status={status} compacting={compacting} />}
       </div>}
-      {staffId && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} />}
+      {staffId && phone && !pane && <StaffHeader projectId={focus!.projectId} staffId={staffId} toast={toast} release />}
+      {staffId && <StaffFacts projectId={focus!.projectId} staffId={staffId} />}
       {!bare && !(phone && !pane) && remote && <RemotePaused b={remote} onCancel={() => cancelPaused(remote.device_name)} />}
       {banner}
 
-      <div ref={body} className={`chat-body ${panel.state.tab && !phone ? "with-panel" : ""} ${panel.state.expanded && !phone ? "panel-full" : ""}`} style={{ ["--panel-w" as string]: `${panelPct}%` }}>
+      <div ref={body} className="chat-body">
         <div className="chat-main">
           {!phone && panel.state.tab !== "browser" && !(panel.state.expanded && panel.state.tab) && <BrowserPip groups={browsers.groups} onOpen={openBrowser} />}
           <div className="chat-scroll" ref={scroller} onScroll={onScroll}>
@@ -2013,6 +2083,15 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
               {!detail && <TurnSkeleton />}
               {/* An imported chat begins with where it came from, above whatever older pages load. */}
               {detail?.imported && <ImportBanner sessionId={id} origin={detail.imported} toast={toast} onPulled={() => void load(true)} />}
+              {/* A chat with nothing in it says so where the conversation will be: a blank page above the
+                  composer read as one that had not loaded. */}
+              {detail && !detail.imported && turns.length === 0 && !busy && !sendingMessages.length && (
+                <div className="chat-empty" role="status">
+                  <Icon name="chat" size={20} />
+                  <b>{t("session.empty")}</b>
+                  <span>{t("session.empty.sub")}</span>
+                </div>
+              )}
               {pageable && <div className="sub older-note">{older === "loading" ? t("session.older") : ""}</div>}
               {snapshots?.pruned && (
                 <div className="sub older-note">
@@ -2041,11 +2120,13 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
                   render={(i) => (
                     <Safe>
                       {i > 0 && !settled[i].imported && !!settled[i - 1].imported && <HandoffLine at={settled[i].startedAt} />}
-                      <TurnView turn={settled[i]} live={false} onTurnAction={turnAction} />
+                      {/* The newest answer keeps its row of actions in view, as the last thing in the chat
+                          and what the operator acts on next; the earlier ones show theirs on hover. */}
+                      <TurnView turn={settled[i]} live={false} latest={!busy && i === settled.length - 1} onTurnAction={turnAction} />
                     </Safe>
                   )}
                 />
-                {busy && <LiveTurn base={tail} live={live} onTurnAction={turnAction} onRender={pinBottom} />}
+                {busy && <LiveTurn base={tail} live={live} since={detail?.run_started_at} onTurnAction={turnAction} onRender={pinBottom} />}
                 {/* A message the host is holding is drawn once, as its card above the composer, where
                     its Steer and × are; the bubble here would be the same words a second time. */}
                 {pendingRows(sendingMessages, detail?.translating).filter((pending) => !sentMessageReachedTranscript(detail?.messages, pending.id) && !queuedInput.some((queued) => queued.id === pending.id)).map((pending) => <PendingMessage key={pending.id} text={pending.text} translating={pending.translating} />)}
@@ -2140,7 +2221,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             targetWorkspace={detail?.workspace}
             idlePlaceholder={remotePaused ? t("remote.composer.paused") : focusPlaceholder}
             context={detail?.context ?? null}
-            onContext={hasDetails ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
+            onContext={hasDetails ? () => panel.open("context") : undefined}
             asr={asr}
             queued={queuedInput}
             onWithdraw={withdraw}
@@ -2163,109 +2244,109 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           />}
           {!phone && !bare && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
         </div>
-        {detail && (
-          <Panel
-            state={panel.state}
-            onTab={panel.open}
-            onClose={panel.close}
-            onExpand={panel.expand}
-            onBack={panel.back}
-            onForward={panel.forward}
-            root={detail.project?.name ?? t("session.files.crumb")}
-            downloadUrl={(e) => downloadHref(e.base, e.path)}
-            sheet={phone}
-            sheetTitle={detail.title}
-            sheetSub={[detail.project?.name, detail.context?.messages ? plural("session.phone.messages", detail.context.messages) : null].filter(Boolean).join(" · ")}
-            drag={dragPanel}
-            tabs={panelTabs}
-            pinned={panel.pinned}
-            onPin={phone ? undefined : panel.togglePin}
-            onShowEntry={panel.showEntry}
-            onCloseEntry={panel.closeEntry}
-            strip={hasDetails ? <PanelStrip
-              model={detail.fallback?.to ?? detail.model}
-              effort={effortText}
-              context={detail.context ?? null}
-              usage={detail.usage}
-              menu={stripMenu}
-              modelRef={stripModel}
-              onModel={orchestrating ? undefined : openPicker}
-              onContext={detail.context ? () => { setDetailsFocus("context"); panel.open("details"); } : undefined}
-              onUsage={() => { setDetailsFocus("usage"); panel.open("details"); }}
-            /> : undefined}
-            pages={{
-              ...(focus ? {
-                board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
-                brief: <BriefPage projectId={focus.projectId} compact toast={toast} />,
-                wakeups: <WakeupsPage projectId={focus.projectId} compact toast={toast} />,
-                folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
-              } : {}),
-              ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
-              sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
-              notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
-              browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
-              agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} loaded={talksLoaded} toast={toast} />,
-              subagents: <SubagentsTab
-                leaderId={id}
-                selected={panel.state.sub}
-                onSelect={panel.openSubagent}
-                onOpenFull={(child) => navigate(sessionPath(child))}
-                toast={toast}
-                chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
-              />,
-            }}
-            // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
-            badges={{ ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
-            marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
-            details={hasDetails ? (ids) =>
-              <SessionDetails
-                ids={ids}
-                id={id}
-                role={orchestrating ? "orchestrator" : main ? "main" : "session"}
-                detail={detail}
-                busy={busy}
-                schedules={schedules}
-                provider={provider}
-                providerUsage={providerUsage}
-                onOpen={onOpen}
-                toast={toast}
-                reload={load}
-                focus={detailsFocus?.page}
-                focusKey={detailsFocus?.n}
-                on={{
-                  rename,
-                  openPicker,
-                  compact,
-                  clearHistory,
-                  remove,
-                  exportMarkdown,
-                  loopAction,
-                  scheduleAction,
-                  move: () => setMoving(true),
-                  showLog: (line, text) => setCommandResult({ line, text }),
-                  openFiles: () => panel.open("files"),
-                }}
-              />
-            : undefined}
-            files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
-            jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} openJob={jobOpen} onOpenJob={setJobOpen} /> : undefined}
-          />
-        )}
       </div>
+      {detail && (
+        <Panel
+          state={panel.state}
+          onTab={panel.open}
+          onClose={panel.close}
+          onExpand={panel.expand}
+          onBack={panel.back}
+          onForward={panel.forward}
+          root={detail.project?.name ?? t("session.files.crumb")}
+          downloadUrl={(e) => downloadHref(e.base, e.path)}
+          sheet={phone}
+          drag={dragPanel}
+          tabs={panelTabs}
+          pinned={panel.pinned}
+          onPin={phone ? undefined : panel.togglePin}
+          onShowEntry={panel.showEntry}
+          onCloseEntry={panel.closeEntry}
+          onCloseTool={panel.closeTool}
+          attention={questionsShown && waiting > 0 ? ["questions"] : undefined}
+          alongside={boardOffered && boardFigures.open > 0 ? ["board"] : undefined}
+          context={panelContext}
+          figures={panelFigures}
+          pages={{
+            overview: <Overview sessionId={id} board={chatBoard.tasks} status={overviewStatus} title={detail.title} meta={overviewMeta} rows={overviewRows} jobs={panelTabs.includes("jobs")} onOpen={panel.open}
+              onBoard={boardOffered ? () => panel.open("board") : () => navigate(pathFor("board", null, { scope: "chat", session: id }))} />,
+            ...(hasChanges ? { changes: <ChangesPane sessionId={id} listing={chatChanges.data} refresh={chatChanges.refresh} toast={toast} /> } : {}),
+            context: <ContextPane detail={detail} busy={busy} onCompact={compact} />,
+            usage: <UsagePane sessionId={id} detail={detail} provider={provider} providerUsage={providerUsage} />,
+            memory: <MemoryPane sessionId={id} />,
+            canvas: <CanvasPane sessionId={id} canvases={sessionCanvases} />,
+            attachments: <AttachmentsPane sessionId={id} onJump={openMessage} />,
+            ...(focus ? {
+              board: <ProjectBoard projectId={focus.projectId} toast={toast} embedded />,
+              brief: <BriefPage projectId={focus.projectId} compact toast={toast} />,
+              wakeups: <WakeupsPage projectId={focus.projectId} compact toast={toast} />,
+              folders: <FoldersPage projectId={focus.projectId} compact toast={toast} />,
+            } : {}),
+            ...(boardOffered && !focus ? { board: <ChatBoard sessionId={id} tasks={chatBoard.tasks} projectId={detail.project?.id ?? ""} leaderTitle={detail.subagent_of ? detail.leader_title ?? "" : null}
+              taskId={panel.state.task} onTask={panel.openTask} onOpenSession={(chat) => navigate(sessionPath(chat))} toast={toast} /> } : {}),
+            ...(questionScope ? { questions: <QuestionsPanel scope={questionScope} toast={toast} /> } : {}),
+            sources: <SourcesPanel key={sourcesOf ?? ""} sources={shownSources} />,
+            notes: <Suspense fallback={null}><NotesPanel sessionId={id} project={isProject(detail.project) ? { id: detail.project.id, name: detail.project.name } : null} phone={phone} toast={toast} /></Suspense>,
+            browser: <BrowserTab groups={browsers.groups} toast={toast} phone={phone} sessionId={id ?? undefined} user={browsers.user} />,
+            agents: <AgentsTab sessionId={id} talks={agentTalks} guestHeld={guestHeld} polls={agentPolls} loaded={talksLoaded} toast={toast} />,
+            subagents: <SubagentsTab
+              leaderId={id}
+              selected={panel.state.sub}
+              onSelect={panel.openSubagent}
+              onOpenFull={(child) => navigate(sessionPath(child))}
+              toast={toast}
+              chat={(child) => <SubagentTranscript key={child} id={child} onPreview={openPreview} toast={toast} />}
+            />,
+          }}
+          // The tabs say how much is behind them: jobs still running, notes kept beside the chat.
+          // The open Board says its "done of all" in its own heading; the tab says it only while closed.
+          badges={{ ...(boardOffered && boardFigures.all > 0 && panel.state.tab !== "board" ? { board: boardTag } : {}), ...(questionsShown && waiting ? { questions: waiting } : {}), ...(runningSubagents ? { subagents: runningSubagents } : {}), ...(talksWaiting ? { agents: talksWaiting } : {}), ...(detail.background_count ? { jobs: detail.background_count } : {}), ...(notesCount ? { notes: notesCount } : {}) }}
+          marks={{ ...(browserShown ? { browser: browserShown.needs_you ? "attn" : browserShown.acting ? "busy" : undefined } : {}), ...(guestHeld.length > 0 || agentTalks.some((talk) => talk.state !== "closed" && talk.held > 0) ? { agents: "attn" as const } : {}) }}
+          details={hasDetails ? (ids) =>
+            <SessionDetails
+              ids={ids}
+              id={id}
+              role={orchestrating ? "orchestrator" : main ? "main" : "session"}
+              detail={detail}
+              busy={busy}
+              schedules={schedules}
+              provider={provider}
+              providerUsage={providerUsage}
+              onOpen={onOpen}
+              toast={toast}
+              reload={load}
+              focus={detailsFocus?.page}
+              focusKey={detailsFocus?.n}
+              on={{
+                rename,
+                openPicker,
+                compact,
+                clearHistory,
+                remove,
+                exportMarkdown,
+                loopAction,
+                scheduleAction,
+                move: () => setMoving(true),
+                showLog: (line, text) => setCommandResult({ line, text }),
+                openFiles: () => panel.open("files"),
+                openTool: panel.open,
+                openModel: orchestrating ? undefined : openPicker,
+              }}
+              effort={effortText}
+            />
+          : undefined}
+          files={hasDetails && panelTabs.includes("files") ? <Explorer key={id} base={sessionBase(id)} rootPath={detail?.workspace} env={detail?.env} upload={!orchestrating} folders={paneFolders} home={detail?.folder_id} onPreview={openPreview} onOpenBeside={(src) => ("file" in src ? openPreview(src) : panel.openBeside(src))} toast={toast} refresh={filesGeneration} written={producedFiles(turns.at(-1)?.activity ?? []).filter((f) => f.how === "wrote").map((f) => { const place = placeOf(f.path, detail.workspace); return place && !place.folder ? place.rel : ""; })} /> : undefined}
+          jobs={hasDetails ? <JobsTab sessionId={id} messages={detail.messages} onOpen={panel.openFile} onPreview={openPreview} openJob={jobOpen} onOpenJob={setJobOpen} /> : undefined}
+        />
+      )}
 
       <TerminalFull dock={terminalDock} phone={phone} workspace={detail?.workspace} fileOpener={openTerminalFile} />
       <TerminalSheet dock={terminalDock} workspace={detail?.workspace} />
 
       {commandResult && (
-        <Overlay><div className="sheet-backdrop" onClick={() => setCommandResult(null)}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="grip" />
-            <h3 className="mono">{commandResult.line}</h3>
-            <div className="sheet-body">
-              <pre className="diff" style={{ whiteSpace: "pre-wrap" }}>{commandResult.text}</pre>
-            </div>
-          </div>
-        </div></Overlay>
+        <Sheet title={commandResult.line} onClose={() => setCommandResult(null)} size="md" className="command-result-sheet">
+          <pre className="diff" style={{ whiteSpace: "pre-wrap" }}>{commandResult.text}</pre>
+        </Sheet>
       )}
 
       {promoting && detail && <MakeProjectSheet project={detail.project} title={detail.title} onClose={() => setPromoting(false)} onMade={() => load(true)} />}
@@ -2564,7 +2645,7 @@ function TurnSources({ turn }: { turn: Turn }) {
   return <SourcesButton sources={sources} onOpen={() => openSources(turn.key)} />;
 }
 
-const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Turn; live: boolean; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
+const TurnView = memo(function TurnView({ turn, live, latest = false, runStart = null, onTurnAction }: { turn: Turn; live: boolean; latest?: boolean; runStart?: number | null; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void }) {
   const { id: sessionId, workspace, folders, preview, toast, link, compose, translateInto } = useContext(SessionContext);
   const focusChat = useFocusChat();
   const [folded, setFolded] = useDisclosed(`${sessionId}:run:${turn.key}`, false);
@@ -2575,7 +2656,9 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   // The answer in the operator's language: the automatic translation, or one asked for under it.
   const asked = useAskedTranslation({ sessionId, seq: turn.answerSeq, text: turn.answer, translation: turn.answerTranslation, live, into: translateInto });
   if (turn.summary) return <SummaryBlock message={turn.summary} />;
-  const elapsed = (live ? Date.now() : turn.endedAt) - turn.startedAt;
+  // A live turn counts from the run's start as the host has it (a run resumed after a question starts
+  // again from the answer); a settled one from its first message to its last.
+  const elapsed = live ? Math.max(0, Date.now() - (runStart ?? turn.startedAt)) : turn.endedAt - turn.startedAt;
   const summary = activitySummary(turn, live, Date.now());
   const activeTool = live ? [...turn.activity].reverse().find((item) => item.kind === "tool" && item.running) as ToolItem | undefined : undefined;
   const activeAction = activeTool ? describe(activeTool) : null;
@@ -2619,19 +2702,19 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
   const answered = answerTime(turn, closing, live);
   // The time and the speed go together: both belong to a turn that finished with an answer.
   const answeredStamp = answered ? <><MessageTime at={answered.at} took={answered.took} /><TurnSpeed runId={turn.runId} /></> : undefined;
+  // A fork is a new session, which a live link's visitor could not open: their rows leave it out.
+  const forkable = !inShare();
+  // Copy (drawn by the row itself), retry and fork first, the three an answer always offers; then the
+  // link, the translation and the reply; the one undoing action waits behind the menu.
   const answerActions = (text: string, answerSeq: number | undefined, translate?: MessageAction | null): MessageAction[] => [
+    ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
+    ...(settled && forkable ? [{ icon: "fork" as IconName, label: t("session.fork.action"), onSelect: () => onTurnAction!("fork", seq!) }] : []),
     ...(seq ? [{ icon: "link" as IconName, label: t("turn.link"), ticks: true, onSelect: copyLink }] : []),
     ...(translate ? [translate] : []),
     ...(answerSeq && focusChat?.reply ? [{ icon: "reply" as IconName, label: t("reply.action"), onSelect: () => focusChat.reply!({ seq: answerSeq, excerpt: excerptOf(text) }) }] : []),
-    ...(answerSeq && onTurnAction ? [{ icon: "reload" as IconName, label: t("turn.retry"), onSelect: () => onTurnAction("retry", answerSeq) }] : []),
   ];
-  // A fork is a new session, which a live link's visitor could not open: their menus leave it out.
-  const forkable = !inShare();
-  const turnMenu: MenuItem[] | undefined = settled
-    ? [
-        ...(forkable ? [{ label: t("session.fork.action"), icon: "fork" as IconName, onSelect: () => onTurnAction!("fork", seq!) }] : []),
-        ...(canRevert ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }] : []),
-      ]
+  const turnMenu: MenuItem[] | undefined = settled && canRevert
+    ? [{ label: t("session.revert.action.menu"), icon: "undo" as IconName, danger: true, onSelect: () => onTurnAction!("revert", seq!) }]
     : undefined;
   const copyLink = async () => {
     const url = `${window.location.origin}${link}#m${seq}`;
@@ -2712,7 +2795,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           {/* A note between steps has no row of actions: its "Translate" is a quiet line that shows on hover. */}
           {said.line ?? (closing === segment ? null : said.offer)}
           {!live && <KeptFiles text={segment.text} onOpen={preview} />}
-          {closing === segment && <MessageActions text={mediaCopyText(said.text, turn.media ?? [])} actions={answerActions(said.text, segment.seq, said.action)} more={turnMenu} trail={answeredStamp} />}
+          {closing === segment && <MessageActions shown={latest} text={mediaCopyText(said.text, turn.media ?? [])} actions={answerActions(said.text, segment.seq, said.action)} more={turnMenu} trail={answeredStamp} />}
           </>}
         </Translatable>
       ))}
@@ -2739,7 +2822,7 @@ const TurnView = memo(function TurnView({ turn, live, onTurnAction }: { turn: Tu
           point of showing it is that the operator can open it while the agent goes on. */}
       <PageCards pages={turnPages(turn.activity)} />
       <SavedToMemory activity={turn.activity} />
-      {turn.answer && !live && <MessageActions text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq, asked.action)} more={turnMenu} trail={answeredStamp} />}
+      {turn.answer && !live && <MessageActions shown={latest} text={mediaCopyText(answer, turn.media ?? [])} actions={answerActions(answer, turn.answerSeq, asked.action)} more={turnMenu} trail={answeredStamp} />}
       </div>
       {/* Outside the folded content: a loop's turn is folded by default, and this line is the one
           thing about it that must be seen without unfolding it. */}
@@ -2769,18 +2852,24 @@ function WorkBlock({ disclosure, items, live, elapsed, imported, current, waitin
     wasLive.current = live;
   }, [live]);
   const steps = stepCount(items);
-  const families = open ? "" : orchestrator ? stepLine(items) : familyLine(items);
+  // The orchestrator's line names what it did in the project's words; a chat's says how long and how
+  // many steps, and what kinds of step they were is the list it opens into.
+  const families = open || !orchestrator ? "" : stepLine(items);
   const label = elapsed !== null
     ? imported && !live ? t("imp.worked", { name: harnessMeta(imported).name }) : t(live ? "session.activity" : "session.worked", { t: duration(elapsed) })
     : steps > 0 ? plural("session.part.steps", steps) : t("session.reasoning");
   return (
     <>
       <button className={`thinking-head ${holds ? "awaiting" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`dots ${live ? "on" : ""}`}>
-          <i />
-          <i />
-          <i />
-        </span>
+        {/* The dots are the run's own mark, drawn while it works; a finished block is a line of words
+            and a chevron, which is all the summary of six minutes of work needs to be. */}
+        {live && (
+          <span className="dots on">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         <span className="worked">{label}</span>
         {current && <span className="activity-current truncate">{current}</span>}
         {elapsed !== null && steps > 0 && <span className="steps">{plural("session.steps", steps)}</span>}
@@ -2939,7 +3028,7 @@ function TurnSkeleton() {
  * The turn the run is writing right now. It reads the stream directly, so a token repaints this
  * component and nothing else: the settled turns above it never hear about it.
  */
-function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; live: LiveStore; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void; onRender?: () => void }) {
+function LiveTurn({ base, live, since = null, onTurnAction, onRender }: { base: Turn | null; live: LiveStore; since?: string | null; onTurnAction?: (kind: "revert" | "fork" | "retry", seq: number) => void; onRender?: () => void }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   useLayoutEffect(() => onRender?.());
@@ -2948,7 +3037,7 @@ function LiveTurn({ base, live, onTurnAction, onRender }: { base: Turn | null; l
   // dots over it — whatever the session is still doing behind the answer.
   return (
     <Safe>
-      <TurnView turn={turn} live={!state.ended} onTurnAction={onTurnAction} />
+      <TurnView turn={turn} live={!state.ended} runStart={runStartOf(since)} onTurnAction={onTurnAction} />
     </Safe>
   );
 }
@@ -3110,7 +3199,7 @@ export function SubagentTranscript({ id, onPreview, toast, inline = false, fallb
  *  brings the newest content back into view. The `livebar` classes are what the settle harness watches.
  *  `compact` drops the word and the step count for the side panel, whose line also holds its buttons
  *  in 360 px: the dot already says the state, and the step is what the operator reads. */
-export function LiveBar({ status, saving, base, live, workspace, onJump, compact = false }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; onJump: () => void; compact?: boolean }) {
+export function LiveBar({ status, saving, base, live, workspace, since, onJump, compact = false }: { status: Status; saving: boolean; base: Turn | null; live: LiveStore; workspace?: string; since?: string | null; onJump: () => void; compact?: boolean }) {
   const state = useSyncExternalStore(live.subscribe, live.get);
   useClock(1000);
   if (saving) {
@@ -3124,11 +3213,14 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
   const now = Date.now();
   const turn = applyLive(base, state, now);
   const steps = stepCount(turn.activity);
-  const { tool: running, since } = currentStep(turn, state);
+  const { tool: running, since: stepSince } = currentStep(turn, state);
   // Two clocks, each said as what it is: the step's own beside the step, the turn's beside the state
   // word. The compact bar has room for one and shows the step's; the turn's is in its title.
-  const turnTime = duration(now - turn.startedAt);
-  const stepTime = since !== null && status !== "waiting" ? duration(Math.max(0, now - since)) : null;
+  // The run's own start, by the host's clock, when the host says it: the turn's first message is when
+  // the operator wrote, and a run resumed after a question starts again from the answer.
+  const runStart = runStartOf(since) ?? turn.startedAt;
+  const turnTime = duration(Math.max(0, now - runStart));
+  const stepTime = stepSince !== null && status !== "waiting" ? duration(Math.max(0, now - stepSince)) : null;
   // A session waiting on the operator has nothing in progress, whatever its last turn holds.
   const step =
     status === "waiting"
@@ -3164,6 +3256,13 @@ export function LiveBar({ status, saving, base, live, workspace, onJump, compact
       {step && stepTime && <span className="num step-time" title={t("session.livebar.steptime", { time: stepTime })}>{stepTime}</span>}
     </button>
   );
+}
+
+/** The host's run start as a clock reading, or null when it gave none or one that does not parse. */
+function runStartOf(at: string | null | undefined): number | null {
+  if (!at) return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 /** The phone bar's second line during a run: the state and how long the turn has taken. */
@@ -3221,8 +3320,8 @@ function MessageTime({ at, took }: { at: string | number; took?: number | null }
 /** The row of small buttons under a message: copy it, and whatever else the turn allows; the rest behind ⋯.
  *  `lead` and `trail` stand before and after the buttons: the message's time, on the side of the row
  *  away from the text it answers to. */
-function MessageActions({ text, actions = [], more, lead, trail }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode }) {
-  // A phone shows the same icons as a desktop, in 44 px targets (ui/phone.css): the word "Copy"
+function MessageActions({ text, actions = [], more, lead, trail, shown = false }: { text: string; actions?: MessageAction[]; more?: MenuItem[]; lead?: ReactNode; trail?: ReactNode; shown?: boolean }) {
+  // A phone shows the same icons as a desktop, in 44 px targets (chat.css): the word "Copy"
   // beside one icon and every other action behind ⋯ made the turn's commands a hunt.
   const menu = more ?? [];
   const [copied, setCopied] = useState(false);
@@ -3241,14 +3340,14 @@ function MessageActions({ text, actions = [], more, lead, trail }: { text: strin
   });
   useContextActions(context, [{ label:t("common.copy"), icon:"copy", onSelect:() => void copy() }, ...actions, ...(more ?? [])]);
   return (
-    <div ref={controls} className="msg-actions">
+    <div ref={controls} className={`msg-actions ${shown ? "shown" : ""}`}>
       {lead}
       <button className="iconbtn small" onClick={copy} aria-label={t(copied ? "common.copied" : "common.copy")} title={t(copied ? "common.copied" : "common.copy")}>
-        <Icon name={copied ? "check" : "copy"} size={15} />
+        <Icon name={copied ? "check" : "copy"} size={16} />
       </button>
       {actions.map((a) => (
         <button key={a.label} className={`iconbtn small ${a.danger ? "danger" : ""}`} onClick={a.onSelect} aria-label={a.label} title={a.label}>
-          <Icon name={a.icon} size={15} />
+          <Icon name={a.icon} size={16} />
         </button>
       ))}
       {menu.length > 0 && <OverflowMenu small label={t("turn.more")} items={menu} />}
@@ -3511,11 +3610,14 @@ function ToolGroup({ family, group }: { family: string; group: ToolItem[] }) {
     if (running) setOpen(true);
   }, [running]);
   const d = describe(group[group.length - 1]);
+  // "Edited 2 files +31 −4": what the group changed, counted when every call in it can be.
+  const lines = WRITERS_COUNTED.includes(family) && !running ? sumLines(group.filter((g) => !g.error).map((g) => lineChange(g.name, g.args, g.result ?? ""))) : null;
   return (
     <div className="group">
       <div className={`act head ${running ? "running" : ""}`} onClick={() => setOpen((o) => !o)}>
         <Icon name={d.icon} />
         <span className="verb">{groupVerb(d.family, running, group.length, family)}</span>
+        <LineFigures lines={lines} />
         <span className="act-end"><Chevron open={open} /></span>
       </div>
       {open && group.map((g) => <ToolRow key={g.id} item={g} nested />)}
@@ -3575,6 +3677,9 @@ function ThoughtBlock({ text }: { text: string }) {
     </div>
   );
 }
+
+/** The steps whose arguments carry the text they wrote, so their lines can be counted. */
+const WRITERS_COUNTED = ["Write", "Edit", "MultiEdit"];
 
 /** The tools whose detail is a file the panel can open. */
 const FILE_TOOLS = ["Read", "Write", "Edit", "ImageView", "SendFile"];
@@ -3749,6 +3854,7 @@ function ToolRow({ item, nested }: { item: ToolItem; nested?: boolean }) {
           <span className="detail">{d.detail}</span>
         ))}
         <span className="act-end">
+          {WRITERS_COUNTED.includes(item.name) && !item.running && !item.error && <LineFigures lines={lineChange(item.name, item.args, item.result ?? "")} />}
           {/* A step imported from another program keeps the name it had there, beside Daedalus's own verb. */}
           {item.orig && item.orig !== d.verb && <span className="act-orig" title={t("imp.tool.orig", { name: item.orig })}>{item.orig}</span>}
           {item.error && !item.running && <span className="failed">{t("turn.failed")}</span>}
@@ -3827,34 +3933,29 @@ function ReceiptDialog({ sessionId, receipt, onClose }: { sessionId: string; rec
       gone = true;
     };
   }, [sessionId, receipt]);
+  // The shared sheet: its own title, close button, Escape and focus return, where a hand-built backdrop
+  // and box had only a click outside.
   return (
-    <Overlay>
-      <div className="sheet-backdrop" onClick={onClose}>
-        <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("session.receipt", { id: receipt })}>
-          <div className="grip" />
-          <h3>{t("session.receipt", { id: receipt })}</h3>
-          <div className="sheet-body">
-            {row === undefined && <div className="empty">{t("common.loading")}</div>}
-            {row === null && <div className="empty">{t("session.receipt.none", { id: receipt })}</div>}
-            {row && (
-              <>
-                <p className="receipt-claim">
-                  <b>{row.passed ? `✅ ${t("session.receipt.ok")}` : `❌ ${t("session.receipt.fail")}`}</b> — {row.criterion}
-                </p>
-                <div className="sub">
-                  {t("session.receipt.meta", { code: row.exit_code, secs: (row.duration_ms / 1000).toFixed(1), when: timeAgo(row.at) })}
-                  {row.tests_run !== null && t("session.receipt.tests", { n: row.tests_run })}
-                  {row.sandboxed ? t("session.receipt.sandboxed") : ""}
-                  {row.dependencies && t("session.receipt.depends", { list: row.dependencies })}
-                </div>
-                <RawHtml html={codeBlock(row.command, "sh")} />
-                {row.output_head && (looksLikeDiff(row.output_head) ? <DiffView text={row.output_head} /> : <pre className="filetext">{row.output_head}</pre>)}
-              </>
-            )}
+    <Sheet title={t("session.receipt", { id: receipt })} onClose={onClose} size="md" className="receipt-sheet">
+      {row === undefined && <div className="empty">{t("common.loading")}</div>}
+      {row === null && <div className="empty">{t("session.receipt.none", { id: receipt })}</div>}
+      {row && (
+        <>
+          <p className={`receipt-claim ${row.passed ? "ok" : "bad"}`}>
+            <Icon name={row.passed ? "check" : "alert"} size={16} />
+            <span><b>{row.passed ? t("session.receipt.ok") : t("session.receipt.fail")}</b> — {row.criterion}</span>
+          </p>
+          <div className="sub">
+            {t("session.receipt.meta", { code: row.exit_code, secs: (row.duration_ms / 1000).toFixed(1), when: timeAgo(row.at) })}
+            {row.tests_run !== null && t("session.receipt.tests", { n: row.tests_run })}
+            {row.sandboxed ? t("session.receipt.sandboxed") : ""}
+            {row.dependencies && t("session.receipt.depends", { list: row.dependencies })}
           </div>
-        </div>
-      </div>
-    </Overlay>
+          <RawHtml html={codeBlock(row.command, "sh")} />
+          {row.output_head && (looksLikeDiff(row.output_head) ? <DiffView text={row.output_head} /> : <pre className="filetext">{row.output_head}</pre>)}
+        </>
+      )}
+    </Sheet>
   );
 }
 

@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
 from check_launcher_setup import CHROMIUM, free_port, serve_launcher, settled
-from launcher_shots import build
+from launcher_shots import binary_or_none
 from playwright.sync_api import expect, sync_playwright
 
 
 def main() -> int:
-    binary = Path(os.environ["LAUNCHER"]) if os.environ.get("LAUNCHER") else build()
+    binary = binary_or_none()
+    if binary is None:
+        return 0
     work = Path(tempfile.mkdtemp(prefix="launcher-free-"))
     port = free_port()
     launcher = serve_launcher(binary, work, port)

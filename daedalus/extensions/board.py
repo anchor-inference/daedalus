@@ -58,6 +58,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _overdue(due_at: str | None, status: str | None) -> bool:
+    """Whether a card's date has passed with the work still open. Read at the moment of asking and never
+    stored, so it cannot be stale: a finished or dropped card is never late, whatever its date says."""
+    if not due_at or status in ("done", "dropped"):
+        return False
+    try:
+        due = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return due < datetime.now(UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class Actor:
     """Who is acting on the board, as the events and the rules need to know it.
@@ -218,7 +230,13 @@ class Board:
         if task.get("assignee_staff_id"):
             payload["assignee_staff_id"] = task["assignee_staff_id"]
         try:
-            await bus.publish(event_type, payload, project_id=task.get("project_id"), staff_id=task.get("assignee_staff_id") or actor.staff_id, session_id=actor.session_id)
+            # The event names the chat that created the task, not the one acting on it: a chat shows
+            # its own board and reloads on exactly these events, and a move by the operator or an
+            # unblock by the system has no acting chat at all. Who acted is ``actor_id``, which is what
+            # the orchestrator reads to ignore its own doing.
+            if actor.kind == "orchestrator" and actor.session_id:
+                payload["actor_id"] = f"orchestrator:{actor.session_id}"
+            await bus.publish(event_type, payload, project_id=task.get("project_id"), staff_id=task.get("assignee_staff_id") or actor.staff_id, session_id=task.get("origin_session_id"))
         except Exception:  # noqa: BLE001
             logger.warning("could not publish %s for task %s", event_type, task["id"], exc_info=True)
 
@@ -262,17 +280,27 @@ class Board:
         row["checklist"] = json.loads(row.get("checklist") or "[]")
         row["depends_on"] = json.loads(row.get("depends_on") or "[]")
         row["brief"] = _brief(row.pop("brief_json", None))
+        row["assignee_operator"] = bool(row.get("assignee_operator"))
+        row["overdue"] = _overdue(row.get("due_at"), row.get("status"))
         return row
 
-    async def list(self, status: str | None = None, *, include_done: bool = True, actor: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
+    async def list(self, status: str | None = None, *, include_done: bool = True, actor: str | None = None, project_id: str | None = None, session_id: str | None = None) -> list[dict[str, Any]]:
         """The board as ``actor`` sees it; ``None`` is the operator, who sees every session's tasks.
-        ``project_id`` narrows it to one project's board."""
+        ``project_id`` narrows it to one project's board, ``session_id`` to what that chat and its
+        subagents created.
+
+        ``session_id`` is not ``actor``: an actor's view adds the operator's unaddressed pool, and for
+        staff or the coordinator the whole project, which is wrong for "this chat's tasks". A subagent's
+        id names its leader's chat, because a subagent works on its leader's board."""
         where, args = await self._scope(actor)
         # A removed card is still found by its id (a journal entry or an old message names it), but
         # no board lists it again.
         where = f"{where} AND removed_at IS NULL"
         if project_id is not None:
             where, args = f"{where} AND project_id = ?", (*args, project_id)
+        if session_id is not None:
+            family = await self.family(session_id)
+            where, args = f"{where} AND origin_session_id IN ({','.join('?' for _ in family)})", (*args, *family)
         if status:
             rows = await self.app.db.fetchall(f"SELECT * FROM board_tasks WHERE status = ? AND {where} ORDER BY priority, created_at", (status, *args))
         elif include_done:
@@ -331,6 +359,8 @@ class Board:
                 raise ValueError("a staff member does not reassign or rewrite tasks; ask the orchestrator")
         if who.kind == "agent" and assignee_staff_id:
             raise ValueError("only the operator or the project's orchestrator assigns tasks")
+        if assignee_staff_id and task.get("assignee_operator"):
+            raise ValueError("this task is the operator's; only the operator hands it to a member")
         if assignee_staff_id:
             await self._assignee(task.get("project_id"), assignee_staff_id)
         new_brief = self._merge_brief(task["brief"], brief) if brief is not None else None
@@ -481,8 +511,10 @@ class Board:
 
         ``question`` and ``approval`` are an open request routed to the operator and tied to the task
         (a permission or a folder is an approval); ``review`` is a card in review, which only the
-        operator takes out of it. Read from the requests every time, like :meth:`needs_you`, so an
-        answer given anywhere takes the card out of the filter on the next read."""
+        operator takes out of it; ``assigned`` is an open card the operator keeps for themselves, which
+        nobody else will do and which waits on them until they close it. Read from the requests every
+        time, like :meth:`needs_you`, so an answer given anywhere takes the card out of the filter on
+        the next read."""
         ids = [task["id"] for task in tasks]
         waiting: dict[str, str] = {}
         if ids:
@@ -495,7 +527,8 @@ class Board:
                 if waiting.get(row["task_id"]) != "question":
                     waiting[row["task_id"]] = reason
         for task in tasks:
-            task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else None)
+            own = bool(task.get("assignee_operator")) and task.get("status") in ("todo", "doing", "blocked")
+            task["needs_you"] = waiting.get(task["id"]) or ("review" if task.get("status") == "review" else "assigned" if own else None)
 
     async def mark_chat_finishes(self, tasks: list[dict[str, Any]]) -> None:
         """Set ``finished_by`` on each card a chat finished itself: the chat, its title, its note and when.
@@ -529,12 +562,13 @@ class Board:
         for task in tasks:
             member = members.get(task.get("assignee_staff_id") or "")
             if member is None:
-                task["assignee"] = None
+                task["assignee"] = {"kind": "operator"} if task.get("assignee_operator") else None
                 continue
             session = live.get(member["id"])
             # The member's live status speaks for this task only while that session works on it.
             on_it = session is not None and session["task_id"] == task["id"]
             task["assignee"] = {
+                "kind": "staff",
                 **member,
                 "status": session["status"] if session is not None else "off",
                 "on_task": on_it,
@@ -704,8 +738,9 @@ class Board:
         cutoff = datetime.now(UTC) - timedelta(hours=hours)
         handed: list[str] = []
         # An assigned task is the staff runtime's to track: its member may be thinking for hours
-        # without touching the board, and handing it back would start a second worker on it.
-        for row in await self.app.db.fetchall("SELECT id, title, session_id, heartbeat_at, updated_at FROM board_tasks WHERE status = 'doing' AND assignee_staff_id IS NULL"):
+        # without touching the board, and handing it back would start a second worker on it. A card
+        # the operator keeps for themselves has no session to go quiet and is theirs to hand back.
+        for row in await self.app.db.fetchall("SELECT id, title, session_id, heartbeat_at, updated_at FROM board_tasks WHERE status = 'doing' AND assignee_staff_id IS NULL AND assignee_operator = 0"):
             last = row["heartbeat_at"] or row["updated_at"]
             try:
                 seen = datetime.fromisoformat(last)

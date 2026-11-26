@@ -1,7 +1,7 @@
 """Settings → Tools → MCP servers, in a real browser.
 
 At 1440 × 900 and on a 390 px phone: the card lists each server with its state and what it runs, a
-server waiting for its sign-in offers Sign in, Add server opens a form whose fields follow the
+server waiting for its sign-in offers Sign in, Add server opens a sheet whose fields follow the
 connection kind and whose save sends the server to the host, Remove asks first and sends a delete,
 and a sign-in that came back says so once and leaves the address clean. A stdio server offers where
 it runs (the Daedalus server or the host machine) and an HTTP one does not; a pasted command tried
@@ -21,6 +21,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -58,7 +59,7 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
     if files.locator("[data-mcp-location='server']").count() != 1 or tracker.locator("[data-mcp-location]").count():
         problems.append("only the stdio server should offer where it runs")
     files.locator("[data-mcp-location]").get_by_role("radio", name=host_label).click()
-    page.wait_for_timeout(400)
+    until(page, lambda: any(item[0] == "PUT" and item[1] == "/api/mcp/servers/files" for item in sent))
     moved = next((item for item in sent if item[0] == "PUT" and item[1] == "/api/mcp/servers/files"), None)
     if moved is None or moved[2].get("location") != "host" or moved[2].get("command") != "npx":
         problems.append(f"moving the server to the host was not sent as asked: {moved}")
@@ -75,26 +76,28 @@ def check(page: Page, problems: list[str], phone: bool) -> None:
     if len(tried) != 2 or tried[-1][2].get("location") != "host":
         problems.append(f"choosing the host did not try the server there: {tried}")
     quick.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
-    page.wait_for_timeout(400)
+    until(page, lambda: any(item[1] == "/api/mcp/add" for item in sent))
     added = next((item for item in sent if item[1] == "/api/mcp/add"), None)
     if added is None or added[2].get("location") != "host":
         problems.append(f"the server was not added where it was tried: {added}")
     sent.clear()
     card.get_by_role("button", name="Fill in by hand" if LANG == "en" else "Заполнить вручную").click()
-    form = card.locator("[data-mcp-form]")
+    # The form is a sheet over the page: its fields and its Add are the sheet's, not the card's.
+    sheet = page.locator(".sheet")
+    form = sheet.locator("[data-mcp-form]")
     form.locator("input.field").first.fill("linear")
     form.locator("input.field.mono").nth(1).fill("https://mcp.linear.example/mcp")
-    form.locator("input[type=checkbox]").check()
+    form.get_by_role("switch").click()
     if form.locator("input[type=password]").count() != 1:
         problems.append("turning sign-in on does not offer the client fields")
-    form.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
-    page.wait_for_timeout(400)
+    sheet.get_by_role("button", name="Add and connect" if LANG == "en" else "Добавить и подключить").click()
+    until(page, lambda: any(item[0] == "PUT" and item[1] == "/api/mcp/servers/linear" for item in sent))
     put = next((item for item in sent if item[0] == "PUT"), None)
     if put is None or put[1] != "/api/mcp/servers/linear" or put[2].get("url") != "https://mcp.linear.example/mcp" or put[2].get("oauth") is None:
         problems.append(f"the new server was not sent as asked: {put}")
     files.get_by_role("button", name="Remove" if LANG == "en" else "Убрать").click()
     page.locator(".sheet-backdrop.confirm .dialog button").last.click()
-    page.wait_for_timeout(300)
+    until(page, lambda: any(item[0] == "DELETE" and item[1] == "/api/mcp/servers/files" for item in sent))
     if not any(item[0] == "DELETE" and item[1] == "/api/mcp/servers/files" for item in sent):
         problems.append("Remove did not delete the server")
     if phone and page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 1"):

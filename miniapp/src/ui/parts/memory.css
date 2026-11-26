@@ -1,0 +1,241 @@
+/* ── Memory ──────────────────────────────────────────────────────────────────────────────────
+   One screen under a 52 px header: a list column (the entries, or every fact) with the field that
+   files a note under it, and beside it, when something is open, a 480 px pane. The list keeps the
+   page's 880 px column and centres in what the pane leaves, so it is the same page with or without
+   the pane. Below 1280 px there is no room for both: an entry takes the page and a fact opens in a
+   sheet. */
+.memory-split { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.memory-list { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.memory-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.memory-scroll > .screen { padding-top: 8px; padding-bottom: 24px; }
+.memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+
+/* The header's search is a field in the row, as the Board's; a phone opens it under the switch. */
+.memory-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memory-filters .segmented, .memory-bar .segmented { margin-bottom: 0; }
+.memory-search { display: inline-flex; align-items: center; gap: 8px; height: var(--ctl-h); width: 220px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--fg-3); }
+.memory-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-14); }
+.memory-search input::placeholder { color: var(--fg-3); }
+/* The browser's own clear mark is drawn by the platform; the field has a button of its own. */
+.memory-search input::-webkit-search-cancel-button { display: none; }
+.memory-search .iconbtn { margin-right: -6px; }
+.memory-search:focus-within { border-color: var(--accent); }
+.pagehead-actions:has(.memory-search) { gap: 8px; }
+.pagehead .memory-add { margin-left: 4px; }
+
+/* What memory says about itself, in rows the list's own width and quiet: whether it learns, and the
+   notes that wait for the operator's word. Neither is a warning, so neither is coloured as one. */
+.memory-notes { display: flex; flex-direction: column; margin: 0 0 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); overflow: hidden; }
+.memory-notes > * + * { border-top: 1px solid var(--line); }
+.memory-pill, .memory-suggest-banner { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--ctl-h-lg); box-sizing: border-box; padding: 0 12px; border: 0; background: none; color: var(--fg-2); font: inherit; font-size: var(--fs-13); text-align: left; text-decoration: none; cursor: pointer; }
+.memory-pill:hover, .memory-suggest-banner:hover { background: var(--hover); color: var(--fg); }
+.memory-pill:focus-visible, .memory-suggest-banner:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.memory-pill-text, .memory-banner-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.memory-pill > .ic:last-child { flex: none; color: var(--fg-3); }
+.memory-suggest-banner > .ic:first-child { flex: none; }
+.memory-banner-act { flex: none; display: inline-flex; align-items: center; gap: 2px; color: var(--fg); }
+.memory-banner-act .ic { color: var(--fg-3); }
+
+/* The entries: one card a group, a 56 px row each with its glyph, its title over its summary, and
+   at the end how many facts it holds and when it changed, in the secondary ink. */
+.memory-section + .memory-section { margin-top: 20px; }
+.memory-section-head { display: flex; align-items: center; height: 28px; padding: 0 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.memory-entry-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); overflow: hidden; }
+.memory-entry-row { display: flex; align-items: center; gap: 12px; min-height: 56px; box-sizing: border-box; padding: 8px 12px; color: var(--fg); text-decoration: none; cursor: pointer; }
+.memory-entry-row + .memory-entry-row { border-top: 1px solid var(--line); }
+.memory-entry-row:hover { background: var(--hover); }
+.memory-entry-row.on { background: var(--selected); }
+.memory-entry-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* The glyph says which kind of entry it is; a colour for each kind as well was decoration. */
+.memory-entry-tile { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--hover); color: var(--fg-2); }
+.memory-entry-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.memory-entry-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-14); font-weight: 500; line-height: 1.4; }
+.memory-sensitive { display: inline-flex; margin-left: 6px; vertical-align: -1px; color: var(--warn); }
+.memory-entry-summary { overflow: hidden; color: var(--fg-2); font-size: var(--fs-13); line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.memory-entry-summary:empty { display: none; }
+.memory-entry-stats { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-size: var(--fs-12); line-height: 1.4; color: var(--fg-3); white-space: nowrap; }
+.memory-entry-count { color: var(--fg-2); }
+
+/* The facts: the rows of the chat panel's Memory tool, so a fact reads the same in both places: a
+   glyph, its text in two lines at most, and under it its category and topics. */
+.memory-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.memory-bar .dropdown { max-width: 220px; }
+.memory-bar .chip.memory-filter { margin: 0; }
+.memory-group + .memory-group { margin-top: 20px; }
+.memory-group-head { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.memory-group-head .linkbtn { color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.memory-group-head .linkbtn:hover { color: var(--fg); }
+.memory-grid { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); overflow: hidden; }
+.memory-card { display: flex; align-items: flex-start; gap: 12px; min-height: 48px; box-sizing: border-box; padding: 10px 12px; color: var(--fg); cursor: pointer; }
+.memory-card + .memory-card { border-top: 1px solid var(--line); }
+.memory-card:hover { background: var(--hover); }
+.memory-card.on, .memory-card.selected { background: var(--selected); }
+.memory-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.memory-card > .ic { flex: none; margin-top: 2px; color: var(--fg-2); }
+.memory-check { margin: 2px 0 0; }
+.memory-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.memory-card-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-14); line-height: 1.45; overflow-wrap: anywhere; }
+.memory-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; color: var(--fg-3); font-size: var(--fs-12); line-height: 1.5; }
+.memory-card-meta > * + *::before { content: "·"; margin-right: 6px; }
+.memory-card-meta .grow { flex: 1; }
+.memory-card-when { flex: none; margin-top: 2px; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; }
+.topic-tag { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.topic-tag:hover, .topic-tag.on { color: var(--fg); }
+.topic-tag.on { text-decoration: underline; text-underline-offset: 3px; }
+.memory-bulkbar { flex: none; display: flex; align-items: center; gap: 10px; min-height: 64px; box-sizing: border-box; padding: 0 max(24px, calc((100% - 880px) / 2)); border-top: 1px solid var(--line); }
+
+/* Nothing yet, or nothing found: a centred note in the list's own column. */
+.memory-scroll:has(.memory-empty) > .screen { min-height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
+.memory-empty { flex: 1; align-content: center; gap: 8px; padding: 48px 16px; }
+.memory-empty > .ic { color: var(--fg-3); }
+.memory-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+
+/* The field under the list files a note; in an entry's pane it changes the entry. It is the chat
+   composer's field in small: the card, the strong edge, the large corner. */
+.memory-composer { flex: none; padding: 8px 24px calc(16px + env(safe-area-inset-bottom)); }
+.memory-composer-pill { display: flex; align-items: flex-end; gap: 8px; width: min(100%, 880px); box-sizing: border-box; margin-inline: auto; padding: 6px 6px 6px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-xl); background: var(--card); transition: border-color var(--t-fast); }
+.memory-composer-pill:focus-within { border-color: var(--accent); }
+.memory-composer textarea { flex: 1; min-width: 0; min-height: var(--ctl-h); max-height: 160px; padding: 6px 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-14); line-height: 1.45; }
+.memory-composer textarea::placeholder { color: var(--fg-3); }
+.memory-composer .memory-send { flex: none; border-radius: var(--radius-pill); background: var(--primary); color: var(--primary-ink); }
+.memory-composer .memory-send:hover:not(:disabled) { background: var(--primary-hover); color: var(--primary-ink); }
+.memory-composer .memory-send:disabled { background: var(--hover); color: var(--fg-3); }
+.memory-composer[data-busy] .memory-composer-pill { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--live) 10%, transparent), transparent); background-size: 200% 100%; animation: memory-shimmer 1.2s linear infinite; }
+.memory-composer.in-pane { padding: 12px 20px; border-top: 1px solid var(--line); }
+.memory-composer.in-pane .memory-composer-pill { width: 100%; }
+
+/* The pane: what a row opens, as the Board's task pane is drawn. */
+.memory-pane { width: 480px; flex: none; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--wash, var(--bg)); }
+.memory-pane-head { flex: none; height: var(--head-h); box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; }
+.memory-pane-kind { font-size: var(--fs-13); color: var(--fg-3); }
+.memory-pane-meta { margin-left: 4px; font-size: var(--fs-12); color: var(--fg-3); }
+.memory-pane-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; scrollbar-width: thin; }
+.memory-pane-title { margin: 0 0 16px; font-size: var(--fs-18); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
+.memory-pane-foot { flex: none; min-height: 64px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 20px; border-top: 1px solid var(--line); }
+.memory-pane .memory-notes { margin-bottom: 16px; }
+.memory-fact-form { display: flex; flex-direction: column; gap: 16px; }
+.memory-fact-form .field-box { margin: 0; }
+.memory-fact-form textarea.field { resize: vertical; }
+.memory-fact-form .field-box > .dropdown { max-width: 100%; }
+.memory-fact-form .dropdown, .memory-fact-form .dropdown-btn { width: 100%; max-width: 100%; }
+.memory-fact-form .dropdown-btn { justify-content: space-between; }
+.memory-fact-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.memory-fact-fixed { margin-top: -8px; }
+
+/* ── what sheets and entries are made of ───────────────────────────────────────────────────── */
+.memory-suggestion .memory-suggestion-record { padding: 6px 0; border-top: 1px solid var(--line); }
+.memory-suggestion .memory-text, .memory-history-entry .memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: var(--fs-14); }
+.memory-suggestion .row-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.memory-history-entry.undone { opacity: 0.6; }
+.memory-history-before summary { cursor: pointer; color: var(--fg-2); font-size: var(--fs-13); margin-top: 4px; }
+.memory-pill-dot { width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--ok); flex: none; }
+.memory-pill.paused .memory-pill-dot, .memory-pill.budget .memory-pill-dot { background: var(--warn); }
+.memory-pill.off .memory-pill-dot { background: var(--fg-3); }
+.memory-pill.busy .memory-pill-dot { background: var(--live); animation: memory-pulse 1.4s ease-in-out infinite; }
+@keyframes memory-pulse { 50% { opacity: 0.35; } }
+@keyframes memory-in { from { opacity: 0; transform: translateY(4px); } }
+.memory-badge { display: inline-grid; place-items: center; min-width: var(--chip-h-dense); height: var(--chip-h-dense); padding: 0 6px; border-radius: var(--radius-xs); background: var(--surface-3); color: var(--fg); font-size: var(--fs-12); font-weight: 500; font-variant-numeric: tabular-nums; }
+.memory-review-by { margin: var(--space-2) 0; }
+.memory-review-group { margin-top: var(--space-4); }
+.memory-review-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+.memory-review-title { min-width: 0; overflow: hidden; font-size: var(--fs-14); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.memory-review-bulk { display: inline-flex; gap: var(--space-2); }
+.memory-review-list { margin: 0; padding: 0; list-style: none; }
+.memory-review-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3) 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.memory-review-kind { color: var(--fg-3); font-size: var(--fs-12); }
+.memory-review-row .memory-text { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: var(--fs-14); }
+.memory-review-before { color: var(--fg-3); text-decoration: line-through; }
+.memory-review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--fs-12); min-width: 0; }
+.memory-review-quote { margin: 0; padding: 2px 0 2px var(--space-3); border-left: 1px solid var(--line-strong); color: var(--fg-2); font-size: var(--fs-13); line-height: 1.45; overflow-wrap: anywhere; }
+.memory-review-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.memory-sensitive { display: inline-flex; color: var(--warn); }
+.memory-entry-heading { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-title-edit { width: min(100%, 420px); }
+.memory-entry-project { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 var(--space-3); color: var(--fg-2); font-size: var(--fs-13); }
+.memory-block { margin: 0 0 var(--space-4); }
+.memory-block-head { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ctl-h-sm); padding: 0 2px 4px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.memory-summary { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); color: var(--fg); font-size: var(--fs-14); line-height: 1.45; text-align: left; cursor: text; }
+.memory-summary svg { flex: none; margin-top: 3px; color: var(--fg-3); opacity: 0; transition: opacity var(--t-fast); }
+.memory-summary:hover svg, .memory-summary:focus-visible svg { opacity: 1; }
+.memory-bullets { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); }
+.memory-bullets:empty { display: none; }
+.memory-bullet { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; }
+.memory-bullet + .memory-bullet { border-top: 1px solid var(--line); }
+.memory-bullet-text { font-size: var(--fs-14); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-bullet-text::before { content: "•"; margin-right: 8px; color: var(--fg-3); }
+.memory-bullet.archived .memory-bullet-text { color: var(--fg-2); }
+.memory-bullet-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--ctl-h-sm); font-size: var(--fs-12); color: var(--fg-3); }
+.memory-bullet-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity var(--t-fast); }
+.memory-bullet:hover .memory-bullet-actions, .memory-bullet:focus-within .memory-bullet-actions { opacity: 1; }
+.memory-source { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; padding: 0 8px; min-height: var(--chip-h-dense); border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); text-decoration: none; }
+a.memory-source:hover { color: var(--fg); }
+.memory-source-t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 260px; }
+.memory-mark { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-3); }
+.memory-mark.locked { color: var(--fg); }
+.memory-bullet-edit { display: flex; flex-direction: column; gap: 6px; }
+.memory-bullet-new { margin: 0 0 var(--space-2); }
+.memory-bullet-edit-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.memory-summary-edit { display: flex; flex-direction: column; gap: 6px; }
+.memory-none { padding: 4px 2px; }
+.memory-older { margin-top: var(--space-2); }
+.memory-older summary { cursor: pointer; padding: 4px 2px; color: var(--fg-2); font-size: var(--fs-13); }
+.memory-older .memory-bullets { margin-top: 4px; }
+@keyframes memory-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.memory-instruction { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0 0 var(--space-2); padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-14); }
+.memory-instruction svg { flex: none; margin-top: 3px; color: var(--fg-3); }
+.memory-note { margin: 0 0 var(--space-2); color: var(--warn); font-size: var(--fs-13); }
+.memory-diff-field { margin: 0 0 6px; font-size: var(--fs-14); }
+.memory-diff { display: flex; flex-direction: column; margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.memory-diff-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--space-2); align-items: flex-start; padding: 6px 8px; border-left: 2px solid transparent; font-size: var(--fs-14); line-height: 1.45; animation: memory-in 180ms var(--ease-out) both; }
+.memory-diff-row input { margin: 3px 0 0; }
+.memory-diff-row.same { color: var(--fg-2); }
+.memory-diff-row.added { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.memory-diff-row.removed .memory-diff-text { color: var(--fg-3); text-decoration: line-through; }
+.memory-diff-row.changed { border-left-color: var(--info); background: color-mix(in srgb, var(--info) 6%, transparent); }
+.memory-diff-row.skipped { opacity: 0.6; }
+.memory-diff-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.memory-diff-before { color: var(--fg-3); font-size: var(--fs-13); }
+.memory-flag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-xs); background: color-mix(in srgb, currentColor 12%, transparent); color: var(--fg-2); font-size: var(--fs-12); font-weight: 500; }
+.memory-flag.bad { color: var(--bad); }
+.memory-flag.warn { color: var(--warn); }
+.memory-import-step { margin: var(--space-4) 0 6px; color: var(--fg-3); font-size: var(--fs-12); font-weight: 500; }
+.memory-import-prompt { display: flex; align-items: flex-start; gap: var(--space-2); padding: 8px 8px 8px 12px; border-radius: var(--radius-sm); background: var(--inset); box-shadow: var(--shadow-ring); }
+.memory-import-prompt pre { flex: 1; margin: 0; white-space: pre-wrap; font-family: var(--mono); font-size: var(--fs-12); line-height: 1.5; color: var(--fg-2); }
+.memory-import-group { margin-top: var(--space-3); }
+.memory-import-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.memory-import-item { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--space-2); padding: 8px 12px; font-size: var(--fs-14); line-height: 1.45; }
+.memory-import-item + .memory-import-item { border-top: 1px solid var(--line); }
+.memory-import-item input { margin: 3px 0 0; }
+.memory-import-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.memory-import-flags { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: var(--fs-12); }
+.memory-import-flags:empty { display: none; }
+.memory-file { cursor: pointer; }
+.memory-learning-lines { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; padding: 0; list-style: none; font-size: var(--fs-13); line-height: 1.45; color: var(--fg-2); overflow-wrap: anywhere; }
+.memory-learning-lines [data-tone="warn"] { color: var(--warn); }
+.memory-learning-lines [data-tone="busy"] { color: var(--live); }
+.memory-suggestion-proposed { margin-top: var(--space-2); }
+.memory-saved-chip { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: var(--chip-h-dense); margin: 4px 0; padding: 0 8px; border-radius: var(--radius-xs); background: var(--surface-2); color: var(--fg-2); font-size: var(--fs-12); text-decoration: none; }
+.memory-saved-chip:hover { color: var(--fg); }
+.memory-saved-chip svg { color: var(--ok); }
+
+@media (max-width: 1023px) {
+  /* A phone's rows take the phone's own heights and sizes; a field under 16 px makes Safari zoom the
+     page when it takes focus. */
+  .memory-scroll > .screen { padding-top: 4px; }
+  .memory-entry-row { min-height: var(--list-row-h); }
+  .memory-entry-title, .memory-bullet-text, .memory-summary, .memory-card-text { font-size: var(--fs-15); }
+  .memory-review-row .memory-text { font-size: var(--fs-15); }
+  .memory-review-bulk { width: 100%; justify-content: flex-end; }
+  .memory-composer { padding-inline: var(--gutter); }
+  .memory-composer textarea { font-size: var(--fs-16); }
+  .memory-bulkbar { padding-inline: var(--gutter); }
+  /* A note's sentence wraps on a phone rather than ending in dots: it is the one thing the row is for. */
+  .memory-banner-text, .memory-pill-text { white-space: normal; padding: 6px 0; line-height: 1.35; }
+  .memory-search { width: 100%; flex: 1 1 100%; }
+  .memory-fact-pair { grid-template-columns: 1fr; }
+  /* The view's switch takes a row, the two selects share the next, so the list starts under two rows of controls rather than three. */
+  .memory-bar .segmented { width: 100%; }
+  .memory-bar .dropdown { flex: 1 1 0; max-width: none; }
+  .memory-bar .dropdown-btn { width: 100%; max-width: none; justify-content: space-between; }
+  .memory-bar .grow { display: none; }
+}

@@ -110,6 +110,7 @@ from daedalus.extensions import (
     api_pages,
     api_panel,
     api_plugins,
+    api_project_approvals,
     api_project_environment,
     api_project_start,
     api_projects,
@@ -125,6 +126,7 @@ from daedalus.extensions import (
     api_runtime_handoff,
     api_secrets,
     api_services_door,
+    api_session_changes,
     api_session_import,
     api_session_share,
     api_settings_changes,
@@ -169,6 +171,7 @@ from daedalus.extensions.services import (
     dial_address,
     unreachable_hint,
 )
+from daedalus.extensions.session_heads import HostHeads
 from daedalus.extensions.socket_limits import SERVER_MAX_BYTES, SocketLimits
 from daedalus.harness import conditions as member_conditions
 from daedalus.harness.capabilities import CAPABILITIES
@@ -176,9 +179,11 @@ from daedalus.host import (
     attached_files,
     capabilities,
     component_install,
+    git_branch,
     launcher_bridge,
     model_health,
     quick_agent,
+    session_attachments,
     subagent_models,
     task_effort,
     translation,
@@ -207,7 +212,7 @@ from daedalus.host.transcript_view import full_tool_result, message_view
 from daedalus.memory import privacy
 from daedalus.model_capabilities import known_image_input
 from daedalus.processes import end_tree
-from daedalus.providers import openrouter_routes
+from daedalus.providers import connection_probe, openrouter_routes
 from daedalus.providers.context_window import catalog_window, table_window, window_from_entry
 from daedalus.providers.free_catalog import approved_endpoint, probe_agent_cycle
 from daedalus.providers.free_catalog import catalog as free_catalog
@@ -246,7 +251,7 @@ from daedalus.stores.quota import quota_forecast
 from daedalus.stores.sqlite import ReceiptConflict, message_text
 from daedalus.stores.staff import ACTIVE_STATUSES, HARNESSES, Staff, StaffBusy, StaffError
 from daedalus.terminals.gateway import Gateway, SocketGone, ticket_who
-from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec
+from daedalus.terminals.model import EnvUnavailable, TerminalError, TerminalSpec, is_device_env
 from daedalus.terminals.model import Owner as TerminalOwner
 from daedalus.tools import TOOL_GROUPS, websearch
 from daedalus.transport.telegram.front import TelegramBusy, TelegramOutbox, TelegramRefused
@@ -289,7 +294,7 @@ LOGIN_WIDGET_MAX_AGE = 24 * 3600
 SESSION_COOKIE = "daedalus_session"
 SESSION_TTL = 30 * 24 * 3600
 SESSION_PAGE = 200
-"""How many sessions the listing's first page carries. The sidebar and the phone's drawer draw what
+"""How many sessions the listing's first page carries. The sidebar (a phone's drawer too) draws what
 it holds, and at thirty most titles sat behind "More": a title costs a row, the column scrolls and
 is windowed, so two hundred are shown at once and the cursor walks on past them."""
 VOICE_AUDIO_MAX = 25 << 20
@@ -726,6 +731,13 @@ class NotificationsSeenBody(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class NotificationsUnseenBody(BaseModel):
+    """Which notifications the operator wants back as unread: the listed ids."""
+
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    model_config = {"extra": "forbid"}
+
+
 class NotificationActBody(BaseModel):
     """One of a notification's actions: ``allow``, ``deny``, ``answer:<i>``, ``open``, or ``answer`` with the words.
 
@@ -883,7 +895,7 @@ class SettingsBody(BaseModel):
     browser may be let into, the injection monitor. The browser service hands the daemon its part at
     once (``limits.set``, ``net.configure``)."""
     navigation: dict[str, Any] | None = None
-    """The rail, its More launcher and the phone drawer. Each field sent replaces that field whole, so
+    """The sidebar's pinned rows and its More launcher. Each field sent replaces that field whole, so
     an icon override or a hidden item can be taken away; a field left out is kept."""
     pages: dict[str, Any] | None = None
     """The caps of custom pages: bytes and files per page, versions kept, the largest stored value."""
@@ -980,6 +992,7 @@ class PresetPatch(BaseModel):
     thinking: bool | None = None
     reasoning_effort: str | None = None
     images: bool | None = None
+    favourite: bool | None = None
     free_only: bool | None = None
     context_window: int | None = None
     context_window_source: Literal["auto", "manual"] | None = None
@@ -1544,6 +1557,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             await prompt_change_planner.close()
 
     api = FastAPI(title="Daedalus", docs_url=None, redoc_url=None, lifespan=lifespan)
+    # The branch and the repository of chats working in a folder on the other side of the terminal
+    # bridge, served from memory to the session detail's poll and read again in the background.
+    host_heads = api.state.host_heads = HostHeads(lambda: app.extensions.get("terminals"))
     # A session page is JSON and compresses about fivefold; over a phone connection that is the
     # difference the operator feels. The event stream is excluded by content type, so a token
     # still leaves the process the moment it arrives.
@@ -1799,7 +1815,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     )
 
     install_routes(api, app, auth)
-    # Settings → Rules: the action categories, their levels and the review's decision log.
+    # Settings → Approvals: the action categories, their levels and the review's decision log.
     api_action_rules.register(api, app, auth)
     api_attempt_diagnostics.register(api, app, auth)
     api_board.register(api, app, auth)
@@ -1812,6 +1828,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_coordinator_authority.register(api, app, auth)
     api_projects.register(api, app, auth)
     api_project_start.register(api, app, auth)
+    api_project_approvals.register(api, app, auth)
     api_folder_browser.register(api, app, auth)
     # Moving a folder between the container and the host, as a background job.
     api_folder_move.register(api, app, auth)
@@ -1861,6 +1878,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     api_harnesses.register(api, app, auth)
     # One staff member's session as its runtime sees it: the staff view's reads.
     api_staff.register(api, app, auth)
+    # A chat's own working-tree changes: its Changes tab's list, diff, revert and commit.
+    api_session_changes.register(api, app, auth)
     # The worker worktrees in a project's folders: the list to clean up from, and the safe removal.
     api_worktrees.register(api, app, auth)
     # What the agents of a project said to each other, and their tools' direct route from a launch.
@@ -2566,6 +2585,25 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         default = app.config.default_preset()
         return default[1].provider if default else ""
 
+    def _session_head(state: Any) -> git_branch.Head:
+        """Whether the session's working folder is in a repository, and the branch it is on. A session
+        working in a folder of its own under the workspaces root reads only inside it: the root may
+        itself sit in some repository. A host folder seen from the container is read on the host by
+        git through the terminal daemon, as the chat's changes are, and served from what that last
+        said (``HostHeads``); a remote conversation's machine is out of every daemon's reach."""
+        env = manager.env_of(state.session.id, state.metadata, state.project)
+        if env != manager.projects.local_env:
+            if is_device_env(env):
+                return git_branch.UNKNOWN
+            try:
+                directory = manager.folder_workspace(state.session.id, state.metadata, state.project)
+            except RuntimeError:
+                return git_branch.UNKNOWN
+            return host_heads.peek(state.session.id, env, str(directory))
+        folder = manager.work_dir(state)
+        root = app.settings.workspaces_dir
+        return git_branch.head_of(folder, stop=root if folder.is_relative_to(root) else None)
+
     def _session_folders(state: Any) -> list[dict[str, Any]]:
         """The folders of its project the session's file pane may open: the ones its walls let it read.
 
@@ -2647,6 +2685,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         context = await manager.context_status(state)
         leader = await manager.get_state(str(state.metadata["subagent_of"])) if state.metadata.get("subagent_of") else None
         subagents = await app.extensions["subagents"].views(session_id, describe=subagent_settings) if "subagents" in app.extensions else []
+        head = _session_head(state)
         return {
             "context": context,
             "id": session_id,
@@ -2661,6 +2700,16 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # A summary written ahead of the trigger while the session goes on: shown, never as blocking.
             "compaction_background": state.background_compacting,
             "run_id": state.run_id,
+            # When the run in flight began, on the wall clock; null between runs. A run that waited for the
+            # operator's answer counts from the resume, as the run-time cap does.
+            "run_started_at": since.isoformat() if (since := manager.run_since(session_id)) is not None else None,
+            # The branch the working folder is on and whether it is in a repository at all, from the
+            # repository's HEAD file and not from git itself: this is read on every poll, and the app offers
+            # the Changes tool by ``repository`` instead of asking git for the changes of every chat opened.
+            # Branch null outside a repository and on a detached HEAD; both null when not known, which for
+            # a host folder is until the host has first answered.
+            "branch": head.branch,
+            "repository": head.repository,
             # The operator's messages acknowledged and still with the translator: drawn as translating after
             # a reload too, not only by the window that sent them.
             "translating": manager.translating(session_id),
@@ -3150,6 +3199,20 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                         raise HTTPException(404, "the file is gone")
                     return FileResponse(target, media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream", filename=target.name, headers={"Access-Control-Allow-Origin": "https://web.telegram.org"})
         raise HTTPException(404, "no such call")
+
+    @api.get("/api/sessions/{session_id}/attachments")
+    async def session_attachments_list(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """What was attached in this chat, oldest message first: the files the operator sent and the ones the
+        agent handed over (SendFile, and media placed in an answer), each with the address that serves it.
+
+        Read from the transcript on request, never on a poll: one scan of the session's stored text.
+        """
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        views = await manager.sessions.list_file_views(session_id)
+        sent = [str(call["id"]) for view in views for call in view.get("tool_calls") or [] if call.get("name") == "SendFile" and call.get("id")]
+        answers = await manager.sessions.tool_result_views(session_id, sent) if sent else []
+        return {"attachments": session_attachments.listing(session_id, views, answers)}
 
     @api.get("/api/sessions/{session_id}/attachments/download")
     async def attachment_file(session_id: str, path: str, _: dict[str, Any] = Depends(auth)) -> Response:
@@ -4505,7 +4568,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         makes it hear the sentence at three times its speed and answer with noise.
         """
         if not app.speech.available():
-            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
+            raise refusal(409, "no local speech model is installed and selected (Settings → Recognition models)", LOCAL_SPEECH_MODEL)
         _prune_streams()
         try:
             clamp_rate(rate)
@@ -4534,7 +4597,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         the browser recognised itself.
         """
         if not app.speech.available():
-            raise refusal(409, "no local speech model is installed and selected (Settings → Voice)", LOCAL_SPEECH_MODEL)
+            raise refusal(409, "no local speech model is installed and selected (Settings → Recognition models)", LOCAL_SPEECH_MODEL)
         chunk = await request.body()
         if len(chunk) > LISTEN_CHUNK_MAX:
             raise HTTPException(413, f"a chunk may be up to {LISTEN_CHUNK_MAX >> 20} MB of samples")
@@ -5326,6 +5389,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 "thinking": preset.thinking,
                 "reasoning_effort": preset.reasoning_effort,
                 "images": preset.images,
+                "favourite": preset.favourite,
                 "context_window": preset.context_window,
                 "max_output_tokens": preset.max_output_tokens,
                 "provider_kind": str((providers.get(preset.provider) or {}).get("kind") or ""),
@@ -5394,20 +5458,29 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         return board
 
     @api.get("/api/board")
-    async def board_list(include_done: int = 0, project: str | None = None, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
+    async def board_list(include_done: int = 0, project: str | None = None, session: str | None = None, _: dict[str, Any] = Depends(auth)) -> list[dict[str, Any]]:
         """Every task, or with ``project`` one project's board: the shell's project lens over the Board screen.
+
+        ``session`` narrows it to the tasks that chat or its subagents created (``origin_session_id``),
+        for the chat's own board in its panel; a subagent's id answers with its leader's. Tasks merely
+        assigned to a staff member's chat are not that chat's. An unknown session lists nothing. It
+        combines with ``project`` and ``include_done``.
 
         A project's task carries its project's and its assignee's names: the screen's card is the only
         place it is read there, and a card that names neither the work's project nor who did it read as
-        an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter."""
-        tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None)
+        an empty title. ``needs_you`` says why a card waits on the operator, for the screen's filter.
+
+        ``due_at`` is the card's due instant (UTC) or ``null``, and ``overdue`` whether it has passed with
+        the work open. ``assignee`` is ``{kind: "staff", id, name, color}``, ``{kind: "operator"}`` for a card
+        the operator keeps for themselves (its ``needs_you`` is ``assigned``), or ``null``."""
+        tasks = await _board().list(None, include_done=bool(include_done), project_id=project or None, session_id=session or None)
         await _board().mark_needs_you(tasks)
         await _board().mark_chat_finishes(tasks)
         projects = {r["id"]: r["name"] for r in await manager.db.fetchall("SELECT id, name FROM projects")}
-        staff = {r["id"]: {"id": r["id"], "name": r["name"], "color": r["color"]} for r in await manager.db.fetchall("SELECT id, name, color FROM staff")}
+        staff = {r["id"]: {"kind": "staff", "id": r["id"], "name": r["name"], "color": r["color"]} for r in await manager.db.fetchall("SELECT id, name, color FROM staff")}
         for task in tasks:
             task["project_name"] = projects.get(task.get("project_id") or "")
-            task["assignee"] = staff.get(task.get("assignee_staff_id") or "")
+            task["assignee"] = {"kind": "operator"} if task.get("assignee_operator") else staff.get(task.get("assignee_staff_id") or "")
         return tasks
 
     @api.get("/api/projects/{project_id}/board")
@@ -5622,7 +5695,9 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             # ``server``: the MCP server "Allow all from <server>" would allow, with the spans offered.
             server = manager.server_of(session_id, key)
             return {"similar": manager.similar_of(session_id, key),
-                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None}
+                    "server": {"name": server, "hours": list(SERVER_GRANT_HOURS), "default_hours": SERVER_GRANT_DEFAULT_HOURS} if server else None,
+                    # Whether "Allow similar in this project" is offered, and the reason when it is not.
+                    "project": manager.project_scope_of(session_id, key)}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -5641,11 +5716,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/sessions/{session_id}/policy/standing")
     async def policy_standing(session_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left."""
+        """The session's standing grants ("Allow similar", "Allow all from <server>") with the time each has left,
+        and beside them, as ``project``, the rules its project holds for every chat (taken back from the project)."""
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
-        return {"standing": manager.standing(state)}
+        return {"standing": manager.standing(state), "project": manager.project_approvals(state)}
 
     @api.delete("/api/sessions/{session_id}/policy/standing/{grant_id}")
     async def policy_revoke_standing(session_id: str, grant_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -6487,7 +6563,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/notifications")
     async def notifications_list(
-        view: Literal["all", "unseen", "problems", "needs_you"] = "all",
+        view: Literal["all", "unseen", "problems", "needs_you", "done"] = "all",
         project: str | None = Query(default=None, max_length=64),
         before: int | None = Query(default=None, ge=1),
         limit: int = Query(default=100, ge=1, le=500),
@@ -6505,6 +6581,12 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if sum((body.ids is not None, body.all, body.session_id is not None)) != 1:
             raise HTTPException(422, "name exactly one of ids, all or session_id")
         marked = await service.mark_seen(body.ids, everything=body.all, session_id=body.session_id)
+        return {"marked": marked, "summary": await service.summary()}
+
+    @api.post("/api/notifications/unseen")
+    async def notifications_unseen(body: NotificationsUnseenBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        service = notifications_service()
+        marked = await service.mark_unseen(body.ids)
         return {"marked": marked, "summary": await service.summary()}
 
     @api.delete("/api/notifications/{entry_id}")
@@ -6728,7 +6810,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         # And what an empty fallback translator means for it: another route serving the same model, if any.
         data["translation"]["fallback_suggested"] = translation.automatic_fallback(
             app.config, data["translation"]["suggested"], ready=manager.providers.available(), health=manager.model_health)
-        # Which models are broken or slow, so Settings → Models and every model picker can mark them.
+        # Which models are broken or slow, so Settings → Models and providers and every model picker can mark them.
         data["model_health"] = await manager.model_health.view(app.config)
         # What a preset left to its model does with the on-demand tool groups, so the switch can say it.
         data["on_demand_defaults"] = {pid: on_demand_tool_groups_for(None, preset.model) for pid, preset in app.config.presets.items()}
@@ -7046,7 +7128,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
 
     @api.get("/api/navigation")
     async def get_navigation(_: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
-        """The rail and drawer layout alone. The shell reads it on every load, and the whole settings
+        """The sidebar's layout alone. The shell reads it on every load, and the whole settings
         view asks the key proxy about every provider on the way, which a menu has no need to wait for."""
         return app.config.navigation.model_dump(mode="json")
 
@@ -7242,6 +7324,29 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if passed:
             free_catalog.mark_probed(body.provider, body.model)
         return {"agent_ready": passed}
+
+    @api.post("/api/providers/{provider_id}/test")
+    async def test_provider(provider_id: str, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
+        """Whether a configured endpoint answers: ``{"ok", "latency_ms", "status", "detail", "models"?}``.
+
+        Reads the endpoint's model list through the adapter real requests use, within a few seconds. A
+        failure of any kind, an endpoint that is down or refuses the key included, is the answer with
+        ``ok`` false and a sentence, not an error; only an id that names nothing is a 404."""
+        if provider_id not in app.config.providers:
+            raise HTTPException(404, "no such provider")
+        try:
+            provider = manager.providers.get(provider_id)
+        except KeyError:
+            return {"ok": False, "latency_ms": None, "status": None, "detail": "the endpoint has no address, or is a hosted vendor with no key set; fill them in first"}
+        problem = ""
+        if is_keyproxy_url(provider.endpoint.base_url):
+            # The proxy knows whether anything behind it can sign the request; asking it first gives the
+            # sentence that names what is missing, where the request would only come back as a 401.
+            keys = await keyproxy_keys()
+            row = (keys or {}).get(keyproxy_upstream(provider.endpoint.base_url))
+            if keys is not None and not (row and row["configured"]):
+                problem = no_credential(str(row["kind"]) if row else "api_key", provider_id)
+        return await connection_probe.probe(provider, redact=manager.redactor.redact, problem=problem)
 
     @api.post("/api/providers/lookup-models")
     async def lookup_provider_models(body: ModelsLookupBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
@@ -7521,7 +7626,7 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if app.config.model.preset == preset_id and not last:
             raise HTTPException(400, "this preset is the global default; pick another default first")
         if app.config.vision.preset == preset_id and not last:
-            raise HTTPException(400, "this preset is the ImageView model; pick another in Settings → Tools first")
+            raise HTTPException(400, "this preset is the ImageView model; pick another in Settings → Models for tasks first")
         raw = app.config.model_dump(mode="json")
         del raw["presets"][preset_id]
         raw["model"]["chain"] = [c for c in raw["model"].get("chain", []) if c != preset_id]

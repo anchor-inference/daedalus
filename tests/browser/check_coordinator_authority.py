@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import Page, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_drawer  # noqa: E402
+from api_stub import DEFAULT_APP, Unhandled, expect_app, folder, fulfil_shared, open_projects  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -156,14 +156,9 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
     page.route("**/api/**", stub)
 
     def open_authority() -> object:
-        # The desktop's column has the project chip; a phone's project switcher is the drawer's
-        # Projects "See all".
-        page.wait_for_selector(".project-chip:visible, .ph-menu:visible")
-        if page.locator(".project-chip:visible").count():
-            page.locator(".project-chip:visible").first.click()
-        else:
-            open_drawer(page)
-            page.locator(".ph-drawer-root.open [data-nav='projects']").click()
+        # The sidebar's Projects label opens every project: in the desktop's column, or in the
+        # phone's drawer, which is the same sidebar.
+        open_projects(page)
         page.locator(f":is(.project-row, .projects-row) .iconbtn[aria-label='{words['settings']}']").click()
         section = page.locator(".sheet-section", has=page.get_by_text(words["title"])).last
         section.locator("summary").first.click()
@@ -172,9 +167,11 @@ def scenario(page: Page, language: str, unhandled: Unhandled, bundle_id: str = "
     page.goto(f"{BASE}/agents?token=t&lang={language}")
     section = open_authority()
     section.get_by_text(words["add"]).click()
-    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").select_option(bundle_id)
+    section.get_by_label("Allowed actions" if language == "en" else "Разрешённые действия").click()
+    page.locator(f".dropdown-list [role=option][data-value='{bundle_id}']").click()
     if bundle_id == "assignment":
-        section.get_by_label(re.compile("^Task" if language == "en" else "^Задача")).select_option("first-task")
+        section.get_by_label(re.compile("^Task" if language == "en" else "^Задача")).click()
+        page.locator(".dropdown-list [role=option][data-value='first-task']").click()
     else:
         expect(section.get_by_text(words["wake"], exact=False)).to_be_visible()
     section.get_by_role("button", name=words["approve"]).click()

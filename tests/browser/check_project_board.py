@@ -23,6 +23,7 @@ from api_stub import (  # noqa: E402
     BoardStub,
     TeamStub,
     Unhandled,
+    choose_option,
     expect_app,
     folders,
     fulfil_shared,
@@ -179,16 +180,16 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     sheet = page.locator(".sheet.pboard-sheet")
     expect(sheet).to_be_visible()
     sheet.locator("#ptask-title").fill("Delivery zones")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     expect(sheet.locator(".sub.attn")).to_contain_text(words["missing"])
     sheet.locator("#ptask-objective").fill("Customers see whether we deliver to them")
     sheet.locator("#ptask-deliverable").fill("A zones page and a check at checkout")
     sheet.locator("#ptask-boundaries").fill("Only the site folder")
     sheet.locator("#ptask-done_when").fill("An address outside the zones is refused politely")
-    sheet.locator("#ptask-folder").select_option(project()["folders"][0]["id"])
+    choose_option(page, sheet.locator("#ptask-folder"), project()["folders"][0]["id"])
     expect(sheet.locator(".sub.attn")).to_have_count(0)
     sheet.locator(".pboard-deps").get_by_role("option", name="Checkout").click()
-    sheet.get_by_role("radio", name="P2", exact=True).click()
+    choose_option(page, sheet.locator("#ptask-priority"), "2")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     made = stub.created[-1]
@@ -232,7 +233,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     cols.locator(".pcard", has_text="Menu photo captions").click()
     expect(sheet).to_be_visible()
     assert "task=t-photos" in page.url, page.url
-    sheet.locator("#ptask-assignee").select_option("st-max")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-max")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["save"]).click()
     # The dialog stays on the task after a save; the footer goes, with nothing left to save.
     expect(sheet.locator(".sheet-foot")).to_have_count(0)
@@ -248,7 +249,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub.launch_failures = 1
     page.get_by_role("button", name=words["new"]).first.click()
     sheet.locator("#ptask-title").fill("Retry launch")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     assert sum(task["title"] == "Retry launch" for task in stub.tasks) == 1
@@ -262,7 +263,7 @@ def desktop(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub.launch_unknowns = 1
     page.get_by_role("button", name=words["new"]).first.click()
     sheet.locator("#ptask-title").fill("Unknown launch")
-    sheet.locator("#ptask-assignee").select_option("st-lev")
+    choose_option(page, sheet.locator("#ptask-assignee"), "st-lev")
     sheet.locator(".sheet-foot").get_by_role("button", name=words["create"]).click()
     expect(sheet).to_have_count(0)
     unknown_id, unknown_body = stub.unknown_launches[-1]
@@ -286,7 +287,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     stub = board()
     serve(page, stub, unhandled)
     page.goto(f"{BASE}/project/{PID}/board?token=t&lang={lang}")
-    expect(page.locator(".ph-board .ph-top-t")).to_have_text("Board" if lang == "en" else "Доска")
+    expect(page.locator(".ph-board .pagehead-t")).to_have_text("Board" if lang == "en" else "Доска")
     expect(page.locator(".pboard-cols")).to_have_count(0)
     # All, then one chip per column with something in it; Needs you in amber.
     chips = page.locator(".ph-board .ph-chip")
@@ -298,7 +299,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     # Without a chip: every open column that has something, finished work folded.
     expect(sections).to_have_count(4)
     fits(page, f"{lang} phone list")
-    rows = page.locator(".ph-board .ph-row")
+    rows = page.locator(".ph-board .list-row")
     for box in [r.bounding_box() for r in rows.all()]:
         assert box and 59.5 <= box["height"] <= 90, f"{lang}: a board row is {box}"
 
@@ -310,10 +311,10 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(sections).to_have_count(4)
 
     # A long press opens the task's sheet: Open, Move to as chips, then the rest.
-    row = page.locator(".ph-board .ph-row.ph-task:not(.need)", has_text="Checkout").first
+    row = page.locator(".ph-board .list-row.ph-task:not(.need)", has_text="Checkout").first
     box = row.bounding_box()
     assert box
-    page.evaluate("""([x, y]) => { const el = document.elementFromPoint(x, y).closest('.ph-row');
+    page.evaluate("""([x, y]) => { const el = document.elementFromPoint(x, y).closest('.list-row');
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: x, clientY: y })); }""", [box["x"] + 60, box["y"] + 20])
     page.wait_for_timeout(700)
     menu = page.locator(".ph-task-menu")
@@ -324,7 +325,7 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
 
     page.locator(".ph-board .ph-chip", has_text=words["review"]).click()
     expect(sections).to_have_count(1)
-    sections.first.locator(".ph-row", has_text="Notify endpoint").click()
+    sections.first.locator(".list-row", has_text="Notify endpoint").click()
     # The review page: its footer holds the decision, disabled until the result is current and checked.
     expect(page.locator(".ph-taskpage .ph-decide .ph-btn.primary")).to_be_disabled()
     assert not stub.accepted
@@ -332,11 +333,11 @@ def phone(page: Page, lang: str, unhandled: Unhandled) -> None:
     expect(page.locator(".ph-taskpage")).to_have_count(0)
 
     page.locator(".ph-board .ph-chip", has_text=words["done"]).click()
-    expect(page.locator(".ph-board .ph-row", has_text="Old price list")).to_be_visible()
-    expect(page.locator(".ph-board .ph-row", has_text="Notify endpoint")).to_have_count(0)
+    expect(page.locator(".ph-board .list-row", has_text="Old price list")).to_be_visible()
+    expect(page.locator(".ph-board .list-row", has_text="Notify endpoint")).to_have_count(0)
 
     # The task on a phone is a page: every brief field reachable, nothing sideways.
-    page.locator(".ph-board .ph-row", has_text="Old price list").click()
+    page.locator(".ph-board .list-row", has_text="Old price list").click()
     sheet = page.locator(".ph-taskpage")
     expect(sheet).to_be_visible()
     # A part nobody wrote is offered once, under the others, and opens its editor in place.

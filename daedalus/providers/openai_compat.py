@@ -1293,6 +1293,14 @@ class OpenAICompatibleProvider(ILLMProvider):
     def _url(self, path: str) -> str:
         return self.endpoint.base_url.rstrip("/") + path
 
+    async def probe_models(self, timeout: httpx.Timeout) -> httpx.Response:
+        """One read of this endpoint's model list, sent as a request is: through this adapter's client
+        (its TLS context, no redirects) with its headers and its key, to the address a completion uses.
+
+        The listing is the cheapest call every kind of endpoint answers, which costs nothing and lets the
+        operator know that the address, the key and the network all work before a run finds out."""
+        return await self._client.get(self._url("/models"), headers=self._headers(), timeout=timeout)
+
     def _headers(self, request: LLMRequest | None = None, account: str = "") -> dict[str, str]:
         # The key proxy meters calls that do not carry this mark (a shell's curl); the bot records its own.
         headers = {"content-type": "application/json", "x-daedalus-metered": "1", **self.endpoint.extra_headers, **account_header(account)}

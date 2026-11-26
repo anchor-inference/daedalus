@@ -30,6 +30,7 @@ from playwright.sync_api import Page, sync_playwright
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api_stub import DEFAULT_APP, expect_app  # noqa: E402
 from screenshots import CAPABILITIES, S1, UNHANDLED, ago, detail, respond, stub  # noqa: E402
+from waiting import until  # noqa: E402
 
 BASE = os.environ.get("APP_URL", DEFAULT_APP)
 CHROMIUM = os.environ.get("CHROMIUM", "/usr/local/bin/chromium")
@@ -123,8 +124,10 @@ def desktop(browser, native: bool) -> list[str]:  # type: ignore[no-untyped-def]
     if str(len(CHANGED)) not in text:
         problems.append(f"the line does not count the {len(CHANGED)} changed files ({text!r})")
     height = summary.evaluate("(el) => Math.round(el.getBoundingClientRect().height)")
-    if height > 32:
-        problems.append(f"the changed-files line is {height} px tall, more than one compact row")
+    # One 52 px card the column's width, the count and its lines on one row: the design's changed-files
+    # card (it was a 32 px line). Taller is a second row, which is what twenty-three cards once were.
+    if height > 52:
+        problems.append(f"the changed-files card is {height} px tall, more than its one 52 px row")
     if turn.locator(".changed-file").count():
         problems.append("the changed files are listed before the line is opened")
     page.evaluate("() => document.querySelector('.turn:last-child .changed-files-head')?.scrollIntoView({ block: 'center' })")
@@ -179,7 +182,7 @@ def desktop(browser, native: bool) -> list[str]:  # type: ignore[no-untyped-def]
         problems.append(f"{'native' if native else 'server'}: the session menu {'lacks' if native else 'offers'} the workspace in the file manager")
     if native and item.count():
         item.click()
-        page.wait_for_timeout(400)
+        until(page, lambda: bool(reveals))
         if not reveals or reveals[-1] != {"session_id": S1, "run": True}:
             problems.append(f"the session menu did not ask the host for the workspace ({reveals[-1:]})")
     else:
@@ -213,16 +216,16 @@ def phone(browser, native: bool) -> list[str]:  # type: ignore[no-untyped-def]
     summary.click()
     sheet = page.locator(".changed-files-sheet")
     sheet.wait_for(timeout=5000)
-    rows = sheet.locator(".ph-row")
+    rows = sheet.locator(".list-row")
     if rows.count() != len(CHANGED):
         problems.append(f"phone: the sheet lists {rows.count()} rows, not {len(CHANGED)}")
-    first_title = rows.first.locator(".ph-row-t").inner_text()
+    first_title = rows.first.locator(".list-row-t").inner_text()
     if first_title.startswith("/"):
         problems.append(f"phone: a row shows an absolute path ({first_title!r})")
     page.wait_for_timeout(500)
     shot(page, "turn-files-phone-sheet")
     rows.first.dispatch_event("contextmenu")
-    actions = page.locator(".ph-actions [role=menu] .ph-mrow")
+    actions = page.locator(".menu-sheet [role=menu] .menu-row")
     actions.first.wait_for(timeout=3000)
     labels = actions.all_inner_texts()
     print("phone actions:", labels)

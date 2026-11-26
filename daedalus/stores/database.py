@@ -69,6 +69,7 @@ from daedalus.stores.lifecycle_schema import MIGRATION as LIFECYCLE_MIGRATION
 from daedalus.stores.orchestrator_contract_schema import MIGRATION as ORCHESTRATOR_CONTRACT_MIGRATION
 from daedalus.stores.phase_clock_schema import MIGRATION as PHASE_CLOCK_MIGRATION
 from daedalus.stores.planning_schema import MIGRATION as PLANNING_MIGRATION
+from daedalus.stores.project_approval_schema import MIGRATION as PROJECT_APPROVAL_MIGRATION
 from daedalus.stores.provider_hold_schema import MIGRATION as PROVIDER_HOLD_MIGRATION
 from daedalus.stores.receipt_request_schema import MIGRATION as RECEIPT_REQUEST_MIGRATION
 from daedalus.stores.recurring_schema import MIGRATION as RECURRING_MIGRATION
@@ -84,6 +85,8 @@ from daedalus.stores.schedule_file_pin_schema import MIGRATION as SCHEDULE_FILE_
 from daedalus.stores.schedule_proposal_schema import MIGRATION as SCHEDULE_PROPOSAL_MIGRATION
 from daedalus.stores.staff_context_schema import MIGRATION as STAFF_CONTEXT_SCHEMA
 from daedalus.stores.staff_report_schema import MIGRATION as STAFF_REPORT_MIGRATION
+from daedalus.stores.task_history import SQL as TASK_HISTORY_SQL
+from daedalus.stores.task_history import backfill as backfill_task_history
 from daedalus.stores.update_drain_schema import MIGRATION as UPDATE_DRAIN_MIGRATION
 from daedalus.stores.watch_authority_schema import MIGRATION as WATCH_AUTHORITY_MIGRATION
 from daedalus.stores.watch_delivery_schema import WATCH_DELIVERY_MIGRATION
@@ -4148,7 +4151,7 @@ async def _session_vision(conn: aiosqlite.Connection) -> None:
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision))
 
-# 173 — how hard that vision model thinks. NULL follows ``[vision] effort``, as the preset's NULL follows
+# How hard the session's vision model thinks. NULL follows ``[vision] effort``, as the preset's NULL follows
 # ``[vision] preset``; its own column for the same reason as the preset's.
 async def _session_vision_effort(conn: aiosqlite.Connection) -> None:
     """Added only when it is missing, for the reason ``_usage_speed`` gives."""
@@ -4158,6 +4161,46 @@ async def _session_vision_effort(conn: aiosqlite.Connection) -> None:
 
 
 MIGRATIONS.append(DataMigration("SELECT 1;", _session_vision_effort))
+
+# The board filtered by the chat that created a task. ``origin_session_id`` has had no index
+# since it was added: the only board index is by project. A chat's own board, and the plan the
+# board exports for a chat's family, read every task of the installation to find a handful. The
+# column is NULL for a task the operator posted outside any chat, which the index simply holds.
+MIGRATIONS.append("""
+CREATE INDEX IF NOT EXISTS board_tasks_by_origin ON board_tasks(origin_session_id);
+""")
+
+# A due date, the operator as an assignee, and a task's own history. ``due_at`` is an instant in UTC
+# (NULL: no date). ``assignee_operator`` marks a card the operator does themselves; it excludes a
+# staff assignee, so a card has one owner or none, and the CHECK says so where a bug cannot get past it.
+# The history reads the stored ``task.*`` events by the ``task_id`` in their payload; with no
+# column for it that was a scan of the whole event table, so the index is over the extracted id,
+# and only over events that have one.
+async def _task_extras(conn: aiosqlite.Connection) -> None:
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(board_tasks)")).fetchall()}
+    if "due_at" not in present:
+        await conn.execute("ALTER TABLE board_tasks ADD COLUMN due_at TEXT")
+    if "assignee_operator" not in present:
+        await conn.execute("ALTER TABLE board_tasks ADD COLUMN assignee_operator INTEGER NOT NULL DEFAULT 0"
+                           " CHECK (assignee_operator IN (0, 1) AND (assignee_operator = 0 OR assignee_staff_id IS NULL))")
+    await conn.execute("CREATE INDEX IF NOT EXISTS app_events_by_task ON app_events(json_extract(payload_json, '$.task_id'), seq)"
+                       " WHERE json_extract(payload_json, '$.task_id') IS NOT NULL")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _task_extras))
+
+# "Allow similar calls in this project". A standing approval used to live in one session's
+# metadata and end with it; a project's own is a row of its own, so every chat of the project, the
+# ones started later and the team's members among them, reads the same list, and it goes with the
+# project: the foreign key removes the rows when the project is removed.
+MIGRATIONS.append(PROJECT_APPROVAL_MIGRATION)
+
+# A card's own history, written by triggers in the transaction of each change (``task_history``),
+# instead of read back from the event ring, which keeps a week and never held the changes made
+# without an event. The cards that exist get what can still be told of them, marked backfilled; the
+# ring's index by task goes, since nothing reads the ring by task any more.
+MIGRATIONS.append(DataMigration(TASK_HISTORY_SQL, backfill_task_history))
 
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session

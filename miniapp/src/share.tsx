@@ -6,7 +6,7 @@ import { useState } from "react";
 import { api, ShareMode, ShareView } from "./api";
 import { useCopied } from "./ui/components";
 import { Sheet } from "./ui/dialogs";
-import { Icon } from "./icons";
+import { Button } from "./ui/primitives";
 import { t } from "./i18n";
 import { confirmAsync, errorText } from "./ui";
 import { LiveLinkSection } from "./livelink";
@@ -48,7 +48,7 @@ export function ShareSheet({
   }
 
   return (
-    <Sheet title={t("session.share.title")} onClose={onClose} size="narrow">
+    <Sheet title={t("session.share.title")} onClose={onClose} size="md">
       <div className="access-options" role="radiogroup" aria-label={t("session.share.title")}>
         {MODES.map((item) => (
           <label key={item} className={`access-option ${mode === item ? "on" : ""}`}>
@@ -64,18 +64,18 @@ export function ShareSheet({
       {!share?.public_base && mode !== "local" && <div className="sub share-warn">{t("svc.nopublic")}</div>}
       {mode !== "local" && share?.url && (
         <>
-          <label className="field">{t("svc.link")}</label>
+          <label className="link-label" htmlFor="share-url">{t("svc.link")}</label>
           <div className="share-field">
-            <input className="field mono" readOnly value={share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
-            <button className="btn small" onClick={() => void copy(share.url!, "link")}><Icon name={copied === "link" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
+            <input id="share-url" className="field mono" readOnly value={share.url} onFocus={(e) => e.target.select()} aria-label={t("svc.sharelink")} />
+            <Button icon={copied === "link" ? "check" : "copy"} onClick={() => void copy(share.url!, "link")}>{t("common.copy")}</Button>
           </div>
           {mode === "key" && share.key && (
             <>
-              <label className="field">{t("svc.key")}</label>
+              <label className="link-label" htmlFor="share-key">{t("svc.key")}</label>
               <div className="share-field">
-                <input className="field mono" readOnly value={share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
-                <button className="btn small" onClick={() => void copy(share.key!, "key")}><Icon name={copied === "key" ? "check" : "copy"} size={13} /> {t("common.copy")}</button>
-                <button className="btn small" disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</button>
+                <input id="share-key" className="field mono" readOnly value={share.key} onFocus={(e) => e.target.select()} aria-label={t("svc.sharekey")} />
+                <Button icon={copied === "key" ? "check" : "copy"} onClick={() => void copy(share.key!, "key")}>{t("common.copy")}</Button>
+                <Button disabled={busy} onClick={() => setMode("key", true)} title={t("svc.newkey.title")}>{t("svc.newkey")}</Button>
               </div>
             </>
           )}

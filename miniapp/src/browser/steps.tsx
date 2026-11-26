@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrowserDraft, BrowserSiteNote, BrowserStep, BrowserWorkflow } from "../api";
 import { Popover } from "../ui/dialogs";
+import { Switch } from "../ui/primitives";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { confirmAsync, errorText, haptic } from "../ui";
@@ -56,24 +57,24 @@ export function RecordButton({ group, toast }: { group: string; toast: (text: st
   };
   return (
     <>
-      <button type="button" className="btn small bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" aria-label={t("browser.steps.record")} title={t("browser.steps.record.title")}>
+      <button type="button" className="btn bp-rec-btn" onClick={(e) => setAnchor(e.currentTarget)} aria-haspopup="dialog" aria-label={t("browser.steps.record")} title={t("browser.steps.record.title")}>
         <span className="bp-rec-dot" aria-hidden="true" />
         <span className="bp-rec-label">{t("browser.steps.record")}</span>
       </button>
       {anchor && (
-        <Popover anchor={anchor} onClose={() => setAnchor(null)} align="right" className="bp-rec-start" label={t("browser.steps.start.head")}>
+        <Popover anchor={anchor} onClose={() => setAnchor(null)} align="end" className="bp-rec-start" label={t("browser.steps.start.head")}>
           <div className="bp-rec-start-head">{t("browser.steps.start.head")}</div>
           <p>{t("browser.steps.start.body")}</p>
           <p className="bp-rec-start-secret"><Icon name="lock" size={13} /> <span>{t("browser.steps.start.secret")}</span></p>
-          <label className="bp-rec-start-keep">
-            <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+          <div className="bp-rec-start-keep">
             <span>
               <b>{t("browser.steps.start.values")}</b>
               <span className="sub">{t("browser.steps.start.values.sub")}</span>
             </span>
-          </label>
+            <Switch checked={keep} onChange={setKeep} label={t("browser.steps.start.values")} />
+          </div>
           <div className="bp-rec-start-foot">
-            <button type="button" className="btn small primary" disabled={busy} onClick={() => void start()}>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => void start()}>
               <span className="bp-rec-dot" aria-hidden="true" />
               {t("browser.steps.start.go")}
             </button>
@@ -160,9 +161,9 @@ export function RecordedCard({ group, recording, toast, onDraft, onSkill }: { gr
       {open && <StepList steps={recording.steps} />}
       <form className="bp-rec-foot" onSubmit={(e) => { e.preventDefault(); void make(); }}>
         <input className="bp-rec-goal" value={goal} maxLength={300} onChange={(e) => setGoal(e.target.value)} aria-label={t("browser.steps.goal")} placeholder={t("browser.steps.goal.placeholder")} />
-        <button type="submit" className="btn small primary" disabled={busy}>{t(busy ? "browser.steps.drafting" : "browser.steps.draft")}</button>
-        <button type="button" className="btn small bp-rec-skill" disabled={busy} title={t("browser.skill.open.title")} onClick={() => onSkill(recording)}>{t("browser.skill.open")}</button>
-        <button type="button" className="btn small bp-rec-discard" disabled={busy} onClick={() => void discard()}>{t("browser.steps.discard")}</button>
+        <button type="submit" className="btn primary" disabled={busy}>{t(busy ? "browser.steps.drafting" : "browser.steps.draft")}</button>
+        <button type="button" className="btn bp-rec-skill" disabled={busy} title={t("browser.skill.open.title")} onClick={() => onSkill(recording)}>{t("browser.skill.open")}</button>
+        <button type="button" className="btn bp-rec-discard" disabled={busy} onClick={() => void discard()}>{t("browser.steps.discard")}</button>
       </form>
     </section>
   );
@@ -222,27 +223,27 @@ export function ProcedureEditor({ draft, toast, onDone }: { draft: BrowserDraft 
       <textarea id={`bp-proc-text-${note.id}`} ref={field} className="bp-proc-text" rows={10} value={text} maxLength={4000} onChange={(e) => setText(e.target.value)} />
       {note.status === "active" ? (
         <div className="bp-proc-foot">
-          <button type="button" className="btn small primary" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
+          <button type="button" className="btn primary" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
             await editNote(note.id, text, title);
             onDone();
           })}>{t("browser.steps.save")}</button>
-          <button type="button" className="btn small" disabled={busy} onClick={onDone}>{t("bs.notes.cancel")}</button>
+          <button type="button" className="btn" disabled={busy} onClick={onDone}>{t("bs.notes.cancel")}</button>
         </div>
       ) : (
       <div className="bp-proc-foot">
-        <button type="button" className="btn small primary" disabled={busy || !text.trim() || !title.trim()} onClick={() => void run(async () => {
+        <button type="button" className="btn primary" disabled={busy || !text.trim() || !title.trim()} onClick={() => void run(async () => {
           if (changed) await editNote(note.id, text, title);
           await approveNote(note.id);
           onDone();
         })}>{t("browser.steps.approve")}</button>
-        <button type="button" className="btn small" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
+        <button type="button" className="btn" disabled={busy || !changed || !text.trim() || !title.trim()} onClick={() => void run(async () => {
           await editNote(note.id, text, title);
         })}>{t("browser.steps.save")}</button>
-        <button type="button" className="btn small" disabled={busy} title={t("browser.steps.later.title")} onClick={() => void run(async () => {
+        <button type="button" className="btn" disabled={busy} title={t("browser.steps.later.title")} onClick={() => void run(async () => {
           if (changed) await editNote(note.id, text, title);
           onDone();
         })}>{t("browser.steps.later")}</button>
-        <button type="button" className="btn small danger" disabled={busy} onClick={() => void run(async () => {
+        <button type="button" className="btn danger" disabled={busy} onClick={() => void run(async () => {
           await deleteNote(note.id);
           onDone();
         })}>{t("browser.steps.discard")}</button>

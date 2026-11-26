@@ -10,11 +10,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "./i18n";
 import { prime } from "./store";
 import { TurnFiles } from "./artifact";
-import { placeOf, turnFiles } from "./turnfiles";
+import { lineChange, placeOf, replacedLines, sumLines, turnFiles } from "./turnfiles";
 import { RevealButton } from "./reveal";
 import type { Activity } from "./turns";
 
 const tool = (id: string, name: string, path: string, extra: Partial<Extract<Activity, { kind: "tool" }>> = {}): Activity => ({ kind: "tool", id, name, args: { path }, result: "ok", running: false, ...extra });
+
+describe("the lines a turn changed", () => {
+  // The changed-files card and the edit steps say "+48 −12". Counted from each call's own text: the
+  // lines both sides of a replacement share at the top and the bottom are context, not change.
+  it("counts a replacement by the lines that differ, not by both sides whole", () => {
+    expect(replacedLines("a\nb\nc", "a\nB\nc")).toEqual({ added: 1, removed: 1 });
+    expect(replacedLines("a\nc", "a\nb1\nb2\nc")).toEqual({ added: 2, removed: 0 });
+    expect(replacedLines("one line", "one line\n")).toEqual({ added: 0, removed: 0 });
+  });
+
+  it("counts a Write as the lines written, a batch edit as its edits, and every match of a replace-all", () => {
+    expect(lineChange("Write", { path: "a", content: "x\ny\nz\n" })).toEqual({ added: 3, removed: 0 });
+    expect(lineChange("Edit", { path: "a", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c\nd", new_string: "" }] })).toEqual({ added: 1, removed: 3 });
+    expect(lineChange("Edit", { path: "a", old_string: "x", new_string: "y", replace_all: true }, "edited a: 4 replacement(s)")).toEqual({ added: 4, removed: 4 });
+  });
+
+  it("says nothing it cannot count: a call with no text, and a sum with one of those in it", () => {
+    expect(lineChange("Exec", { command: "sed -i s/a/b/ f" })).toBeNull();
+    expect(lineChange("Edit", { path: "a" })).toBeNull();
+    expect(sumLines([{ added: 1, removed: 0 }, null])).toBeNull();
+    const { changed } = turnFiles([tool("e1", "Edit", "a.txt", { args: { path: "a.txt", old_string: "x", new_string: "y\nz" } }), tool("e2", "Edit", "a.txt", { args: { path: "a.txt", old_string: "q", new_string: "" } })]);
+    expect(changed[0].lines).toEqual({ added: 2, removed: 2 });
+  });
+});
 
 describe("where a tool's path is", () => {
   it("is relative to the workspace, whichever way the path is written", () => {

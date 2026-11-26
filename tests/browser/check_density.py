@@ -9,13 +9,17 @@ and rows at the three sizes the owner uses.
 The phone has its own claims since the redesign modelled on the chat apps of the operator's phone
 (check_phone): six type steps (12 / 13 / 14 / 15 / 16 / 17) on every drawn text of the home, the
 Chats page, the drawer and the composer's sheets; a 52 px top bar with no rule under it; 54 px list
-rows and 44 px destinations in the drawer; an idle composer of one 44 px row at the bottom of the
-screen; no bottom bar outside a project; and a 44 px target for every control, counting the invisible
-::after that a 34 px circle or a 28 px chip carries. The numbers are a step under the first cut of the
+rows; a drawer that is the sidebar, 330 px wide at 412 with 44 px rows; a composer card whose
+controls are one row of 44 px targets, at rest as while typing; no bottom bar outside a project; and a
+44 px target for every control, counting the invisible ::after that a 40 px circle or a 28 px chip
+carries. The numbers are a step under the first cut of the
 redesign (12 / 13 / 15 / 16 / 17 / 22, a 56 px bar, 60 px rows), which the operator measured as too
 large next to Claude and ChatGPT on the same phone.
 
-The desktop's session header is two lines inside its 48 px since the desktop redesign, the title and
+On every window nothing is drawn under 12 px, the floor the approved design sets for meta and
+labels (the session, the agents list and the phone's Chats page are read for it).
+
+The desktop's session header is two lines inside its 52 px (48 until every header took 52), the title and
 then the project, the model and the live state; the start screen and the projects page that came with
 it have their own claims (check_start).
 
@@ -57,15 +61,18 @@ READ = """
   const one = (...sels) => { for (const s of sels) { const el = document.querySelector(s); if (el) return el; } return null; };
   const all = (...sels) => { for (const s of sels) { const list = document.querySelectorAll(s); if (list.length) return [...list]; } return []; };
   const rows = all('.sidebar .erow', '.session-list-pane .erow', '.agents-screen .erow');
-  const phoneRows = all('.ph-row').map((r) => box(r).h);
+  const phoneRows = all('.list-row').map((r) => box(r).h);
   const single = rows.filter((r) => !r.querySelector('.erow-meta') && !r.querySelector('.erow-line2'));
   const double = rows.filter((r) => r.querySelector('.erow-meta') || r.querySelector('.erow-line2'));
   const acts = all('.act:not(.head)');
-  // The sidebar's own rows: a chat two lines at 44, a project one at 36, a chat under a project 40;
-  // a chat's plate is round and a project's tile square.
+  // The sidebar's own rows: every one a 32 px line, a chat, a chat inside a project and a project alike;
+  // the pinned destinations too.
   const sbChat = all('.sidebar .sb-chat:not(.nested)').map((r) => box(r).h);
   const sbNested = all('.sidebar .sb-chat.nested').map((r) => box(r).h);
   const sbProject = all('.sidebar .sb-prow').map((r) => box(r).h);
+  const sbNav = all('.sidebar .sb-pinned-nav .sb-nav').map((r) => box(r).h);
+  const sbHead = box(one('.sidebar .sidebar-head'));
+  const sbFoot = box(one('.sidebar .sidebar-foot'));
   const radius = (el) => el ? getComputedStyle(el).borderTopLeftRadius : null;
   // Only what is drawn: the desktop-only buttons are display:none on a phone and measure 0×0.
   const icons = all('.chat-head .iconbtn', '.pagehead .iconbtn').filter((el) => el.getBoundingClientRect().width > 0);
@@ -76,11 +83,20 @@ READ = """
     aside: box(one('.session-aside')),
     panel: box(one('.panel')),
     panelTabs: box(one('.panel-tabs')),
+    panelTop: one('.panel') ? Math.round(one('.panel').getBoundingClientRect().top) : null,
+    vh: window.innerHeight,
     headStatus: box(one('.chat-head .head-status')),
     headModel: box(one('.composer .model-select')),
     composerRow: box(one('.composer-row')),
     subMeta: box(one('.chat-head .sub.meta')),
     headSub: box(one('.chat-head .chat-sub')),
+    headTitle: box(one('.chat-head .chat-title')),
+    // How far the run line's middle is from the title's: 0 when they share the line, as they must.
+    subOffset: (() => { const s = one('.chat-head .chat-sub'), t = one('.chat-head .chat-title'); if (!s || !t) return null; const a = s.getBoundingClientRect(), b = t.getBoundingClientRect(); return a.height ? Math.round((a.top + a.height / 2) - (b.top + b.height / 2)) : null; })(),
+    // Where the title's words start, from the main area's edge (the sidebar is draggable, so the window's
+    // x would hold only at its default width), and how much room the scroller gives the stripe.
+    titleX: (() => { const t = one('.chat-head .chat-title'); const m = one('.main'); if (!t || !m) return null; const r = document.createRange(); r.selectNodeContents(t); return Math.round(r.getBoundingClientRect().x - m.getBoundingClientRect().x); })(),
+    scrollRoom: (() => { const s = one('.chat-scroll'); if (!s) return null; const cs = getComputedStyle(s); return Math.round(s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)); })(),
     chat: box(one('.chat')),
     head: box(one('.chat-head')),
     timeline: box(one('.timeline')),
@@ -89,8 +105,7 @@ READ = """
     answerFs: px(one('.answer'), 'fontSize'),
     userFs: px(one('.msg.user'), 'fontSize'),
     userW: box(one('.msg.user')),
-    sbChat, sbNested, sbProject,
-    plate: box(one('.sidebar .sb-chat:not(.nested) .sb-plate')), plateRadius: radius(one('.sidebar .sb-chat:not(.nested) .sb-plate')), tileRadius: radius(one('.sidebar .sb-tile')),
+    sbChat, sbNested, sbProject, sbNav, sbHead, sbFoot,
     rowSingle: single.map((r) => box(r).h),
     rowDouble: double.map((r) => box(r).h),
     rowFs: px(one('.erow-title'), 'fontSize'),
@@ -100,9 +115,24 @@ READ = """
     iconbtn: icons.map(box),
     chips: all('.chat-head .chip').map(box),
     phoneRows,
-    menuBtn: box(one('.rail [data-rail="menu"]', '.sidebar-menu')),
-    rail: box(one('.rail')),
+    small: smallText(),
   };
+  // Every drawn text under the 12 px floor: an element that holds words of its own, is on the
+  // screen and is not hidden. The smallest size drawn, and up to eight offenders by class and words.
+  function smallText() {
+    const out = [];
+    let min = Infinity;
+    for (const el of document.querySelectorAll('body *')) {
+      if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      if (r.width === 0 || r.height === 0 || s.visibility === 'hidden' || s.display === 'none' || el.closest('[aria-hidden="true"], .xterm')) continue;
+      const size = parseFloat(s.fontSize);
+      min = Math.min(min, size);
+      if (size < 12 && out.length < 8) out.push(`${size}px ${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${el.textContent.trim().slice(0, 24)}"`);
+    }
+    return { min: Number.isFinite(min) ? min : null, under: out };
+  }
 }
 """
 
@@ -138,22 +168,22 @@ def measure_agents(browser, width: int, height: int, mobile: bool) -> dict:  # t
     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
     context.add_init_script(OPEN_FOLDERS)
     # A phone's list of chats is the Chats page now; its home holds only the live ones.
-    page = open_page(context, "agents?view=chats", ".ph-row") if mobile else open_page(context, "agents", ".sb-row")
+    page = open_page(context, "agents?view=chats", ".list-row") if mobile else open_page(context, "agents", ".sb-row")
     out = page.evaluate(READ)
     out["vw"] = width
     context.close()
     return out
 
 
-# The width of what stands left of the conversation: the rail, plus the sidebar when it is open.
+# The width of what stands left of the conversation: the sidebar's column when it is open, nothing when folded.
 LEFT = """() => {
   const w = (s) => { const el = document.querySelector(s); return el ? Math.round(el.getBoundingClientRect().width) : 0; };
-  return { rail: w('.desktop-column'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
+  return { column: w('.desktop-column'), sidebar: w('nav.sidebar'), main: Math.round(document.querySelector('.main').getBoundingClientRect().left) };
 }"""
 
 
 def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
-    """The fold and the menu, which are behaviour rather than sizes: the rail left alone, its persistence, the popover's keyboard."""
+    """The fold and the menu, which are behaviour rather than sizes: the sidebar gone, its persistence, the popover's keyboard."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
     context.add_init_script(OPEN_FOLDERS)
     page = open_page(context, f"agents/{S1}", ".sidebar")
@@ -163,20 +193,21 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     page.wait_for_timeout(400)
     out["collapsed"] = page.evaluate(LEFT)
     page.reload()
-    page.wait_for_selector(".rail", timeout=15000)
+    page.wait_for_selector(".sidebar-unfold", timeout=15000)
     page.wait_for_timeout(400)
     out["collapsedAfterReload"] = page.evaluate(LEFT)
     page.keyboard.press("Control+\\")
     page.wait_for_timeout(400)
     out["reopened"] = page.evaluate(LEFT)
 
-    page.locator('.rail [data-rail="menu"]').click()
+    page.locator('.sb-pinned-nav [data-nav="menu"]').click()
     page.wait_for_selector(".navmenu[role='dialog']", timeout=5000)
-    out["menuItems"] = page.locator(".navmenu [data-launch]").count()
+    out["menuItems"] = page.locator(".navmenu .launch-grid .launch-row").count()
+    out["menuChips"] = page.locator(".navmenu .launch-chip").count()
     out["menuLang"] = page.locator(".navmenu .lang").count()
     out["menuFocusInside"] = page.evaluate("() => !!document.activeElement && document.activeElement.matches('.navmenu .launch-field')")
     out["menuBox"] = page.evaluate("() => { const r = document.querySelector('.navmenu').getBoundingClientRect(); return { x: Math.round(r.x), bottom: Math.round(innerHeight - r.bottom), w: Math.round(r.width) }; }")
-    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu .launch-catalogue [data-launch]').getBoundingClientRect().height)")
+    out["menuRow"] = page.evaluate("() => Math.round(document.querySelector('.navmenu .launch-grid .launch-row').getBoundingClientRect().height)")
     page.keyboard.press("ArrowDown")
     page.keyboard.press("ArrowRight")
     out["arrowMoves"] = page.evaluate("() => document.activeElement === document.querySelectorAll('.navmenu [data-launch]')[1]")
@@ -189,7 +220,7 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     page.keyboard.press("Escape")
     page.wait_for_timeout(200)
     out["menuClosed"] = page.locator(".navmenu").count() == 0
-    out["focusBack"] = page.evaluate("() => document.activeElement === document.querySelector('.rail [data-rail=\"menu\"]')")
+    out["focusBack"] = page.evaluate("() => document.activeElement === document.querySelector('.sb-pinned-nav [data-nav=\"menu\"]')")
     page.keyboard.press("Control+Shift+M")
     page.wait_for_timeout(300)
     out["shortcutOpens"] = page.locator(".navmenu[role='dialog']").count() == 1
@@ -201,6 +232,37 @@ def check_sidebar(browser) -> dict:  # type: ignore[no-untyped-def]
     out["gKeyNavigates"] = page.evaluate("() => location.pathname").endswith("/inbox")
     context.close()
     return out
+
+
+PAGE_ROUTES = ["inbox", "board", "usage", "health", "memory", "services", "changes", "schedules", "canvas", "harnesses", "terminals"]
+
+
+def check_page_header(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
+    """Every full page's header is one 52 px row with its title 24 px in from the main area's left
+    edge, at a laptop and an ultrawide width. Measured from the main area, not the window: the sidebar
+    is draggable, so "x = 324" holds only at its default width. The header once followed the page's
+    column (padded in to its edge), which put the titles at six different positions."""
+    problems: list[str] = []
+    measured: dict = {}
+    for width in (1366, 1920):
+        context = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="dark")
+        for route in PAGE_ROUTES:
+            page = open_page(context, route, ".pagehead h1")
+            m = page.evaluate("""() => {
+              const main = document.querySelector('.main').getBoundingClientRect();
+              const head = document.querySelector('.pagehead').getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(document.querySelector('.pagehead h1'));
+              return { titleX: Math.round(range.getBoundingClientRect().x - main.x), height: Math.round(head.height) };
+            }""")
+            measured[f"{route}-{width}"] = m
+            if m["titleX"] != 24:
+                problems.append(f"{route} at {width}: the title starts {m['titleX']} px from the main area's edge, not 24")
+            if m["height"] != 52:
+                problems.append(f"{route} at {width}: the header is {m['height']} px high, not 52")
+            page.close()
+        context.close()
+    return problems, measured
 
 
 def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
@@ -235,9 +297,9 @@ def check_browser_preview(browser) -> list[str]:  # type: ignore[no-untyped-def]
 
 
 def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
-    """Settings' column and rows as drawn: inside the dialog the section takes the pane's whole width
-    (the dialog is already the reading width; the page's centred 960 px column went with the page), a
-    row is at least the touch height, and a phone does not scroll sideways."""
+    """Settings' frame, column and rows as drawn: a page whose list of sections is the sidebar's 300 px,
+    a 52 px header, the section in a centred 880 px column (the pane less 24 px a side when that is
+    narrower), a row at least the touch height, and a phone that does not scroll sideways."""
     problems: list[str] = []
     for width, height, mobile in ((1920, 1080, False), (1180, 820, False), (390, 844, True)):
         context = browser.new_context(viewport={"width": width, "height": height}, color_scheme="dark", is_mobile=mobile, has_touch=mobile)
@@ -246,19 +308,26 @@ def check_settings(browser) -> list[str]:  # type: ignore[no-untyped-def]
           const col = document.querySelector('.settings-col').getBoundingClientRect();
           const main = document.querySelector('.settings-main');
           const pane = main ? main.getBoundingClientRect() : null;
+          const nav = document.querySelector('.settings-nav');
+          const head = document.querySelector('.settings-head');
           const rows = [...document.querySelectorAll('.settings-row')].map((r) => {
             const b = r.getBoundingClientRect();
             const ctl = r.querySelector('.settings-row-ctl');
             return { h: Math.round(b.height), right: Math.round(b.right), ctlRight: ctl ? Math.round(ctl.getBoundingClientRect().right) : null };
           });
           return { col: { x: Math.round(col.x), w: Math.round(col.width), r: Math.round(col.right) }, pane: pane ? { x: Math.round(pane.x), w: Math.round(pane.width) } : null, rows,
+                   nav: nav ? Math.round(nav.getBoundingClientRect().width) : null, head: head ? Math.round(head.getBoundingClientRect().height) : null,
                    scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth] };
         }""")
         print(f"settings-{width}", json.dumps({k: v for k, v in m.items() if k != "rows"}), f"{len(m['rows'])} rows")
         if m["pane"]:
-            want = m["pane"]["w"]
+            want = min(880, m["pane"]["w"] - 48)
             if abs(m["col"]["w"] - want) > 1:
-                problems.append(f"settings {width}: the column is {m['col']['w']}px, not the pane's {want}")
+                problems.append(f"settings {width}: the column is {m['col']['w']}px, not {want}")
+            if m["nav"] != 300:
+                problems.append(f"settings {width}: the list of sections is {m['nav']}px, not the sidebar's 300")
+            if m["head"] != 52:
+                problems.append(f"settings {width}: the header is {m['head']}px, not 52")
             if abs((m["col"]["x"] - m["pane"]["x"]) - (m["pane"]["x"] + m["pane"]["w"] - m["col"]["r"])) > 2:
                 problems.append(f"settings {width}: the column is off centre {m['col']} in {m['pane']}")
         for row in m["rows"]:
@@ -294,11 +363,14 @@ READ_PHONE = """
   const targets = [];
   for (const el of root.querySelectorAll('button, a[href], [role="link"], [role="radio"], input, textarea')) {
     if (!vis(el) || el.closest('[inert]') || el.type === 'file') continue;
+    // The form shadow a Base UI switch keeps beside itself: a 1 px input, hidden from the reader and
+    // out of the tab order. The switch itself is the target, and is measured as one.
+    if (el.tagName === 'INPUT' && el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) continue;
     const r = el.getBoundingClientRect();
     let w = r.width, h = r.height;
-    // The composer's field is 34 px inside its 44 px pill, and a tap on the pill focuses the field.
-    const pill = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
-    if (pill) h = Math.max(h, pill.getBoundingClientRect().height);
+    // The composer's field is one line inside its card, and a tap on the card focuses the field.
+    const card = el.tagName === 'TEXTAREA' ? el.closest('.composer[data-shape] .composer-box') : null;
+    if (card) h = Math.max(h, card.getBoundingClientRect().height);
     const after = getComputedStyle(el, '::after');
     if (after.content !== 'none' && after.position === 'absolute') {
       const px = (v) => (v.endsWith('px') ? parseFloat(v) : 0);
@@ -315,12 +387,13 @@ READ_PHONE = """
     topBorder: top ? parseFloat(getComputedStyle(top).borderBottomWidth) : null,
     topBg: top ? getComputedStyle(top).backgroundColor : null,
     pageBg: getComputedStyle(document.body).backgroundColor,
-    idle: rect('.composer[data-shape="idle"] .composer-box'),
-    open: rect('.composer[data-shape="open"] .composer-box'),
+    card: rect('.composer[data-shape] .composer-box'),
+    composerRow: rect('.composer[data-shape] .composer-row'),
     circle: rect('.composer[data-shape] .roundbtn'),
-    rows: [...document.querySelectorAll('.ph-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
+    sbrows: [...document.querySelectorAll('.ph-page .sb-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
+    rows: [...document.querySelectorAll('.list-row')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
     chips: [...document.querySelectorAll('.ph-chip')].filter(vis).map((r) => Math.round(r.getBoundingClientRect().height)),
-    nav: [...document.querySelectorAll('.ph-drawer-root.open .ph-nrow')].map((r) => Math.round(r.getBoundingClientRect().height)),
+    nav: [...document.querySelectorAll('.ph-drawer-root.open .sb-pinned-nav .sb-nav')].map((r) => Math.round(r.getBoundingClientRect().height)),
     drawer: rect('.ph-drawer-root.open .ph-drawer'),
     tabbar: document.querySelectorAll('nav.tabbar').length,
     scroll: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
@@ -367,12 +440,12 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
             problems.append(f"home {lang}: the top bar has a {m['topBorder']} px rule")
         if m["topBg"] != m["pageBg"]:
             problems.append(f"home {lang}: the top bar {m['topBg']} is not the page colour {m['pageBg']}")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"home {lang}: the idle composer is {m['idle']}, not one 44 px row")
-        elif m["idle"]["b"] > 24:
-            problems.append(f"home {lang}: the idle composer stands {m['idle']['b']} px above the bottom")
-        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (34, 34):
-            problems.append(f"home {lang}: the white circle is {m['circle']}, not 34 × 34")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"home {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        elif m["card"]["b"] > 24:
+            problems.append(f"home {lang}: the composer stands {m['card']['b']} px above the bottom")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"home {lang}: the send circle is {m['circle']}, not 40 × 40")
         if m["tabbar"]:
             problems.append(f"home {lang}: a bottom bar is still drawn")
         for h in m["rows"]:
@@ -381,9 +454,7 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
 
         page.locator(".ph-home .composer .composer-field").fill("Wire the order form to the sheet")
         page.wait_for_timeout(300)
-        m = read("composer-open", ".ph-home .composer")
-        if not m["open"]:
-            problems.append(f"composer {lang}: typing does not open the composer onto its toolbar")
+        read("composer-typed", ".ph-home .composer")
         # The mic stays beside Send once something is typed: hiding it left no way to dictate the rest.
         mic = page.locator(".ph-home .composer .composer-tools > .mic")
         if mic.count() and not mic.is_visible():
@@ -394,8 +465,10 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         page.wait_for_selector(".ph-drawer-root.open", timeout=5000)
         page.wait_for_timeout(400)
         m = read("drawer", ".ph-drawer-root.open")
-        if not m["drawer"] or m["drawer"]["w"] != 336:
-            problems.append(f"drawer {lang}: {m['drawer']}, not 336 wide at 412")
+        if not m["drawer"] or m["drawer"]["w"] != 330:
+            problems.append(f"drawer {lang}: {m['drawer']}, not 330 wide at 412")
+        if not m["nav"]:
+            problems.append(f"drawer {lang}: no pinned rows of the sidebar in it")
         if any(h != 44 for h in m["nav"]):
             problems.append(f"drawer {lang}: destination rows {m['nav']}, not 44")
         page.keyboard.press("Escape")
@@ -403,24 +476,24 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
         if page.locator(".ph-drawer-root.open").count():
             problems.append(f"drawer {lang}: Escape does not close it")
 
-        go("agents?view=chats", ".ph-row")
+        go("agents?view=chats", ".list-row")
         m = read("chats", ".ph-chats")
         if any(h != 54 for h in m["rows"]):
             problems.append(f"chats {lang}: rows {sorted(set(m['rows']))}, not 54")
         if any(h != 28 for h in m["chips"]):
             problems.append(f"chats {lang}: chips {sorted(set(m['chips']))}, not 28")
-        page.locator(".ph-row-more").first.click()
-        page.wait_for_selector(".ph-actions", timeout=5000)
+        page.locator(".list-row-more").first.click()
+        page.wait_for_selector(".menu-sheet", timeout=5000)
         page.wait_for_timeout(300)
-        read("row-sheet", ".ph-actions")
+        read("row-sheet", ".menu-sheet")
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
         # The same sheet on a finger held still, and the quick actions on a swipe to the left.
-        row = ".ph-chats .ph-row"
+        row = ".ph-chats .list-row"
         page.evaluate("""(sel) => { const el = document.querySelector(sel); const r = el.getBoundingClientRect();
           el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', clientX: r.x + 120, clientY: r.y + 20 })); }""", row)
         page.wait_for_timeout(700)
-        if not page.locator(".ph-actions").count():
+        if not page.locator(".menu-sheet").count():
             problems.append(f"chats {lang}: a long press does not open the row's sheet")
         page.evaluate("(sel) => document.querySelector(sel).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }))", row)
         page.keyboard.press("Escape")
@@ -429,25 +502,37 @@ def check_phone(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-d
           const at = (type, x) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', clientX: x, clientY: r.y + 20 }));
           at('pointerdown', r.x + 300); at('pointermove', r.x + 280); at('pointermove', r.x + 200); at('pointermove', r.x + 60); at('pointerup', r.x + 60); }""", row)
         page.wait_for_timeout(400)
-        if page.locator(".ph-swipe.end .ph-swipe-act").count() < 2:
+        if page.locator(".list-row-swipe.end .list-row-swipe-act").count() < 2:
             problems.append(f"chats {lang}: a swipe to the left does not reveal the row's quick actions")
 
         # The session: the same 52 px bar with a two-line title and at most two glyphs, the answer's
         # icon row in 44 px targets, the idle composer, and the ⋮ sheet with its tiles.
         go(f"agents/{S1}", ".ph-chat-top")
         m = read("session", ".chat")
+        if not m["card"] or not m["composerRow"] or m["composerRow"]["h"] != 44:
+            problems.append(f"session {lang}: the composer is {m['card']} with a row of {m['composerRow']}, not a card over one 44 px row")
+        if not m["circle"] or (m["circle"]["w"], m["circle"]["h"]) != (40, 40):
+            problems.append(f"session {lang}: the send circle is {m['circle']}, not 40 × 40")
+        before = m["card"]
+        page.locator(".chat .composer .composer-field").first.click()
+        page.wait_for_timeout(200)
+        after = page.evaluate(READ_PHONE, ".chat")["card"]
+        if before and after and before["h"] != after["h"]:
+            problems.append(f"session {lang}: the composer is {before['h']} px at rest and {after['h']} px once the field has the reader")
+        page.keyboard.press("Escape")
         top = page.locator(".ph-chat-top").bounding_box()
         if not top or round(top["height"]) != 52:
             problems.append(f"session {lang}: the bar is {top}, not 52 tall")
         if page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top')).borderBottomWidth)"):
             problems.append(f"session {lang}: the bar has a rule under it")
-        glyphs = page.locator(".ph-chat-top .ph-top-actions > *").count()
+        glyphs = page.locator(".ph-chat-top .pagehead-actions > *").count()
         if glyphs > 2:
             problems.append(f"session {lang}: {glyphs} glyphs at the right of the bar, more than two")
-        if not page.locator(".ph-chat-top .ph-top-sub").count():
-            problems.append(f"session {lang}: the title has no second line")
-        if not m["idle"] or m["idle"]["h"] != 44:
-            problems.append(f"session {lang}: the idle composer is {m['idle']}, not one 44 px row")
+        # The title is 15 px with the 12 px line of where the chat lives over it, when it lives
+        # somewhere of another name than its own.
+        title = page.evaluate("parseFloat(getComputedStyle(document.querySelector('.ph-chat-top .pagehead-t')).fontSize)")
+        if title != 15:
+            problems.append(f"session {lang}: the title is {title} px, not 15")
         page.locator(".ph-chat-top button[aria-haspopup='menu']").click()
         page.wait_for_selector(".ph-session-menu .ph-tile", timeout=5000)
         page.wait_for_timeout(300)
@@ -527,12 +612,12 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
                 problems.append(f"{name} {lang}: the page scrolls sideways {m['scroll']}")
             return m
 
-        go("orchestration/projects", ".ph-orch .ph-row")
+        go("orchestration/projects", ".ph-orch .sb-row")
         m = read("orchestration", ".ph-orch")
         if not m["top"] or m["top"]["h"] != 52:
             problems.append(f"orchestration {lang}: the top bar is {m['top']}, not 52 tall")
-        if any(h != 54 for h in m["rows"]):
-            problems.append(f"orchestration {lang}: rows {sorted(set(m['rows']))}, not 54")
+        if any(h != 44 for h in m["sbrows"]):
+            problems.append(f"orchestration {lang}: rows {sorted(set(m['sbrows']))}, not 44")
 
         go(f"project/{pid}", ".needs-card")
         read("needs card", ".needs-card")
@@ -542,7 +627,7 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
         read("decision sheet", ".ph-decisions")
         page.keyboard.press("Escape")
 
-        go(f"project/{pid}/board", ".ph-board .ph-row")
+        go(f"project/{pid}/board", ".ph-board .list-row")
         m = read("board", ".ph-board")
         if not m["top"] or m["top"]["h"] != 52:
             problems.append(f"board {lang}: the top bar is {m['top']}, not 52 tall")
@@ -550,18 +635,18 @@ def check_phone_project(browser) -> tuple[list[str], dict]:  # type: ignore[no-u
             problems.append(f"board {lang}: chips {sorted(set(m['chips']))}, not 28")
         if any(h < 54 for h in m["rows"]):
             problems.append(f"board {lang}: a row is shorter than 54: {sorted(set(m['rows']))}")
-        page.locator(".ph-board .ph-row.ph-task:not(.need) .ph-row-more").first.tap()
+        page.locator(".ph-board .list-row.ph-task:not(.need) .list-row-more").first.tap()
         page.wait_for_selector(".ph-task-menu", timeout=5000)
         page.wait_for_timeout(300)
         read("task sheet", ".ph-task-menu")
         page.keyboard.press("Escape")
-        page.locator("nav.project-tabs button[data-tab='more']").tap()
-        page.wait_for_selector(".ph-more-sheet", timeout=5000)
+        page.locator("nav.project-tabs [data-tab='more']").tap()
+        page.wait_for_selector(".more-sheet", timeout=5000)
         page.wait_for_timeout(300)
-        read("more sheet", ".ph-more-sheet")
+        read("more sheet", ".more-sheet")
         page.keyboard.press("Escape")
 
-        go(f"project/{pid}/attention", ".ph-attention .ph-row")
+        go(f"project/{pid}/attention", ".ph-attention .list-row")
         read("needs decision", ".ph-attention")
 
         go(f"project/{pid}/board?task=t-endpoint", ".ph-taskpage .ph-decide .ph-btn")
@@ -578,52 +663,67 @@ def judge(m: dict) -> list[str]:
     # took 14 in.
     if m["body"] != 14:
         problems.append(f"{m['vw']}: body is {m['body']}px, not 14")
+    # Nothing drawn under 12 px, the design's floor for meta and labels: 11 px was the smallest step
+    # until then, and a fifth of the drawn text used it.
+    if m["small"]["under"]:
+        problems.append(f"{m['vw']}: text under the 12 px floor: {m['small']['under']}")
     if not phone:
-        # 52 px of rail and the 288 px column: 272 until the rows went to two lines, where a Russian
-        # title was cut at eighteen characters.
-        if not m["left"] or m["left"]["w"] != 340:
-            problems.append(f"{m['vw']}: the left column is {m['left']}, not 340 wide")
-        for name, rows, want in (("chat", m["sbChat"], 44), ("nested chat", m["sbNested"], 40), ("project", m["sbProject"], 36)):
+        # The 300 px column the design opens the sidebar at, alone: the 52 px rail of icons beside it
+        # is gone (288 before, and 272 until the rows went to two lines). The operator's drag still
+        # moves it; this is the default.
+        if not m["left"] or m["left"]["w"] != 300:
+            problems.append(f"{m['vw']}: the left column is {m['left']}, not 300 wide")
+        # Every row is the 32 px one-line row every list shares: a chat was two lines of 44 (40 under a
+        # project) with its model and host on the second line, which went to the row's tooltip.
+        for name, rows in (("chat", m["sbChat"]), ("nested chat", m["sbNested"]), ("project", m["sbProject"]), ("pinned", m["sbNav"])):
             for h in rows:
-                if h != want:
-                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not {want}")
-        if not m["sbChat"] or not m["sbProject"]:
-            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows and {len(m['sbProject'])} project rows")
-        if m["plate"] and m["plate"]["w"] != 24:
-            problems.append(f"{m['vw']}: a chat's plate is {m['plate']['w']}px, not 24")
-        if m["plateRadius"] != "50%" or m["tileRadius"] in (None, "50%"):
-            problems.append(f"{m['vw']}: a chat's plate is not round or a project's tile not square ({m['plateRadius']}, {m['tileRadius']})")
+                if h != 32:
+                    problems.append(f"{m['vw']}: a sidebar {name} row is {h}px, not 32")
+        if not m["sbChat"] or not m["sbProject"] or not m["sbNav"]:
+            problems.append(f"{m['vw']}: the sidebar drew {len(m['sbChat'])} chat rows, {len(m['sbProject'])} project rows and {len(m['sbNav'])} pinned rows")
+        for name in ("sbHead", "sbFoot"):
+            if not m[name] or m[name]["h"] != 52:
+                problems.append(f"{m['vw']}: the sidebar's {name[2:].lower()} is {m[name]}, not 52 high")
         if m["list"]:
             problems.append(f"{m['vw']}: a second list column is still there ({m['list']})")
     for h in m["rowSingle"]:
-        if h > (44 if phone else 36):
+        if h > (44 if phone else 32):
             problems.append(f"{m['vw']}: a one-line row is {h}px")
     for h in m["rowDouble"]:
         if h > (54 if phone else 52):
             problems.append(f"{m['vw']}: a two-line row is {h}px")
     if m["avatar"] and m["avatar"]["w"] > 24:
         problems.append(f"{m['vw']}: an avatar in a row is {m['avatar']['w']}px")
-    # A phone's top bar is 52 px, one row of 44 px targets with room around them; a desktop's 48.
-    if m["head"] and m["head"]["h"] > (52 if phone else 48):
+    # A phone's top bar is 52 px, one row of 44 px targets with room around them, and so is a
+    # desktop's header since every header took --head-h's 52 (it was 48).
+    if m["head"] and m["head"]["h"] > 52:
         problems.append(f"{m['vw']}: the chat header is {m['head']['h']}px")
     if m["subMeta"]:
         problems.append(f"{m['vw']}: the header still has its second row of chips")
-    # The desktop header is two lines inside the same 48 px: the title, then the project, the model
-    # and the live state in the meta size — the phone's title button, not a second row of chips.
-    if not phone and (not m["headSub"] or m["headSub"]["h"] > 18):
-        problems.append(f"{m['vw']}: the header's second line is {m['headSub']}, not one 12 px line")
+    # The desktop header is one line, as every page's: the place and the title 24 px in from the main
+    # area's edge, then the run in the meta size on the same line. It was two lines in the same 52 px,
+    # the model and the state under the title, which read as a second toolbar.
+    if not phone:
+        if m["titleX"] != 24:
+            problems.append(f"{m['vw']}: the chat's title starts {m['titleX']} px from the main area's edge, not 24")
+        if m["subOffset"] is not None and abs(m["subOffset"]) > 3:
+            problems.append(f"{m['vw']}: the header's run line sits {m['subOffset']} px off the title's line")
     if m["chips"]:
         problems.append(f"{m['vw']}: {len(m['chips'])} chip(s) are still in the header")
     if not phone:
         if not m["panel"]:
             problems.append(f"{m['vw']}: the panel is not open beside the conversation")
         else:
-            if m["panel"]["w"] < 360 or m["panel"]["w"] > 0.65 * m["vw"]:
-                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, outside 360..65%")
-            # 48, the header's height: the tabs draw their icon over their word, so six named tabs fit
-            # the panel's width where a 40 px row of "icon word" pairs fell back to icons alone.
-            if not m["panelTabs"] or m["panelTabs"]["h"] != 48:
-                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 48")
+            # 30 % of the window between 400 and 520 px until the operator drags it, and at the window's
+            # full height beside the chat: its top is the window's, its tab row level with the header.
+            want = min(520, max(400, round(0.3 * m["vw"])))
+            if abs(m["panel"]["w"] - want) > 1:
+                problems.append(f"{m['vw']}: the panel is {m['panel']['w']}px, not {want} (30 % between 400 and 520)")
+            if m["panelTop"] != 0 or abs(m["panel"]["h"] - m["vh"]) > 1:
+                problems.append(f"{m['vw']}: the panel is not the window's full height ({m['panel']})")
+            # 52, the header's height, so the line under the tabs meets the line under the header.
+            if not m["panelTabs"] or m["panelTabs"]["h"] != 52:
+                problems.append(f"{m['vw']}: the panel's tab row is {m['panelTabs']}, not 52")
     elif m["panel"]:
         problems.append(f"{m['vw']}: a phone shows the panel as a column")
     # Running phones reserve the composer for steering; idle settings use a full touch target.
@@ -643,47 +743,49 @@ def judge(m: dict) -> list[str]:
             problems.append(f"{m['vw']}: an icon button is {b['w']}×{b['h']}, not {want}")
     if m["answerFs"] != (16 if phone else 15):
         problems.append(f"{m['vw']}: the answer is {m['answerFs']}px")
+    # The operator's bubble reads at the answer's size and stops at 560 px, three quarters of the stripe.
+    if not phone and m["userW"] and (m["userFs"] != 15 or m["userW"]["w"] > 560):
+        problems.append(f"{m['vw']}: the operator's bubble is {m['userW']['w']}px wide at {m['userFs']}px, not 15 px within 560")
     if m["timeline"]:
-        # The conversation and the field that answers it are one column. Two claims, both of them
-        # about what went wrong before: the field is exactly as wide as the conversation above it
-        # (they were offset against each other), and the stripe is never exceeded. How much room a
-        # panel leaves is not arithmetic worth pinning here; the widening claim is made below.
-        stripe = 920 if m["vw"] < 1600 else (1120 if m["vw"] < 2100 else 1320)
-        if m["timeline"]["w"] > stripe:
-            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the {stripe} stripe")
+        # The conversation and the field that answers it are one column, 760 px at every width (the
+        # owner's measure; it widened to 1120 and 1320 on wide windows before). Three claims: the stripe
+        # is never exceeded, it is the whole 760 wherever the scroller has the room, and the field is
+        # exactly as wide as the conversation above it (they were offset against each other once).
+        if m["timeline"]["w"] > 760:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px, over the 760 stripe")
+        if not phone and m["scrollRoom"] is not None and m["scrollRoom"] >= 760 and m["timeline"]["w"] != 760:
+            problems.append(f"{m['vw']}: the timeline is {m['timeline']['w']}px with {m['scrollRoom']}px of room, not 760")
         if m["vw"] >= 1024 and m["composerBox"] and abs(m["composerBox"]["w"] - m["timeline"]["w"]) > 2:
             problems.append(f"{m['vw']}: the composer is {m['composerBox']['w']}px against a {m['timeline']['w']}px timeline")
-        # Beside the 42 % panel a 1440 window keeps a 638 px conversation column: 1440 less the 52 px
-        # rail and the 288 px sidebar is a 1100 px chat area, 58 % of it the conversation, and the
-        # timeline is that less the gutters. The rail took 52 px the old 677 px figure did not count
-        # (the sidebar's strip then stood only where the column was folded), so the floor is 590.
-        if m["vw"] == 1440 and m["timeline"]["w"] < 590:
-            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 590")
+        # Beside the 432 px panel a 1440 window keeps the conversation's whole stripe: 1440 less the
+        # 300 px sidebar and the panel leaves 708 px of chat, the stripe less its margins.
+        if m["vw"] == 1440 and m["timeline"]["w"] < 640:
+            problems.append(f"1440: the timeline is {m['timeline']['w']}px beside the panel, narrower than 640")
     return problems
 
 
 def judge_sidebar(s: dict) -> list[str]:
     problems: list[str] = []
-    # A 52 px icon rail stands beside the contextual list, whose boundary reserves one pixel.
-    # Folding retains a 52 px icon column; the conversation starts at its edge.
-    # The column is 288 wide since its rows went to two lines (272 before).
-    want = {"open": (340, 287, 340), "collapsed": (52, 0, 52), "collapsedAfterReload": (52, 0, 52), "reopened": (340, 287, 340)}
-    for key, (rail, sidebar, main) in want.items():
+    # The sidebar is the first column alone, 300 wide, the design's default (288 before, 272 before
+    # that); folded, nothing of it is left and the conversation starts at the window's edge.
+    want = {"open": (300, 300, 300), "collapsed": (0, 0, 0), "collapsedAfterReload": (0, 0, 0), "reopened": (300, 300, 300)}
+    for key, (column, sidebar, main) in want.items():
         got = s[key]
-        if (got["rail"], got["sidebar"], got["main"]) != (rail, sidebar, main):
-            problems.append(f"{key}: rail/sidebar/conversation start {got['rail']}/{got['sidebar']}/{got['main']}, not {rail}/{sidebar}/{main}")
-    # The launcher lists every destination, the rail's included, as Frequent tiles and the catalogue
-    # (the stub's thirteen screens and its one published page), then Settings, Customise and About.
-    if s["menuItems"] != 17:
-        problems.append(f"the launcher has {s['menuItems']} items")
+        if (got["column"], got["sidebar"], got["main"]) != (column, sidebar, main):
+            problems.append(f"{key}: column/sidebar/conversation start {got['column']}/{got['sidebar']}/{got['main']}, not {column}/{sidebar}/{main}")
+    # The launcher lists every destination, the pinned ones included, in its groups (the stub's thirteen
+    # screens and its one published page), and four of them again as Frequent chips.
+    if s["menuItems"] != 14 or s["menuChips"] != 4:
+        problems.append(f"the launcher has {s['menuItems']} destinations and {s['menuChips']} chips")
     # The language and the companion went to Settings -> Appearance.
     if s["menuLang"]:
         problems.append("the launcher still has a language switch")
-    # It opens from the rail's foot, beside the rail rather than over it, 600 wide while the window allows.
-    if not 48 <= s["menuBox"]["x"] <= 58 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 600:
-        problems.append(f"the launcher is not beside its rail trigger at 600 wide: {s['menuBox']}")
-    if s["menuRow"] != 32:
-        problems.append(f"a catalogue row is {s['menuRow']}px")
+    # It opens from the sidebar's More row, beside the sidebar rather than over it (8 px from its edge),
+    # 560 wide while the window allows, in rows of 44 with a line under each name.
+    if s["menuBox"]["x"] != 308 or s["menuBox"]["bottom"] < 8 or s["menuBox"]["w"] != 560:
+        problems.append(f"the launcher is not beside its More row at 560 wide: {s['menuBox']}")
+    if s["menuRow"] != 44:
+        problems.append(f"a launcher row is {s['menuRow']}px")
     for key in ("menuFocusInside", "arrowMoves", "escClears", "menuClosed", "focusBack", "shortcutOpens", "gKeyNavigates"):
         if not s[key]:
             problems.append(f"{key} is false")
@@ -698,40 +800,48 @@ START = """
     composer: box(document.querySelector('.start-composer .composer-box')),
     circle: box(circle),
     radius: circle ? getComputedStyle(circle).borderRadius : null,
-    chips: [...document.querySelectorAll('.start-where-chip')].map((el) => box(el).h),
-    live: [...document.querySelectorAll('.start-live-row')].map((el) => box(el).h),
-    projectRows: [...document.querySelectorAll('.projects-row:not(.head)')].map((el) => box(el).h),
+    chips: [...document.querySelectorAll('.start-composer .composer-row > button.composer-project, .start-composer .composer-row > button.composer-mode, .start-composer .composer-row > button.composer-access')].map((el) => box(el).h),
+    cards: [...document.querySelectorAll('.resume-card')].map((el) => box(el).h),
+    heading: (() => { const el = document.querySelector('h1.start-greeting'); return el ? { size: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight } : null; })(),
+    projectRows: [...document.querySelectorAll('.projects-row')].map((el) => box(el).h),
+    projectList: (() => { const el = document.querySelector('.projects-table'); return el ? Math.round(el.getBoundingClientRect().width) : 0; })(),
   };
 }
 """
 
 
 def check_start(browser) -> tuple[list[str], dict]:  # type: ignore[no-untyped-def]
-    """The desktop's start screen and projects page, at 1440: the composer in a 720 px column (the
-    mockup's, a step over the 680 it had when it stood alone, so the chips and the live rows under
-    it share its edges), the primary a 32 px circle, the project chips 28 px like every filter chip,
-    a live row two lines in at most 52 px, and a project row two lines in at most 64 px."""
+    """The desktop's start screen and projects page, at 1440: the question in 28 px over a composer in
+    the conversation's own 760 px column, the primary a 32 px circle, the chips of the composer's row
+    28 px like every small chip, the chats to continue and the project rows 56 px cards, in the page
+    chrome's 880 px list."""
     problems: list[str] = []
     context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-    page = open_page(context, "agents", ".start-live-row")
+    page = open_page(context, "agents", ".resume-card")
     # An empty field shows the mic alone in the trailing slot; Send, the circle measured, joins it once
     # the field holds words. It was the voice circle on an empty field until that left ordinary chats.
     page.locator(".start-composer .composer-field").fill("Bake the menu")
     start = page.evaluate(START)
     page.goto(f"{BASE}/agents?view=projects&token=t&scheme=dark&lang=en")
-    page.wait_for_selector(".projects-row:not(.head)", timeout=15000)
-    start["projectRows"] = page.evaluate(START)["projectRows"]
+    page.wait_for_selector(".projects-row", timeout=15000)
+    projects = page.evaluate(START)
+    start["projectRows"] = projects["projectRows"]
+    start["projectList"] = projects["projectList"]
     context.close()
-    if not start["composer"] or start["composer"]["w"] != 720:
-        problems.append(f"start: the composer is {start['composer']}, not 720 wide")
+    if not start["composer"] or start["composer"]["w"] != 760:
+        problems.append(f"start: the composer is {start['composer']}, not 760 wide")
+    if not start["heading"] or start["heading"]["size"] != "28px" or start["heading"]["weight"] != "500":
+        problems.append(f"start: the question is {start['heading']}, not 28/500")
     if not start["circle"] or start["circle"]["w"] != 32 or start["circle"]["h"] != 32 or start["radius"] != "50%":
         problems.append(f"start: the primary is {start['circle']} with radius {start['radius']}, not a 32 px circle")
     if not start["chips"] or any(h != 28 for h in start["chips"]):
-        problems.append(f"start: the project chips are {start['chips']}, not 28")
-    if not start["live"] or any(h > 52 for h in start["live"]):
-        problems.append(f"start: the live rows are {start['live']}")
-    if not start["projectRows"] or any(h > 64 for h in start["projectRows"]):
-        problems.append(f"projects: the rows are {start['projectRows']}")
+        problems.append(f"start: the chips of the row are {start['chips']}, not 28")
+    if not start["cards"] or any(h != 56 for h in start["cards"]):
+        problems.append(f"start: the cards to continue are {start['cards']}, not 56")
+    if not start["projectRows"] or any(h != 56 for h in start["projectRows"]):
+        problems.append(f"projects: the rows are {start['projectRows']}, not 56")
+    if start["projectList"] != 880:
+        problems.append(f"projects: the list is {start['projectList']} wide, not the page chrome's 880")
     return problems, start
 
 
@@ -747,6 +857,8 @@ def run() -> int:
         if ASSERT:
             measured["sidebar"] = check_sidebar(browser)
             problems += check_browser_preview(browser)
+            head_problems, measured["page-header"] = check_page_header(browser)
+            problems += head_problems
             problems += check_settings(browser)
             phone_problems, measured["phone"] = check_phone(browser)
             problems += phone_problems
@@ -761,17 +873,15 @@ def run() -> int:
         for name, m in measured.items():
             if name.startswith("session-"):
                 problems += judge(m)
+        for name in ("agents-1440", "agents-390"):
+            if measured[name]["small"]["under"]:
+                problems.append(f"{name}: text under the 12 px floor: {measured[name]['small']['under']}")
         for h in measured["agents-390"]["phoneRows"]:
             if h != 54:
                 problems.append(f"390: a row of Chats is {h}px, not 54")
         problems += judge_sidebar(measured["sidebar"])
     if MEASURE:
         Path(MEASURE).write_text(json.dumps(measured, indent=1) + "\n")
-    if ASSERT:
-        # A wider window must read wider, not pad the sides: the owner's standing complaint.
-        wide = {m["vw"]: m["timeline"]["w"] for n, m in measured.items() if n.startswith("session-") and m.get("timeline") and m["vw"] >= 1024}
-        if len(wide) > 1 and wide[max(wide)] <= wide[min(wide)]:
-            problems.append(f"the conversation does not widen with the window: {wide}")
     print("problems:", problems or "none")
     return 1 if problems else 0
 

@@ -3,77 +3,103 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
-export type PanelTab = "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources" | "agents";
+export type PanelTab = "overview" | "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources" | "agents" | "changes" | "context" | "usage" | "memory" | "canvas" | "attachments";
 
-/** A session's own tabs: what the agent is, the files it works on, one of them open, its jobs, and the
- *  operator's notes beside the conversation (the chat's, and its project's when it has one). */
-export const PANEL_TABS: PanelTab[] = ["details", "files", "preview", "jobs", "notes"];
+/** Every tool a panel can hold, for a route or a stored state to be read against. */
+export const ALL_TABS: readonly PanelTab[] = ["overview", "details", "files", "preview", "jobs", "notes", "subagents", "board", "brief", "wakeups", "folders", "questions", "browser", "sources", "agents", "changes", "context", "usage", "memory", "canvas", "attachments"];
 
-/** A project's tabs, beside a session in the project's focus mode. */
+/** A session's own tools: what the agent works on and with, what it was given and kept, and what it
+ *  is and cost. The Overview is the panel's front page and is always there; the rest are opened as
+ *  tabs from the "+" menu or from an Overview row, and closed again. */
+export const PANEL_TABS: PanelTab[] = ["overview", "files", "preview", "jobs", "context", "memory", "notes", "canvas", "attachments", "details", "usage"];
+
+/** A project's tools, beside a session in the project's focus mode. */
 export const PROJECT_TABS: PanelTab[] = ["board", "brief", "wakeups", "folders"];
 
 /** What a panel is beside: an ordinary session, a project's orchestrator, a session inside a
  *  project's focus mode (a staff member, or anyone else working in the project), or the main chat. */
 export type PanelContext = "session" | "orchestrator" | "member" | "main";
 
+export type ToolOffer = { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean; agents?: boolean; changes?: boolean; board?: boolean };
+
 /**
- * The tabs a panel offers, in order. The orchestrator runs no job, so its panel is the project's,
- * with what waits for the operator first and then its own Details: it is a session
- * like any other in what it costs, how full its context is and which model runs it, and a panel
- * without that tab left the operator no way to see any of it. A session inside a project keeps
- * its own tabs and gains the project's, so the board is one click away from whoever is working on
- * it; the main chat keeps a session's tabs behind the questions of every project.
+ * The tools a panel offers, in the order the "+" menu and the Overview list them. The panel used to
+ * draw every one of them as a fixed tab, and six to nine words in a 400 px column stood shoulder to
+ * shoulder or fell back to bare icons; now only the Overview and what the operator opened are tabs,
+ * and this list is the menu they are opened from.
  *
- * The Browser tab is there only for a session that has had a browser (`browser`): most never do,
- * and the member panel already has eight tabs. It follows the agent's own tabs, before the project's.
- * The Subagents tab is there only for a session that has helpers (`subagents`), right after Jobs:
- * subagents used to be rows among the jobs, where a helper's conversation was one more click and a
- * whole screen away, and a session that never started one does not need a tab that is always empty.
+ * Some tools are offered only when there is something behind them, because an always-empty entry is
+ * one more line to read past: Changes for a chat whose folder is a git repository (`changes`), the
+ * Browser for a session that has had one, Sources once an answer cited any, Subagents for a session
+ * with helpers, Agents for a chat that talks to another agent through a link, Questions while an
+ * ordinary session's side questions wait (the orchestrator's and the main chat's always). Preview
+ * is a session's always, and the orchestrator's once a file was opened there, so the file on screen
+ * has a tab to be on.
  *
- * The orchestrator writes no file, yet it has a Files tab after Details: the project's files, and
- * what the staff made in their worktrees before it is merged, are what the operator steers it by,
- * and without the tab the orchestrator's view showed neither anywhere. The tab only reads — nothing
- * is uploaded from it and a worktree is never written.
- *
- * The orchestrator has no Preview tab of its own, yet its chat carries file cards — a member's
- * patch, the operator's attachment — that open in Preview. With `preview` (a file has been opened)
- * the tab joins its strip after Files, so the file on screen has a tab to be on.
- *
- * The Agents tab is there only for a chat that talks to another agent through a link (`agents`), right
- * before Notes: those conversations used to be strips over the composer, and a message waiting for
- * approval was a strip turning yellow that had to be clicked to be seen.
- *
- * An ordinary session has a Questions tab only while its agent's side questions wait (`questions`),
- * first, where the orchestrator's is: most sessions never leave one, and a tab that is nearly always
- * empty is one more thing on a phone's strip to read past.
+ * The orchestrator runs no job, so it has no Terminal; it writes no file, yet it has Files to read
+ * the project and the staff's worktrees by. A session inside a project gains the project's tools.
+ * The chat's own board (`board`) is offered where a page for it is mounted.
  */
-export function tabsFor(context: PanelContext, opts: { browser?: boolean; preview?: boolean; subagents?: boolean; questions?: boolean; sources?: boolean; agents?: boolean } = {}): PanelTab[] {
-  // An answer's sources sit beside the browser: both are the web the turn read.
-  const browser: PanelTab[] = [...(opts.browser ? (["browser"] as PanelTab[]) : []), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
-  // Subagents stay right after Jobs, where they came from; Notes close the agent's own tabs.
-  const own: PanelTab[] = [...PANEL_TABS.filter((tab) => tab !== "notes"), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), ...(opts.agents ? (["agents"] as PanelTab[]) : []), "notes"];
-  if (context === "orchestrator") return ["questions", "details", "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), "notes", ...browser, ...PROJECT_TABS];
-  if (context === "member") return [...own, ...browser, ...PROJECT_TABS];
-  if (context === "main") return ["questions", ...own, ...browser];
-  return [...(opts.questions ? (["questions"] as PanelTab[]) : []), ...own, ...browser];
+export function tabsFor(context: PanelContext, opts: ToolOffer = {}): PanelTab[] {
+  const work: PanelTab[] = [...(opts.changes ? (["changes"] as PanelTab[]) : []), "files", "preview", "jobs", ...(opts.browser ? (["browser"] as PanelTab[]) : [])];
+  const agent: PanelTab[] = [...(opts.board && context !== "member" ? (["board"] as PanelTab[]) : []), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), ...(opts.agents ? (["agents"] as PanelTab[]) : []), "context", "memory", ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
+  const materials: PanelTab[] = ["notes", "canvas", "attachments"];
+  const info: PanelTab[] = ["details", "usage"];
+  if (context === "orchestrator") {
+    return ["overview", "questions", ...(opts.changes ? (["changes"] as PanelTab[]) : []), "files", ...(opts.preview ? (["preview"] as PanelTab[]) : []), ...(opts.browser ? (["browser"] as PanelTab[]) : []), "context", ...(opts.sources ? (["sources"] as PanelTab[]) : []), "notes", ...PROJECT_TABS, ...info];
+  }
+  const questions: PanelTab[] = context === "main" || (context === "session" && opts.questions) ? ["questions"] : [];
+  const project = context === "member" ? PROJECT_TABS : [];
+  return ["overview", ...questions, ...work, ...agent, ...materials, ...project, ...info];
 }
 
-/** Every tab a route may name in this context. A link to `?panel=browser` must open the tab even
+/** Every tool a route may name in this context. A link to `?panel=browser` must open the tab even
  *  before the listing that says the session has a browser has arrived. Preview is always among
  *  them: a file card in the orchestrator's chat opened Preview, wrote `?panel=preview` into the
  *  address, and the route, reading a tab it did not know, closed the panel again in the same
  *  moment — the first click fetched the file and showed nothing, and only a second click, landing
  *  on an address that no longer changed, kept it open. */
 export function routeTabsFor(context: PanelContext): PanelTab[] {
-  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true, sources: true, agents: true });
+  return tabsFor(context, { browser: true, preview: true, subagents: true, questions: true, sources: true, agents: true, changes: true, board: true });
+}
+
+/** The tab a panel opens on by itself: the Overview, except beside a project's orchestrator and the
+ *  main chat, whose first business is what waits for the operator. */
+export function firstTab(context: PanelContext): PanelTab {
+  return context === "orchestrator" || context === "main" ? "questions" : "overview";
+}
+
+/** The groups the "+" menu lists the tools under. A project's board, beside its orchestrator or a
+ *  member, is the project's; anywhere else the board is this chat's own and belongs with the agent. */
+export type ToolGroup = "work" | "agent" | "materials" | "project" | "info";
+export const TOOL_GROUPS: readonly ToolGroup[] = ["work", "agent", "materials", "project", "info"];
+
+export function toolGroup(tab: PanelTab, context: PanelContext): ToolGroup | null {
+  switch (tab) {
+    case "changes": case "files": case "preview": case "jobs": case "browser": return "work";
+    case "questions": case "subagents": case "agents": case "context": case "memory": case "sources": return "agent";
+    case "board": return context === "orchestrator" || context === "member" ? "project" : "agent";
+    case "notes": case "canvas": case "attachments": return "materials";
+    case "brief": case "wakeups": case "folders": return "project";
+    case "details": case "usage": return "info";
+    default: return null;
+  }
+}
+
+/** The offered tools under their groups, empty groups left out, the Overview in none. */
+export function groupTools(tabs: readonly PanelTab[], context: PanelContext): { group: ToolGroup; tabs: PanelTab[] }[] {
+  return TOOL_GROUPS.map((group) => ({ group, tabs: tabs.filter((tab) => toolGroup(tab, context) === group) })).filter((g) => g.tabs.length > 0);
 }
 
 /** One file the Preview tab showed: where the bytes come from, and the lines an answer cited, if any. */
 export type PanelEntry = { base: string; path: string; lines?: string };
 
 export type PanelState = {
-  /** The open tab, or null while the panel is closed. */
+  /** The tab on screen, or null while the panel is closed. */
   tab: PanelTab | null;
+  /** The tools open as tabs after the Overview, in the order they were opened. Closing the panel
+   *  keeps them: the next time it opens, the tabs the operator was working with are still there. */
+  open: PanelTab[];
   /** What Preview has shown, oldest first; `at` points at the one on screen. */
   stack: PanelEntry[];
   at: number;
@@ -81,30 +107,50 @@ export type PanelState = {
   expanded: boolean;
   /** The subagent whose conversation the Subagents tab shows, or null for the list of them. */
   sub: string | null;
+  /** The task the chat's Board tab has open in place of its list, or null for the list. */
+  task: string | null;
 };
 
-export const PANEL_CLOSED: PanelState = { tab: null, stack: [], at: -1, expanded: false, sub: null };
+export const PANEL_CLOSED: PanelState = { tab: null, open: [], stack: [], at: -1, expanded: false, sub: null, task: null };
 
-export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = [...PANEL_TABS, "subagents", "agents", ...PROJECT_TABS, "questions", "browser", "sources"]): v is PanelTab {
+export function isPanelTab(v: string | null | undefined, tabs: readonly PanelTab[] = ALL_TABS): v is PanelTab {
   return !!v && (tabs as readonly string[]).includes(v);
 }
 
+/** `tab` on screen, joined to the open tools when it is not among them yet. The Overview is never in
+ *  the list: it is the panel's own first tab, not a tool that was opened. */
 export function openTab(s: PanelState, tab: PanelTab): PanelState {
-  return s.tab === tab ? s : { ...s, tab };
+  const open = tab === "overview" || s.open.includes(tab) ? s.open : [...s.open, tab];
+  return s.tab === tab && open === s.open ? s : { ...s, tab, open };
+}
+
+/** A tool's tab closed. The one on screen gives its place to the tab before it, as a browser does,
+ *  or to the Overview when it was the first; Preview takes its history with it. */
+export function closeTool(s: PanelState, tab: PanelTab): PanelState {
+  const at = s.open.indexOf(tab);
+  if (at < 0) return s;
+  const open = s.open.filter((other) => other !== tab);
+  const next = s.tab === tab ? (open[at - 1] ?? "overview") : s.tab;
+  return { ...s, open, tab: next, ...(tab === "preview" ? { stack: [], at: -1 } : {}), ...(tab === "subagents" ? { sub: null } : {}), ...(tab === "board" ? { task: null } : {}) };
 }
 
 export function closePanel(s: PanelState): PanelState {
   return s.tab === null ? s : { ...s, tab: null, expanded: false };
 }
 
-/** The toggle the shortcut and the header button share: closed → the last tab (Details by default), open → closed. */
-export function togglePanel(s: PanelState, last: PanelTab | null = null, first: PanelTab = "details"): PanelState {
+/** The toggle the shortcut and the header button share: closed → the last tab (the Overview by default), open → closed. */
+export function togglePanel(s: PanelState, last: PanelTab | null = null, first: PanelTab = "overview"): PanelState {
   return s.tab === null ? openTab(s, last ?? first) : closePanel(s);
 }
 
 /** A subagent opened beside its leader: the Subagents tab on its conversation; null goes back to the list. */
 export function openSubagent(s: PanelState, sub: string | null): PanelState {
-  return s.tab === "subagents" && s.sub === sub ? s : { ...s, tab: "subagents", sub };
+  return s.tab === "subagents" && s.sub === sub ? s : { ...openTab(s, "subagents"), sub };
+}
+
+/** A task opened inside the Board tab, or the tab's list again with null. */
+export function openTask(s: PanelState, task: string | null): PanelState {
+  return s.tab === "board" && s.task === task ? s : { ...openTab(s, "board"), task };
 }
 
 export function toggleExpanded(s: PanelState): PanelState {
@@ -114,9 +160,9 @@ export function toggleExpanded(s: PanelState): PanelState {
 /** A file opened into Preview: goes on top of the history, forgetting anything that was "forward". */
 export function openFile(s: PanelState, entry: PanelEntry): PanelState {
   const current = s.stack[s.at];
-  if (current && sameEntry(current, entry)) return { ...s, tab: "preview" };
+  if (current && sameEntry(current, entry)) return openTab(s, "preview");
   const stack = [...s.stack.slice(0, s.at + 1), entry];
-  return { ...s, tab: "preview", stack, at: stack.length - 1 };
+  return { ...openTab(s, "preview"), stack, at: stack.length - 1 };
 }
 
 /** A file opened next to the one on screen without taking its place: it joins the open files right after
@@ -157,10 +203,10 @@ export function closeEntry(s: PanelState, entry: PanelEntry): PanelState {
 
 /** Makes an open file the one on screen without growing the history: a click on its tab. */
 export function showEntry(s: PanelState, entry: PanelEntry): PanelState {
-  if (isCurrent(s, entry)) return s.tab === "preview" || s.tab === "files" ? s : { ...s, tab: "preview" };
+  if (isCurrent(s, entry)) return s.tab === "preview" || s.tab === "files" ? s : openTab(s, "preview");
   let at = -1;
   for (let i = s.stack.length - 1; i >= 0; i--) if (sameEntry(s.stack[i], entry)) { at = i; break; }
-  return at < 0 ? openFile(s, entry) : { ...s, tab: s.tab === "files" ? "files" : "preview", at };
+  return at < 0 ? openFile(s, entry) : { ...openTab(s, s.tab === "files" ? "files" : "preview"), at };
 }
 
 export function canGoBack(s: PanelState): boolean {
@@ -172,11 +218,11 @@ export function canGoForward(s: PanelState): boolean {
 }
 
 export function goBack(s: PanelState): PanelState {
-  return canGoBack(s) ? { ...s, tab: "preview", at: s.at - 1 } : s;
+  return canGoBack(s) ? { ...openTab(s, "preview"), at: s.at - 1 } : s;
 }
 
 export function goForward(s: PanelState): PanelState {
-  return canGoForward(s) ? { ...s, tab: "preview", at: s.at + 1 } : s;
+  return canGoForward(s) ? { ...openTab(s, "preview"), at: s.at + 1 } : s;
 }
 
 export function currentEntry(s: PanelState): PanelEntry | null {
@@ -189,12 +235,13 @@ function sameEntry(a: PanelEntry, b: PanelEntry): boolean {
 
 // ── the route ────────────────────────────────────────────────────────────────────────────────
 
-export type PanelQuery = { tab: PanelTab; path: string | null; lines?: string; sub?: string | null };
+export type PanelQuery = { tab: PanelTab; path: string | null; lines?: string; sub?: string | null; task?: string | null };
 
-/** What a link carries: the open tab, the previewed file, the subagent the Subagents tab shows.
+/** What a link carries: the open tab, the previewed file, the subagent the Subagents tab shows, the
+ *  task the Board tab has open.
  *  `tab=` is read as the tab too, so a link written as `?panel=files&tab=preview&path=…` opens
  *  Preview on that path. */
-export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[] = PANEL_TABS): PanelQuery | null {
+export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[] = ALL_TABS): PanelQuery | null {
   const tab = query.get("tab");
   const panel = query.get("panel");
   const which = isPanelTab(tab, tabs) ? tab : isPanelTab(panel, tabs) ? panel : null;
@@ -202,20 +249,21 @@ export function readPanelQuery(query: URLSearchParams, tabs: readonly PanelTab[]
   const path = query.get("path");
   const lines = query.get("lines") ?? "";
   const sub = which === "subagents" ? query.get("sub") || null : null;
-  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}), ...(which === "subagents" ? { sub } : {}) };
+  const task = which === "board" ? query.get("task") || null : null;
+  return { tab: which, path: path || null, ...(/^\d+(?:-\d+)?$/.test(lines) ? { lines } : {}), ...(which === "subagents" ? { sub } : {}), ...(which === "board" ? { task } : {}) };
 }
 
 /** The query parameters the state writes; null for the ones to drop. */
 export function panelQuery(s: PanelState): Record<string, string | null> {
   const current = currentEntry(s);
-  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, sub: s.tab === "subagents" ? s.sub : null, tab: null };
+  return { panel: s.tab, path: s.tab === "preview" && current ? current.path : null, lines: s.tab === "preview" ? current?.lines ?? null : null, sub: s.tab === "subagents" ? s.sub : null, task: s.tab === "board" ? s.task : null, tab: null };
 }
 
 /** The state a route describes, over what the pane already holds: the tab from the link, the file
  *  on top of the history when the link names one the pane is not already showing. */
 export function applyPanelQuery(s: PanelState, q: PanelQuery | null, base: string): PanelState {
   if (!q) return closePanel(s);
-  let next = q.tab === "subagents" ? openSubagent(s, q.sub ?? null) : openTab(s, q.tab);
+  let next = q.tab === "subagents" ? openSubagent(s, q.sub ?? null) : q.tab === "board" ? openTask(s, q.task ?? null) : openTab(s, q.tab);
   if (q.path && (q.tab === "preview" || !currentEntry(next))) {
     const current = currentEntry(next);
     if (!current || current.path !== q.path || current.lines !== q.lines) next = openFile(next, { base, path: q.path, ...(q.lines ? { lines: q.lines } : {}) });
@@ -226,39 +274,36 @@ export function applyPanelQuery(s: PanelState, q: PanelQuery | null, base: strin
 
 // ── the width ────────────────────────────────────────────────────────────────────────────────
 
-export const PANEL_MIN_PX = 360;
+/** The narrowest the panel is drawn: under it the Overview's rows and a diff's lines stop reading. */
+export const PANEL_MIN_PX = 400;
+/** The widest it may be dragged, as a share of the chat: the conversation keeps a third. */
 export const PANEL_MAX_PCT = 65;
-export const PANEL_DEFAULT_PCT = 42;
 
-/** The share of the chat area the panel takes, kept between the pixel floor and the percentage ceiling.
- *  With no room for both (a narrow pane), the floor wins: a panel too narrow to read is no panel. */
-export function clampPanelPct(pct: number, areaWidth: number): number {
-  return Math.round(boundPanelPct(pct, areaWidth) * 10) / 10;
-}
-
-/** The same bounds without the rounding, for the width shown under a moving pointer: a tenth of a
- *  percent of a wide chat area is more than a pixel, and the edge would step behind the pointer. */
-export function boundPanelPct(pct: number, areaWidth: number): number {
-  if (!Number.isFinite(pct)) return PANEL_DEFAULT_PCT;
-  const floor = areaWidth > 0 ? (PANEL_MIN_PX / areaWidth) * 100 : 0;
-  const lo = Math.min(floor, PANEL_MAX_PCT);
-  return Math.min(PANEL_MAX_PCT, Math.max(lo, pct));
+/** A dragged width held between the floor and the ceiling. With no room for both (a narrow pane) the
+ *  floor wins: a panel too narrow to read is no panel. Null for nonsense, which leaves the default. */
+export function clampPanelPx(px: number, areaWidth: number): number | null {
+  if (!Number.isFinite(px) || px <= 0) return null;
+  const ceiling = areaWidth > 0 ? Math.max(PANEL_MIN_PX, Math.floor((areaWidth * PANEL_MAX_PCT) / 100)) : Number.POSITIVE_INFINITY;
+  return Math.round(Math.min(ceiling, Math.max(PANEL_MIN_PX, px)));
 }
 
 const WIDTH_KEY = "daedalus.width.panel";
 
-export function readPanelPct(storage: Pick<Storage, "getItem"> | null = safeStorage()): number {
+/** The width the operator dragged the panel to, in pixels, or null for the stylesheet's own
+ *  (`--panel-w`: 30 % of the window between 400 and 520 px). A share of the chat was kept here once;
+ *  read as pixels it is under the floor and means "not dragged". */
+export function readPanelPx(storage: Pick<Storage, "getItem"> | null = safeStorage()): number | null {
   try {
     const v = Number(storage?.getItem(WIDTH_KEY));
-    return v > 0 && v <= PANEL_MAX_PCT ? v : PANEL_DEFAULT_PCT;
+    return Number.isFinite(v) && v >= PANEL_MIN_PX ? Math.round(v) : null;
   } catch {
-    return PANEL_DEFAULT_PCT;
+    return null;
   }
 }
 
-export function rememberPanelPct(pct: number, storage: Pick<Storage, "setItem"> | null = safeStorage()): void {
+export function rememberPanelPx(px: number, storage: Pick<Storage, "setItem"> | null = safeStorage()): void {
   try {
-    storage?.setItem(WIDTH_KEY, String(pct));
+    storage?.setItem(WIDTH_KEY, String(Math.round(px)));
   } catch {
     /* private mode: the width lasts for the visit */
   }
@@ -274,15 +319,30 @@ export const PANEL_OPEN_MIN = 1280;
 /** Below this the panel is a sheet over the chat, never a column; a pinned panel does not open itself there. */
 export const PANEL_COLUMN_MIN = 1024;
 
-/** Which tab a session opens on with nothing in the route: what was open last time, or Details on
- *  a window wide enough for both; "0" is the operator having closed it. A pinned panel opens in every
+/** What is kept: the tab on screen ("0" for a closed panel) and, after a bar, the open tools —
+ *  `files|files,notes`. A bare tab name is a state with that one tool open. */
+export function parseStoredPanel(stored: string | null): { tab: string | null; open: PanelTab[] } {
+  if (stored === null) return { tab: null, open: [] };
+  const [tab, list = ""] = stored.split("|");
+  const open = list.split(",").filter((name): name is PanelTab => isPanelTab(name) && name !== "overview");
+  if (isPanelTab(tab) && tab !== "overview" && !open.includes(tab)) open.push(tab);
+  return { tab, open: [...new Set(open)] };
+}
+
+export function storedPanel(s: Pick<PanelState, "tab" | "open">): string {
+  return `${s.tab ?? "0"}${s.open.length ? `|${s.open.join(",")}` : ""}`;
+}
+
+/** Which tab a session opens on with nothing in the route: what was open last time, or the first tab
+ *  on a window wide enough for both; "0" is the operator having closed it. A pinned panel opens in every
  *  chat, on any window that draws it as a column, whatever the last chat did with it: pinning is the
  *  operator saying the panel belongs beside every conversation, and a panel that closed itself on a
  *  1200 px laptop because the window was under the auto-open width would undo that. */
 export function defaultPanelTab(stored: string | null, viewportWidth: number, tabs: readonly PanelTab[] = PANEL_TABS, pinned = false): PanelTab | null {
-  if (pinned && viewportWidth >= PANEL_COLUMN_MIN) return isPanelTab(stored, tabs) ? stored : tabs[0];
-  if (stored === "0") return null;
-  if (isPanelTab(stored, tabs)) return viewportWidth >= PANEL_OPEN_MIN ? stored : null;
+  const tab = parseStoredPanel(stored).tab;
+  if (pinned && viewportWidth >= PANEL_COLUMN_MIN) return isPanelTab(tab, tabs) ? tab : tabs[0];
+  if (tab === "0") return null;
+  if (isPanelTab(tab, tabs)) return viewportWidth >= PANEL_OPEN_MIN ? tab : null;
   return viewportWidth >= PANEL_OPEN_MIN ? tabs[0] : null;
 }
 
@@ -292,22 +352,50 @@ export function panelTabKey(context: PanelContext): string {
   return context === "session" ? TAB_KEY : context === "main" ? `${TAB_KEY}.main` : `${TAB_KEY}.project`;
 }
 
-export function readPanelTab(viewportWidth: number, storage: Pick<Storage, "getItem"> | null = safeStorage(), context: PanelContext = "session"): PanelTab | null {
+/** The tools to draw a tab for in the order of the default tools: `tabs` with what a context always
+ *  shows first (its first tab) and the Overview leading. */
+function defaultTabs(context: PanelContext): PanelTab[] {
+  const tabs = tabsFor(context);
+  const first = firstTab(context);
+  return [first, ...tabs.filter((tab) => tab !== first)];
+}
+
+/** The state a session opens with: the tab and the tools as they were left. A tool kept from a chat
+ *  that had it is offered or left out by the panel that draws the tabs. */
+export function readPanelState(viewportWidth: number, storage: Pick<Storage, "getItem"> | null = safeStorage(), context: PanelContext = "session"): Pick<PanelState, "tab" | "open"> {
   let stored: string | null = null;
   try {
     stored = storage?.getItem(panelTabKey(context)) ?? null;
   } catch {
     /* private mode */
   }
-  return defaultPanelTab(stored, viewportWidth, tabsFor(context), readPanelPinned(storage));
+  const kept = parseStoredPanel(stored);
+  const firstOpen = context === "orchestrator" || context === "main" ? ["questions" as PanelTab] : [];
+  const open = stored === null ? firstOpen : kept.open;
+  return { tab: defaultPanelTab(stored, viewportWidth, defaultTabs(context), readPanelPinned(storage)), open };
 }
 
-/** Remembers the open tab, or "0" for a panel the operator closed. A pinned panel keeps its last tab
- *  when it is closed in one chat, so the next chat still opens it on that tab rather than on Details. */
-export function rememberPanelTab(tab: PanelTab | null, storage: (Pick<Storage, "setItem"> & Partial<Pick<Storage, "getItem">>) | null = safeStorage(), context: PanelContext = "session"): void {
-  if (tab === null && storage?.getItem && readPanelPinned(storage as Pick<Storage, "getItem">)) return;
+export function readPanelTab(viewportWidth: number, storage: Pick<Storage, "getItem"> | null = safeStorage(), context: PanelContext = "session"): PanelTab | null {
+  return readPanelState(viewportWidth, storage, context).tab;
+}
+
+/** Remembers the open tab and tools, the tab "0" for a panel the operator closed. A pinned panel keeps
+ *  its last tab when it is closed in one chat, so the next chat still opens it on that tab rather than
+ *  on the Overview. */
+export function rememberPanel(s: Pick<PanelState, "tab" | "open">, storage: (Pick<Storage, "setItem"> & Partial<Pick<Storage, "getItem">>) | null = safeStorage(), context: PanelContext = "session"): void {
+  let tab = s.tab;
+  if (tab === null && storage?.getItem && readPanelPinned(storage as Pick<Storage, "getItem">)) {
+    let kept: string | null = null;
+    try {
+      kept = storage.getItem(panelTabKey(context));
+    } catch {
+      /* private mode */
+    }
+    tab = (parseStoredPanel(kept).tab as PanelTab | null) ?? null;
+    if (tab === ("0" as PanelTab)) tab = null;
+  }
   try {
-    storage?.setItem(panelTabKey(context), tab ?? "0");
+    storage?.setItem(panelTabKey(context), storedPanel({ tab, open: s.open }));
   } catch {
     /* private mode */
   }
@@ -344,26 +432,16 @@ function safeStorage(): Storage | null {
 }
 
 /**
- * How much of each tab the strip can draw, widest first: the icon and the word, the word alone, the
- * word on the open tab only (the others as their icons, named by their tooltip), the icons alone. The
- * strip takes the first that fits, measured, never a fixed count of tabs: a rule that dropped the icons
- * past four tabs let the sixth tab (Notes) push the Russian strip into a scroll, and the first tab was
- * drawn as a cut-off "…ия". A phone's sheet never draws the icon beside the word; there is no room.
+ * How much of each tab the strip can draw, widest first: the icon and the word, the word on the open
+ * tab only (the others as their icons, named by their tooltip), the icons alone. The strip takes the
+ * first that fits, measured, never a fixed count of tabs, so no label is ever cut or pressed against
+ * its neighbour or the edge.
  */
-export const TAB_FITS = ["full", "words", "active", "icons"] as const;
+export const TAB_FITS = ["full", "active", "icons"] as const;
 export type TabFit = (typeof TAB_FITS)[number];
 
-// One array for the sheet, not a fresh slice per call: the strip's measuring callback depends on it, and
-// a new array every render would rebuild the callback and re-run the measurement on every render.
-const SHEET_FITS: readonly TabFit[] = TAB_FITS.slice(1);
-
-/** The fits a strip tries, in order; the same array on every call. */
-export function fitsFor(inSheet: boolean): readonly TabFit[] {
-  return inSheet ? SHEET_FITS : TAB_FITS;
-}
-
 /** The widest fit of `order` that `fits` accepts, or the last when none does: the icons are drawn even
- *  when they overflow, because there is nothing narrower to fall back to. */
+ *  when they overflow (the strip then scrolls), because there is nothing narrower to fall back to. */
 export function widestFit(order: readonly TabFit[], fits: (fit: TabFit) => boolean): TabFit {
   return order.find(fits) ?? order[order.length - 1];
 }
