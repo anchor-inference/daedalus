@@ -141,8 +141,8 @@ def fill_form(page: Page, where: str, problems: list[str]) -> None:
     sheet = page.locator(".secret-sheet")
     sheet.wait_for(timeout=5000)
     # The project choice appears once the chat's secrets and project are read.
-    page.locator(".secret-sheet [role='radio']").first.wait_for(timeout=5000)
-    if page.locator(".secret-sheet [role='radio']").count() != 2:
+    page.locator(".secret-sheet .secret-add [role='radio']").first.wait_for(timeout=5000)
+    if page.locator(".secret-sheet .secret-add [role='radio']").count() != 2:
         problems.append(f"{where}: the form does not offer this chat and the project")
     page.locator("#secret-name").fill("Router admin")
     if "«secret:router_admin»" not in sheet.inner_text():
@@ -152,6 +152,8 @@ def fill_form(page: Page, where: str, problems: list[str]) -> None:
     if masked != "disc":
         problems.append(f"{where}: the value is not masked ({masked})")
     page.locator("#secret-note").fill("ISP router web admin, user admin")
+    if VALUE.split("\n")[0] in page.content():
+        problems.append(f"{where}: the typed value is in the page's markup")
     shot(page, f"form-{where}")
     page.locator(".secret-add .btn.primary").click()
     page.locator(".secret-sheet").wait_for(state="detached", timeout=5000)

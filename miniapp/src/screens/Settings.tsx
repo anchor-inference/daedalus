@@ -439,8 +439,9 @@ function HeartbeatTab({ s, toast }: { s: Settings; toast: (t: string) => void })
   );
 }
 
-/** Security: each concern its own group — two-factor sign-in, the operator's secrets, signing out everywhere. */
-function SecurityTab({ toast }: { toast: (t: string) => void }) {
+/** Security: each concern its own group — two-factor sign-in, the operator's secrets, signing out everywhere.
+ *  The secrets' "Add secret" is the section's header button, which counts up `newSecret`. */
+function SecurityTab({ toast, phone, newSecret }: { toast: (t: string) => void; phone: boolean; newSecret: number }) {
   // Nothing on this screen changes when the other sessions end, so the button keeps the answer.
   const [signedOut, setSignedOut] = useState(false);
   const signOutEverywhere = async () => {
@@ -456,7 +457,7 @@ function SecurityTab({ toast }: { toast: (t: string) => void }) {
   return (
     <>
       <TwoFactorCard toast={toast} />
-      <SecretsCard toast={toast} />
+      <SecretsCard toast={toast} phone={phone} requestNew={newSecret} />
       <SetGroup title={t("settings.security.sessions")}>
         <Row title={t("settings.security.signoutall")} desc={t("settings.security.signoutall.sub")} data-setting="security.signout">
           <Button size="sm" onClick={() => void signOutEverywhere()}>{signedOut && <Icon name="check" size={13} />}{t("settings.security.signoutall.action")}</Button>
@@ -521,6 +522,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
   // sends the operator here to add a model, and landing on the list would leave one more click to find.
   const [adding, setAdding] = useState(() => (section === "models" || section === "providers") && new URLSearchParams(window.location.search).get("add") === "1");
   const [addingProvider, setAddingProvider] = useState(false);
+  const [newSecret, setNewSecret] = useState(0);
   const [status, setStatus] = useState<any>(null);
   // Names and sign-in state: a model's account choice, a provider's status, the badge on Accounts.
   const { data: subscriptionAccounts } = useSubscriptionAccounts(false);
@@ -1022,7 +1024,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       case "notifications":
         return <NotificationSettings toast={toast} />;
       case "security":
-        return <SecurityTab toast={toast} />;
+        return <SecurityTab toast={toast} phone={!wide} newSecret={newSecret} />;
       case "about": {
         const logout = async () => {
           try {
@@ -1112,6 +1114,10 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
           <Icon name="plus" size={16} /> {t("settings.provider.add")}
         </button>
       </>
+    ) : sec === "security" ? (
+      <button type="button" className="btn primary secrets-add-open" onClick={() => setNewSecret((n) => n + 1)}>
+        <Icon name="plus" size={16} /> {t("secret.add")}
+      </button>
     ) : null;
   // Found rows as the controls they are, each section's body cut down to them (settingssearch.tsx);
   // a section found by its own name, not by a row, is a way into it.
@@ -1201,7 +1207,7 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
         <div className="screen narrow settings-col" data-section={level}>
           <h1 className="settings-title">{sectionLabel(level)}</h1>
           <p className="settings-about">{about(level)}</p>
-          {level === "models" && s && <div className="btnrow settings-phone-actions">{actions(level)}</div>}
+          {((level === "models" && s) || level === "security") && <div className="btnrow settings-phone-actions">{actions(level)}</div>}
           {body(level)}
         </div>
       ) : (

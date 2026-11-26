@@ -170,6 +170,9 @@ const LARGE_ALLOWED = [".answer", ".summary-body", ".preview-doc", ".composer-bo
   ".task-pane-title", ".task-prose",
   // A Memory entry's pane opens on its title, a pane's heading (18/500).
   ".memory-pane-title",
+  // An open secret's pane opens on its name as the pane's heading: 18/500, or 16 in the monospace
+  // face, whose letters are wider, when it is the secret's own name.
+  ".secret-pane-title",
   // A schedule's pane opens on its name as the pane's heading, the same 18.
   ".sched-pane-title",
   // The chat panel's Overview opens on the chat's title as the pane's heading, at a pane title's 18.
@@ -215,6 +218,8 @@ const BOX_ALLOWED = [
   // The schedule pane is the same pane: its head is level with the page header beside it (52), its foot
   // holds the schedule's buttons with the room a dialog's foot has (64).
   ".sched-pane-head", ".sched-pane-foot",
+  // The open secret's pane is that pane again: its foot holds Remove, Attach and Save in a dialog's 64.
+  ".secret-pane-foot",
   // The open event's pane is a page of its own beside the grid, and its head is level with the page header.
   ".cal-pane-head",
   // The field that adds a task to a chat's own board is the one wide control of its panel's tab, as
@@ -571,6 +576,31 @@ describe("the inbox", () => {
     expect(rule(".inbox-row-mark.attention")).toContain("var(--attention)");
     expect(rule(".inbox-row-mark.live")).toContain("var(--live)");
     expect(rule(".inbox-group-head.waiting")).toContain("var(--attention)");
+  });
+});
+
+describe("the secrets manager", () => {
+  const rule = (selector: string) => all.filter((r) => !r.media && selectors(r).includes(selector)).map((r) => r.body).join(";");
+  const at = (media: string, selector: string) => all.filter((r) => r.media.includes(media) && selectors(r).includes(selector)).map((r) => r.body).join(";");
+
+  it("lists secrets as 44 px rows (56 on a phone) in a 400 px column beside the open one, in a sheet 1080 wide", () => {
+    expect(rule(".secrets-manager.layout-split")).toContain("grid-template-columns: 400px minmax(0, 1fr)");
+    expect(rule(".secret-row-open")).toContain("height: var(--card-row-h)");
+    expect(at("max-width: 1023px", ".secret-row-open")).toContain("height: var(--card-row-h-lg)");
+    expect(at("min-width: 1024px", ".sheet.xl.secret-sheet")).toContain("width: min(1080px, 94vw)");
+    expect(rule(".secret-pane-head")).toContain("height: var(--head-h)");
+    expect(rule(".secret-pane-foot")).toContain("height: 64px");
+  });
+
+  it("sets only the name in the monospace face: where a secret belongs and when it was used are words", () => {
+    expect(rule(".secret-row-name")).toContain("font-family: var(--mono)");
+    expect(rule(".secret-row-used")).not.toContain("--mono");
+    expect(rule(".secret-row .secret-where")).not.toContain("--mono");
+  });
+
+  it("draws the open secret beside Settings' list only from a 900 px column, sticky along a long list", () => {
+    expect(at("min-width: 1024px", ".secrets-manager.in-settings.layout-split")).toContain("grid-template-columns: minmax(0, 1fr) 440px");
+    expect(at("min-width: 1024px", ".secrets-manager.in-settings .secret-pane")).toContain("position: sticky");
   });
 });
 

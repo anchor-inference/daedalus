@@ -79,9 +79,8 @@ body.resizing iframe { pointer-events: none; }
   .reply-pill, .reply-card .reply-card-open { animation: none; }
   .reply-card .reply-card-x { transition: none; }
 }
-/* The operator's secrets: a chip that names one (a draft's or a sent message's) and the form that keeps
-   one. The value field is masked like a password field but takes several lines, which a password input
-   cannot; the eye shows it while the operator checks what they pasted. */
+/* The operator's secrets: a chip that names one, on a draft or a sent message. The manager that keeps
+   them is ui/parts/secrets.css. */
 .secret-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 8px; border-radius: var(--radius-xs); border: 0; background: var(--surface-2); color: var(--fg); font: inherit; font-size: var(--fs-12); font-family: var(--mono); position: relative; }
 button.secret-chip { cursor: pointer; }
 button.secret-chip:hover { background: var(--surface-3); }
@@ -91,56 +90,6 @@ button.secret-chip:hover { background: var(--surface-3); }
 @media (pointer: coarse) { .secret-chip-x::after { content: ""; position: absolute; inset: -11px; } }
 .attachments .secret-chip { align-self: center; }
 .msg-secrets { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
-.secret-form .secret-heading { margin: 10px 0 4px; color: var(--fg-2); font-size: var(--fs-12); }
-.secret-form .secret-why { margin: 0 0 4px; }
-.secret-value-row { position: relative; display: flex; }
-.secret-value { flex: 1; margin: 0; resize: vertical; padding-right: 40px; font-family: var(--mono); -webkit-text-security: disc; }
-.secret-value.shown { -webkit-text-security: none; }
-.secret-eye { position: absolute; top: 4px; right: 4px; }
-.secret-eye[aria-pressed="true"] { color: var(--fg); background: var(--surface-3); }
-/* The manager: a search and "Add secret" over a list of rows, the rows of a settings card whether the list
-   is the Settings page's own or the body of the composer's sheet. A row's value is a fixed run of dots, so
-   it says nothing of the length; the eye puts the value on the line under the row for half a minute,
-   which the bar under it counts down. */
-.secrets-manager { display: flex; flex-direction: column; gap: var(--space-2); }
-.secrets-manager .secret-why { margin: 0; }
-.secrets-toolbar { display: flex; gap: var(--space-2); align-items: center; }
-.secrets-search { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
-.secrets-search .ic { position: absolute; left: 10px; color: var(--fg-2); pointer-events: none; }
-.secrets-search input.field { width: 100%; margin: 0; padding-left: 30px; }
-.secrets-add-open { flex: none; margin-left: auto; }
-.secret-sheet .secret-add { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); box-shadow: var(--drop-xs); animation: secret-in .14s ease-out; }
-.secret-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
-.secrets-group { display: flex; flex-direction: column; gap: 4px; }
-.secrets-group > .secret-heading { margin: var(--space-2) 0 0; color: var(--fg-2); font-size: var(--fs-12); }
-.secrets-others-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
-.secrets-others-toggle .ic { transform: rotate(-90deg); transition: transform var(--t-fast); }
-.secrets-others-toggle[aria-expanded="true"] .ic { transform: none; }
-.secrets-list > .secret-row + .secret-row { border-top: 1px solid var(--line); }
-.secrets-none { padding: var(--space-2) 0; }
-.secret-row { min-width: 0; }
-.secret-row-scope, .secret-row-note { overflow-wrap: anywhere; }
-.secret-row-meta { display: block; color: var(--fg-3); font-size: var(--fs-12); overflow-wrap: anywhere; }
-.secret-row-attached { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--fg-2); font-size: var(--fs-12); }
-.secret-row-dots { flex: 0 1 auto; min-width: 0; padding: 2px 8px; border-radius: var(--radius-xs); background: var(--inset); box-shadow: var(--shadow-ring); font-family: var(--mono); font-size: var(--fs-13); letter-spacing: 0.08em; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.secret-row-dots.shown { display: block; letter-spacing: normal; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: auto; user-select: all; }
-.secret-row-dots.bad { background: transparent; box-shadow: none; color: var(--bad); letter-spacing: normal; font-family: var(--font); }
-.secret-row-tools { flex: none; display: inline-flex; gap: 2px; }
-.secret-revealed { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 12px; }
-.secret-timer { height: 2px; border-radius: 2px; background: var(--fg-3); transform-origin: left; animation: secret-countdown 30s linear forwards; }
-.dialog-body .secret-warn { margin: 0 0 8px; color: var(--warn); }
-/* In the composer's sheet the control lane has the sheet's width to share with the words: it goes under them. */
-.secret-sheet .secret-row .settings-row { flex-wrap: wrap; }
-.secret-sheet .secret-row .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
-.secret-sheet .secret-row-dots { flex: 1; }
-.secret-sheet .secret-row-tools { margin-left: auto; }
-@keyframes secret-in { from { opacity: 0; transform: translateY(-2px); } }
-@keyframes secret-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@media (prefers-reduced-motion: reduce) {
-  .secret-sheet .secret-add { animation: none; }
-  /* No moving bar for a reader who asked for stillness; the value still hides on time. */
-  .secret-timer { display: none; }
-}
 .chat { position: relative; }
 
 /* ── to the latest message ─────────────────────────────────────────────────────────────── */
@@ -439,22 +388,7 @@ a.rcard-title:hover { text-decoration-color: currentColor; }
 .share-field .ic { color: var(--fg-3); flex: none; }
 .share-field .btn { flex: none; white-space: nowrap; }
 
-/* On a phone: the Secret form. */
+/* On a phone: a sent message's secret reads at the phone's secondary size. */
 @media (max-width: 1023px) {
-  /* The Secret form in the phone's dress: the labels and fields of the other phone forms, and 16 px in the
-     fields so Safari does not zoom into them. */
-  .secret-sheet .field-label, .secret-sheet .secret-heading { margin: var(--space-4) 4px var(--space-2); font-size: var(--fs-13); font-weight: 500; color: var(--fg-3); }
-  .secret-sheet .secret-form { padding: 0 var(--gutter); }
-  .secret-sheet input.field, .secret-sheet textarea.field { font-size: var(--fs-16); }
-  .secret-sheet input.field { height: var(--row-h-touch); }
-  .secret-sheet .secret-form .sub { font-size: var(--fs-13); }
-  .secret-sheet .secret-chip, .msg-secrets .secret-chip { font-size: var(--fs-13); }
-  .secret-sheet .secrets-manager { padding: 0 var(--gutter) var(--space-4); }
-  .secret-sheet .secret-add { padding: var(--space-3); }
-  .secret-sheet .secret-edit { padding: 0; }
-  .secrets-search input.field { font-size: var(--fs-16); height: var(--row-h-touch); }
-  .secret-row-dots { font-size: var(--fs-14); }
-  .secret-row-scope, .secret-row-meta, .secret-row-attached, .secrets-group > .secret-heading { font-size: var(--fs-13); }
-  .secret-row-tools .iconbtn { width: var(--row-h-touch); height: var(--row-h-touch); }
-  .secret-row-tools { gap: 0; }
+  .msg-secrets .secret-chip { font-size: var(--fs-13); }
 }
