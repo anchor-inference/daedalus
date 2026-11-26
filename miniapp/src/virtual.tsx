@@ -461,6 +461,12 @@ export function WindowedRows({ keys, render, host, rowSelector, estimate = 64, o
       if (key === undefined) break;
       const rect = rows[i].getBoundingClientRect();
       const next = rows[i + 1];
+      // The last row drawn has no next one to measure to, and its own box leaves out the gap that
+      // follows it. Taking that box gave the row one height at the window's edge and another inside
+      // it, so the window's end moved, the row was measured the other way, and the two answers chased
+      // each other until React stopped the page (a list of 32 px rows with a 2 px gap, scrolled a
+      // little). Only the list's true last row, which has no gap after it, is measured by its box.
+      if (!next && held.current.start + i !== keys.length - 1) continue;
       const h = Math.round(next ? next.getBoundingClientRect().top - rect.top : rect.height);
       if (h > 0 && sizes.current.get(key) !== h) {
         sizes.current.set(key, h);
