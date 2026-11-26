@@ -691,6 +691,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {openReply && <ReplyDialog key={openReply.id} sessionId={sessionId} reply={openReply} phone={phone} onClose={() => setReplyOpen(null)} />}
           {secretOpen && <SecretSheet sessionId={sessionId} phone={phone} attached={secrets.map((secret) => secret.name)} onClose={() => setSecretOpen(false)}
             onAttach={(secret) => setSecrets((list) => [...list.filter((other) => other.name !== secret.name), secret])}
+            onDetach={(id) => setSecrets((list) => list.filter((other) => other.id !== id))}
             onChanged={(id, name) => setSecrets((list) => (name === null ? list.filter((other) => other.id !== id) : list.map((other) => (other.id === id ? { ...other, name } : other))))} />}
           <AccessSelect yagni={!!props.yagni} onYagni={props.onYagni} autopilot={props.autopilot} onAutopilot={props.onAutopilot} bypass={props.bypass} onBypass={props.onBypass}
             translation={props.translation} translationDefault={props.translationDefault} onAgentLang={props.onAgentLang} compact={phone} />

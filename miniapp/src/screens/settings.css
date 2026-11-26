@@ -202,15 +202,13 @@ h1.settings-title { margin: 0; font-size: var(--fs-20); font-weight: 600; letter
 .set-card .set-value .dropdown-btn:hover:not(:disabled), .set-card .settings-row-ctl > .dropdown > .dropdown-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .set-card .set-value, .set-card .settings-row-ctl > .dropdown { max-width: 420px; }
 
-/* ── Security, components, dependencies and About: rows whose control is more than one thing ───
+/* ── Components, dependencies and About: rows whose control is more than one thing ──────────
    A row that holds several buttons has the lane's width to share with its words; on a phone it goes
-   under them, which is the shape a lone select or number already has. */
-.set-block.secrets-toolbar { flex-direction: row; }
-.set-block .secrets-search { flex: 1; }
+   under them, which is the shape a lone select or number already has. (Security's secrets are a
+   manager of their own: ui/parts/secrets.css.) */
 @media (max-width: 599px) {
-  .set-card .secret-row .settings-row, .set-card .settings-row.comp-row { flex-wrap: wrap; }
-  .set-card .secret-row .settings-row-ctl, .set-card .settings-row.comp-row > .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
-  .secret-row .secret-row-tools { margin-left: auto; }
+  .set-card .settings-row.comp-row { flex-wrap: wrap; }
+  .set-card .settings-row.comp-row > .settings-row-ctl { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; }
 }
 
 /* ── Navigation: one row per destination, in the list it sits in ───────────────────────────── */
