@@ -52,7 +52,7 @@ import { DesktopAppCard } from "../updatedialog";
 import { SecretsCard } from "../secrets";
 import { KeyproxyCard, SearchKeys } from "../keyproxy";
 import { SubscriptionAccountsCard, useSubscriptionAccounts, type SubscriptionAccounts } from "../accounts";
-import { revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
+import { keepInView, revealSetting, settingTarget, clearSettingTarget } from "../settinglink";
 import { INDEX_SECTIONS, SECTION_GROUPS, fieldPath, matchFields, sectionOfAnchor, type SectionGroup } from "./settingsindex";
 import { HitBody, hitCount, moveInList, usePageKeys } from "./settingssearch";
 import { AddProvider, ModelsSection } from "./ModelsSection";
@@ -563,6 +563,8 @@ export function SettingsScreen({ toast, section, onClose }: { toast: (t: string)
       if (target || ++tries > 20) {
         window.clearInterval(timer);
         target?.scrollIntoView({ block: "start" });
+        // Held like a row: the cards above it that answer later would push it down the page.
+        if (target) keepInView(target, { find: () => document.getElementById(anchor), block: "start" });
         setAnchor(null);
       }
     }, 100);
