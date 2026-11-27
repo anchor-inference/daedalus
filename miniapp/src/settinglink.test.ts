@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Notification } from "./api";
 import {
-  dismissSettingNotice, FLASH_CLASS, NOTICE_EVENT, noticeFromEvent, raiseFromError, raiseSettingNotice, revealSetting, rowSelector,
+  dismissSettingNotice, FLASH_CLASS, NOTICE_EVENT, noticeFromEvent, raiseFromError, raiseSettingNotice, keepInView, revealSetting, rowSelector,
   settingNotices, settingOfError, settingPath, settingRef, type SettingNotice,
 } from "./settinglink";
 import { NoticeQueue } from "./ui/primitives";
@@ -77,6 +77,116 @@ describe("revealSetting", () => {
     const found = revealSetting("nowhere", { every: 50, tries: 4 });
     vi.advanceTimersByTime(400);
     await expect(found).resolves.toBe(false);
+  });
+});
+
+describe("a revealed row held in view", () => {
+  // jsdom has no layout: the column's height and the row's place are numbers the test moves, and the
+  // observer is a stand-in whose callback the test calls when it says the column changed size.
+  let notify: () => void;
+  let column: HTMLElement;
+  let el: HTMLElement;
+  let layout: { above: number };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = "";
+    layout = { above: 0 };
+    vi.stubGlobal("ResizeObserver", class {
+      private watching = false;
+      constructor(private callback: ResizeObserverCallback) {
+        notify = () => this.watching && this.callback([{ target: column } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      observe() {
+        this.watching = true;
+      }
+      disconnect() {
+        this.watching = false;
+      }
+      unobserve() {}
+    });
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    column = document.createElement("div");
+    column.getBoundingClientRect = () => ({ height: 600 + layout.above, top: 0, bottom: 600 + layout.above } as DOMRect);
+    document.body.appendChild(column);
+    el = placed("vision.preset");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function placed(key: string): HTMLElement {
+    const row = document.createElement("div");
+    row.dataset.setting = key;
+    row.scrollIntoView = vi.fn();
+    row.getBoundingClientRect = () => ({ top: 300 + layout.above, bottom: 360 + layout.above, height: 60 } as DOMRect);
+    column.appendChild(row);
+    return row;
+  }
+
+  const land = (px: number) => {
+    layout.above = px;
+    notify();
+  };
+
+  it("puts the row back however late the content above it lands", async () => {
+    await revealSetting("vision.preset");
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
+    // Far past the second or two a fixed grace allowed.
+    vi.advanceTimersByTime(12_000);
+    land(1200);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(el.scrollIntoView).toHaveBeenLastCalledWith({ block: "center" });
+  });
+
+  it("leaves a row that is still in view where it is", async () => {
+    await revealSetting("vision.preset");
+    land(200);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["wheel", "touchstart", "pointerdown", "keydown"])("lets go the moment the reader's %s comes", async (type) => {
+    await revealSetting("vision.preset");
+    window.dispatchEvent(new Event(type));
+    land(1200);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets go after the bound", async () => {
+    await revealSetting("vision.preset", { holdMs: 5000 });
+    vi.advanceTimersByTime(5001);
+    land(1200);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the row to a new element when its card draws afresh, and lets go when it is gone", async () => {
+    await revealSetting("vision.preset");
+    el.remove();
+    const again = placed("vision.preset");
+    land(1200);
+    expect(again.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    again.remove();
+    land(2400);
+    expect(again.scrollIntoView).toHaveBeenCalledTimes(1);
+    placed("vision.preset");
+    land(3600);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the top of a part of the page named by an old address the same way", () => {
+    keepInView(el, { find: () => document.querySelector<HTMLElement>("[data-setting]"), block: "start" });
+    land(1200);
+    expect(el.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
+  it("holds the row of the last link only", async () => {
+    const other = placed("compaction.preset");
+    await revealSetting("vision.preset");
+    await revealSetting("compaction.preset");
+    land(1200);
+    expect(other.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -73,15 +73,27 @@ export function rowSelector(key: string): string {
   return `[data-setting="${key.replace(/["\\]/g, "\\$&")}"]`;
 }
 
+/** How long a revealed row is held in view while the section lays out around it. A section's cards
+ *  read their own answers, so what lands above the row is as late as the slowest of them; the reader's
+ *  first touch ends the holding much sooner, this is only the bound for one who never touches. */
+export const HOLD_MS = 20_000;
+
 /**
- * Find the row, scroll it into the middle of its scroller and make it blink.
+ * Find the row, scroll it into the middle of its scroller, make it blink and keep it in view.
  *
  * Settings are read from the host after the page opens, and a section draws its rows only then, so
  * the row is looked for a few times rather than once; the answer says whether it was found. The class
  * is taken off again after `FLASH_MS`, and put on afresh when it is already there, so a second press
  * of the same button blinks again instead of doing nothing.
+ *
+ * The scroll lands on the section as it is drawn at that moment. A card above the row that reads its
+ * own answer (the agent's browser, the companion, accounts) draws after it and pushes the row down
+ * the page; after a fixed grace period of a second or two a slow machine or a slow host left the
+ * reader near the row, not on it. So the row is held: whenever anything around it changes size and it
+ * has left its scroller's view it is put back, until the reader scrolls, presses a key, touches the
+ * page, the row leaves the page, another row is revealed, or `holdMs` has passed.
  */
-export function revealSetting(key: string, opts: { root?: ParentNode; tries?: number; every?: number; flashMs?: number } = {}): Promise<boolean> {
+export function revealSetting(key: string, opts: { root?: ParentNode; tries?: number; every?: number; flashMs?: number; holdMs?: number } = {}): Promise<boolean> {
   const root = opts.root ?? document;
   const tries = opts.tries ?? 30;
   const every = opts.every ?? 100;
@@ -99,26 +111,81 @@ export function revealSetting(key: string, opts: { root?: ParentNode; tries?: nu
       row.classList.add(FLASH_CLASS);
       const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       row.scrollIntoView?.({ block: "center", behavior: reduced ? "auto" : "smooth" });
-      // A card above the row that answers its own request later (the companion's, on the voice
-      // section) grows after the scroll and pushes the row out of sight; for a moment after the
-      // scroll the row is put back whenever the section moves it. Measured against the box that
-      // scrolls it: inside Settings' column a row can be within the window and still hidden under
-      // the column's edge, which the window's bounds alone took for "in view".
-      const until = performance.now() + 1500;
-      const keep = () => {
-        const box = row.getBoundingClientRect();
-        const pane = scrollerOf(row)?.getBoundingClientRect();
-        const top = Math.max(0, pane?.top ?? 0);
-        const bottom = Math.min(window.innerHeight, pane?.bottom ?? window.innerHeight);
-        if (box.top < top || box.bottom > bottom) row.scrollIntoView?.({ block: "center" });
-        if (performance.now() < until) window.setTimeout(keep, 120);
-      };
-      window.setTimeout(keep, 250);
+      keepInView(row, { find: () => root.querySelector<HTMLElement>(rowSelector(key)), holdMs: opts.holdMs });
       window.setTimeout(() => row.classList.remove(FLASH_CLASS), opts.flashMs ?? FLASH_MS);
       resolve(true);
     };
     attempt();
   });
+}
+
+let holding: (() => void) | null = null;
+
+/** Put `first` back where it was scrolled to (the middle of its scroller, or its top for `block:
+ *  "start"`) whenever something around it changes size and it is out of its scroller's view, until
+ *  the reader acts. Programmatic scrolls (the one that brought it there, the smooth one before it)
+ *  raise none of the events that end it, so only the reader's own hand does. A card that draws its
+ *  rows afresh when its answer lands replaces the element; `find` names the new one, and no element
+ *  under it means the reader has left the section. */
+export function keepInView(first: HTMLElement, opts: { find: () => HTMLElement | null; block?: "center" | "start"; holdMs?: number }): void {
+  if (typeof ResizeObserver === "undefined") return;
+  const { find, block = "center", holdMs = HOLD_MS } = opts;
+  const cleanups: (() => void)[] = [];
+  const stop = () => {
+    if (holding === stop) holding = null;
+    while (cleanups.length) cleanups.pop()?.();
+  };
+  // One element is held at a time: a second link followed while the first is still held would otherwise
+  // have two rows pulling the page to their own middle.
+  holding?.();
+  holding = stop;
+  let row = first;
+  const heights = new Map<Element, number>();
+  const observer = new ResizeObserver((entries) => {
+    // The first notice of a node only reports the size it has, which is taken when it is first
+    // watched; acting on it would cut short the smooth scroll that is under way.
+    let changed = false;
+    for (const entry of entries) {
+      const now = entry.target.getBoundingClientRect().height;
+      if (heights.has(entry.target) && heights.get(entry.target) !== now) changed = true;
+      heights.set(entry.target, now);
+    }
+    if (changed) check();
+  });
+  const watch = (el: HTMLElement) => {
+    observer.disconnect();
+    heights.clear();
+    // Everything between the row and the page: a card above it growing resizes the column that holds
+    // both, whatever the card is, so the row's own ancestors are the whole list to watch.
+    for (let node: HTMLElement | null = el.parentElement; node; node = node.parentElement) {
+      heights.set(node, node.getBoundingClientRect().height);
+      observer.observe(node);
+    }
+  };
+  const check = () => {
+    if (!row.isConnected) {
+      const again = find();
+      if (!again) return stop();
+      row = again;
+      watch(row);
+    }
+    const box = row.getBoundingClientRect();
+    const pane = scrollerOf(row)?.getBoundingClientRect();
+    // Measured against the box that scrolls it: inside Settings' column a row can be within the window
+    // and still hidden under the column's edge, which the window's bounds alone took for "in view".
+    const top = Math.max(0, pane?.top ?? 0);
+    const bottom = Math.min(window.innerHeight, pane?.bottom ?? window.innerHeight);
+    if (box.top < top || box.bottom > bottom) row.scrollIntoView?.({ block });
+  };
+  watch(row);
+  cleanups.push(() => observer.disconnect());
+  const reader = { capture: true, passive: true } as const;
+  for (const type of ["wheel", "touchstart", "pointerdown", "keydown"]) {
+    window.addEventListener(type, stop, reader);
+    cleanups.push(() => window.removeEventListener(type, stop, reader));
+  }
+  const timer = window.setTimeout(stop, holdMs);
+  cleanups.push(() => window.clearTimeout(timer));
 }
 
 /** The nearest box around the row that scrolls it vertically, or null when the page itself does. */
