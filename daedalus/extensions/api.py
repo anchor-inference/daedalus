@@ -22,7 +22,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, closing, suppress
+from contextlib import AbstractContextManager, asynccontextmanager, closing, nullcontext, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PureWindowsPath
@@ -184,6 +184,7 @@ from daedalus.host import (
     model_health,
     quick_agent,
     session_attachments,
+    share_turns,
     subagent_models,
     task_effort,
     translation,
@@ -1724,6 +1725,10 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         if who.get("via") != "share":
             return None
         return {"share": str(who.get("share") or ""), "name": str(who.get("name") or "")}
+
+    def visit(who: dict[str, Any]) -> AbstractContextManager[None]:
+        """Marks what a request starts as a live link's visitor's turn, for that link's policy and spend."""
+        return share_turns.visiting(str(who.get("share") or "")) if who.get("via") == "share" else nullcontext()
 
     def front_of(who: dict[str, Any]) -> str:
         """The front an answer, a grant or a message came through, as the events record it: a
@@ -3388,21 +3393,22 @@ def build_app(app: Application, api_token: str) -> FastAPI:
             text = f"[In reply to: «{excerpt}»]\n{body.text}"
         try:
             await companion_turn(session_id)
-            run_id = await manager.submit(
-                session_id,
-                text,
-                steer=body.steer,
-                follow_up=body.follow_up,
-                expected_running=body.expected_running,
-                client_message_id=body.client_message_id or None,
-                reply_to=reply,
-                # The operator's secrets are the operator's to hand over, never a visitor's.
-                secrets=() if visitor else body.secrets,
-                via=front_of(_),
-                visitor=visitor,
-                # The app draws the message itself, as translating, and should not wait on the translator.
-                background_translation=True,
-            )
+            with visit(_):
+                run_id = await manager.submit(
+                    session_id,
+                    text,
+                    steer=body.steer,
+                    follow_up=body.follow_up,
+                    expected_running=body.expected_running,
+                    client_message_id=body.client_message_id or None,
+                    reply_to=reply,
+                    # The operator's secrets are the operator's to hand over, never a visitor's.
+                    secrets=() if visitor else body.secrets,
+                    via=front_of(_),
+                    visitor=visitor,
+                    # The app draws the message itself, as translating, and should not wait on the translator.
+                    background_translation=True,
+                )
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
         except ReceiptConflict as exc:
@@ -3463,19 +3469,20 @@ def build_app(app: Application, api_token: str) -> FastAPI:
                 raise HTTPException(400, "nothing to send")
             body = text.strip() or ("Files attached." if len(attachments) > 1 else "File attached.")
             await companion_turn(session_id)
-            run_id = await manager.submit(
-                session_id,
-                body,
-                attachments,
-                steer=steer,
-                follow_up=follow_up,
-                expected_running=expected_running,
-                client_message_id=client_message_id or None,
-                secrets=[] if visitor_mark(_) else [name.strip() for name in secret_names.split(",") if name.strip()],
-                visitor=visitor_mark(_),
-                # A translated message keeps its files: the delivery renames them away from the staging below.
-                background_translation=True,
-            )
+            with visit(_):
+                run_id = await manager.submit(
+                    session_id,
+                    body,
+                    attachments,
+                    steer=steer,
+                    follow_up=follow_up,
+                    expected_running=expected_running,
+                    client_message_id=client_message_id or None,
+                    secrets=[] if visitor_mark(_) else [name.strip() for name in secret_names.split(",") if name.strip()],
+                    visitor=visitor_mark(_),
+                    # A translated message keeps its files: the delivery renames them away from the staging below.
+                    background_translation=True,
+                )
             translating = translating_entry(session_id, client_message_id)
         except ReceiptConflict as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -4636,7 +4643,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         try:
             # Typed words in a translated session go to the translator after the answer is acknowledged: the
             # card says they are translating, and does not sit on "Sending…" for as long as it takes.
-            run_id = await manager.answer(session_id, body.answers, via=front_of(_), background_translation=True)
+            with visit(_):
+                run_id = await manager.answer(session_id, body.answers, via=front_of(_), background_translation=True)
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
         held = next((entry for entry in manager.translating(session_id) if entry.get("kind") == "answer"), None) if not run_id else None
@@ -4740,7 +4748,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
     @api.post("/api/sessions/{session_id}/retry")
     async def retry_session(session_id: str, body: RevertBody, _: dict[str, Any] = Depends(auth)) -> dict[str, Any]:
         try:
-            return await manager.retry(session_id, body.seq)
+            with visit(_):
+                return await manager.retry(session_id, body.seq)
         except KeyError:
             raise HTTPException(404, "no such session") from None
         except ValueError as exc:
@@ -5781,6 +5790,19 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         account = body.get("account")
         if account is not None and not isinstance(account, str):
             raise HTTPException(400, "account must be a string")
+        if _.get("via") == "share":
+            share = str(_.get("share") or "")
+            rule = share_turns.rule_of(await share_turns.policy_of(manager.db, share), "main")
+            if rule is not None:
+                # A link that sets the conversation's model keeps its visitor's pick beside the link: written
+                # on the session, it would also be what the operator's next turn runs on.
+                effort = "none" if body.get("thinking") is False else body.get("reasoning_effort")
+                try:
+                    pick = await manager.set_link_pick(session_id, share, rule, preset=body.get("preset") or None, effort=effort,
+                                                       account=account, clear=bool(body.get("clear")))
+                except ValueError as exc:
+                    return JSONResponse({"detail": str(exc), "code": "not_allowed"}, status_code=403)  # type: ignore[return-value]
+                return {"ok": True, "share_pick": pick}
         if body.get("context_window"):
             # Per-session window (in memory): smaller than the model's for cheap runs or tests.
             state.context_window = max(8_000, int(body["context_window"]))
