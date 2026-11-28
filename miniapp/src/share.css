@@ -24,3 +24,166 @@
 .live-create .link-label { margin: 0 4px 0 0; }
 .live-ended { display: grid; gap: 2px; color: var(--fg-3); font-size: var(--fs-13); }
 .live-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.live-link-name { display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); }
+.live-lock { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: var(--radius-pill); font-size: var(--fs-12); font-weight: 400; white-space: nowrap; }
+.live-lock.on { color: var(--fg-2); background: var(--surface-2); }
+.live-lock.off { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+/* The window. On a desktop it is the secrets manager's size and shape: a head of the page header's
+   height, the links in a 300 px column and the chosen link's settings beside it, each scrolling alone,
+   and the decision with its summary pinned at the foot of the settings. */
+.sheet.live-sheet > .sheet-body { display: flex; flex-direction: column; }
+.live-win { display: flex; flex-direction: column; min-height: 0; }
+.live-win-list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.live-win-listhead { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 0 4px 4px; font-size: var(--fs-12); font-weight: 500; color: var(--fg-3); text-transform: none; }
+.live-win-empty { padding: 4px 4px 8px; font-size: var(--fs-13); line-height: 1.45; }
+.live-win-row { display: flex; flex-direction: column; border-radius: var(--radius-sm); }
+.live-win-row:hover { background: var(--hover); }
+.live-win-row.on { background: var(--selected); }
+.live-win-rowmain { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px 2px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.live-win-rowname { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-14); font-weight: 500; }
+.live-win-rowfacts { font-size: var(--fs-12); }
+.live-win-rowtools { display: flex; gap: 2px; padding: 0 4px 6px; }
+.live-win-list .live-reach { margin-top: 8px; }
+.live-win-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.live-win-body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.live-win-loading { padding: 16px; }
+.live-win-url { display: flex; gap: 8px; margin-bottom: 4px; }
+.live-win-url .field { flex: 1; min-width: 0; }
+.live-win-foot { display: flex; align-items: center; gap: 16px; padding: 12px 0 4px; border-top: 1px solid var(--line); background: var(--surface-1); }
+.live-summary { flex: 1; display: flex; align-items: flex-start; gap: 10px; min-width: 0; font-size: var(--fs-13); line-height: 1.45; color: var(--fg); }
+.live-summary .ic { flex: none; margin-top: 1px; color: var(--ok); }
+.live-summary.open .ic { color: var(--warn); }
+.live-save { flex: none; }
+.live-saved { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ok); font-size: var(--fs-13); }
+
+.live-sec { display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-top: 1px solid var(--line); }
+.live-win-body > .live-sec:first-of-type, .live-win-body > .live-warning + .live-sec, .live-win-url + .live-sec { border-top: 0; padding-top: 8px; }
+.live-sec-head { display: flex; align-items: center; gap: 12px; }
+.live-sec-title { margin: 0; font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; }
+.live-sec-sub { margin: -4px 0 4px; font-size: var(--fs-13); line-height: 1.5; max-width: 72ch; }
+.live-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.live-grid2 .field-box { margin: 0; }
+
+/* A link without a password is drawn as the less safe state it is: the warning's colour, not the calm
+   card a password gets. */
+.live-pw { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--card); }
+.live-pw.none { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.live-pw-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-14); }
+.live-pw.none .live-pw-head .ic { color: var(--warn); }
+.live-pw.set .live-pw-head .ic { color: var(--ok); }
+.live-pw-sub { margin: 0; font-size: var(--fs-13); line-height: 1.45; }
+.live-pw-field { display: flex; gap: 8px; margin-top: 4px; }
+.live-pw-field .field { flex: 1; min-width: 0; }
+
+.live-roles { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.live-role { display: grid; grid-template-columns: minmax(180px, 0.9fr) minmax(0, 2fr); gap: 8px 16px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.live-role:first-child { border-top: 0; }
+.live-role.bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.live-role-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-14); }
+.live-role-text .sub { font-size: var(--fs-12); line-height: 1.4; }
+.live-role-value { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.live-role-value .live-role-preset { flex: 1 1 100%; max-width: 100%; }
+.live-role-current { font-size: var(--fs-12); }
+.live-role-choice { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.live-role-choice-label, .live-role-fixed { font-size: var(--fs-12); }
+.live-role-error { grid-column: 1 / -1; }
+.live-bill { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); font-size: var(--fs-12); white-space: nowrap; color: var(--fg-2); background: var(--surface-2); }
+.live-bill.subscription { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.live-bill:empty { display: none; }
+
+.live-allowed { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.live-allowed-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.live-allowed-search { flex: 1 1 240px; display: flex; align-items: center; gap: 6px; padding-left: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); color: var(--fg-3); }
+.live-allowed-search .field { flex: 1; min-width: 0; border: 0; background: none; padding-left: 2px; }
+.live-allowed-count { font-size: var(--fs-12); }
+/* The model picker's shape: the providers by name in a column, the chosen one's presets beside it,
+   both one height so a long provider list and a long preset list each scroll alone. */
+.live-allowed-split { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(var(--row-h) * 12); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); overflow: hidden; }
+.live-allowed-provs { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; padding: 4px; border-right: 1px solid var(--line); }
+.live-allowed-prov { display: flex; align-items: center; gap: 8px; flex: none; height: var(--row-h); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.live-allowed-prov:hover { background: var(--hover); }
+.live-allowed-prov.on { background: var(--selected); }
+.live-allowed-prov.none { color: var(--fg-3); }
+.live-allowed-provcount { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.live-allowed-provcount.some { color: var(--accent); }
+.live-allowed-models { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px; }
+.live-allowed-mhead { position: sticky; top: -4px; z-index: 1; display: flex; align-items: center; gap: 12px; min-height: var(--row-h); margin: -4px -4px 4px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--card); font-size: var(--fs-13); }
+.live-allowed-provall { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; white-space: nowrap; }
+.live-allowed-empty { padding: 8px; }
+.live-allowed-row { border-radius: var(--radius-sm); }
+.live-allowed-row.on { background: var(--selected); }
+.live-allowed-main { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 4px 8px; font-size: var(--fs-13); cursor: pointer; }
+.live-allowed-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.live-allowed-name .mono { font-size: var(--fs-12); }
+.live-allowed-own { font-size: var(--fs-12); }
+.live-allowed-subs { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 8px 32px; }
+.live-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.live-chips-label { min-width: 5.5em; font-size: var(--fs-12); }
+.live-chipbtn { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--card); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.live-chipbtn.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+.live-limit { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
+.live-limit.quiet { background: none; border-style: dashed; }
+.live-limit.quiet .field-label { color: var(--fg-2); }
+.live-limit-input { display: flex; align-items: center; gap: 6px; }
+.live-limit-input .field { width: 9em; }
+.live-limit-unit { color: var(--fg-2); font-size: var(--fs-14); }
+.live-limit-sub { font-size: var(--fs-12); line-height: 1.45; }
+.live-spent { display: flex; flex-direction: column; gap: 4px; }
+.live-spent-line { font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.live-bar { height: 6px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; }
+.live-bar > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.live-bar > span.near { background: var(--warn); }
+.live-bar > span.full { background: var(--bad); }
+.live-term { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px; background: var(--card); }
+
+.live-withheld { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; margin: 0; padding: 0; list-style: none; }
+.live-withheld li { display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; font-size: var(--fs-13); }
+.live-withheld li .ic { flex: none; margin-top: 2px; color: var(--fg-3); }
+.live-withheld li > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.live-withheld li .sub { font-size: var(--fs-12); line-height: 1.4; }
+
+@media (min-width: 1024px) {
+  .sheet.xl.live-sheet { width: min(1100px, 94vw); height: min(840px, 90vh); max-height: 90vh; padding: 0; }
+  .live-sheet > .sheet-head { flex: none; height: var(--head-h); box-sizing: border-box; margin: 0; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line); }
+  .live-sheet > .sheet-head h3 { font-size: var(--fs-15); font-weight: 600; }
+  .live-sheet > .sheet-body { flex: 1; min-height: 0; overflow: hidden; padding: 0; }
+  .live-win { flex: 1; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+  .live-win-list { min-height: 0; overflow-y: auto; padding: 12px; border-right: 1px solid var(--line); }
+  .live-win-pane { min-height: 0; }
+  .live-win-body { flex: 1; overflow-y: auto; padding: 16px 24px 8px; }
+  .live-win-foot { flex: none; padding: 12px 24px; }
+}
+
+/* A phone: the whole sheet scrolls as one page inside 16 px gutters, the links above the settings, the
+   roles one column, and the decision pinned to the bottom. */
+@media (max-width: 1023px) {
+  /* The body is a plain block here: as a flex column it squeezed the pane to the screen's height and
+     the rest of the settings spilled out of it. */
+  .sheet.live-sheet > .sheet-body { display: block; padding: 0; }
+  .live-win { display: block; padding: 0 var(--gutter); }
+  .live-win-pane, .live-win-body { min-height: auto; }
+  .live-win-list { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .live-grid2, .live-withheld { grid-template-columns: minmax(0, 1fr); }
+  .live-role { grid-template-columns: minmax(0, 1fr); }
+  .live-role-choice { grid-column: 1; }
+  .live-allowed { padding: 8px; }
+  .live-allowed-split.phone { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .live-allowed-split.phone .live-allowed-provs { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); }
+  .live-allowed-split.phone .live-allowed-prov { height: var(--ctl-h-sm); max-width: 70%; }
+  .live-allowed-split.phone .live-allowed-models { max-height: 60vh; }
+  .live-allowed-main { min-height: var(--row-h-touch); }
+  .live-allowed-subs { padding-left: 8px; }
+  /* The summary and the decision end the page rather than float over it: pinned, the summary's four or
+     five lines covered a third of a phone's screen and the very fields it summed up. */
+  .live-win-foot { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 0 calc(16px + env(safe-area-inset-bottom)); }
+  .live-save { width: 100%; justify-content: center; }
+  .live-sheet input.field { font-size: var(--fs-16); }
+  .live-pw-field { flex-wrap: wrap; }
+  .live-pw-field .field { flex-basis: 100%; }
+  .live-win-url { flex-wrap: wrap; }
+  .live-win-url .field { flex-basis: 100%; }
+}
+@media (max-width: 1023px) { .live-allowed-split.phone .live-allowed-mhead > b { display: none; } .live-allowed-split.phone .live-allowed-mhead { justify-content: flex-end; } }
+.live-role-value .live-role-preset .dropdown-btn { width: 100%; max-width: 100%; }
