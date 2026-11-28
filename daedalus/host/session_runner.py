@@ -103,6 +103,7 @@ from daedalus.host import (
     prompt_coach,
     prompts,
     quick_agent,
+    share_tools,
     standing,
     subagent_models,
     summaries,
@@ -5563,6 +5564,9 @@ class SessionManager:
             turn = guest_turns.restricted(state.guest_turn)
             if turn is not None and "history" in options:
                 options["history"] = agent_talk.for_reply(options["history"], state.run_id or "", turn.runs) if turn.kind == "reply" else guest_turns.for_guest(options["history"], state.run_id or "")
+            elif "history" in options and share_tools.held(self, state.session.id, state.metadata) and (snapshot := memory_render.Snapshot.read(state.metadata)) is not None:
+                # The memory block an earlier turn carried is still in the history; a link's holder reads it there.
+                options["history"] = share_tools.without_carried_memory(options["history"], snapshot.carriers, self.sessions.transcript_key)
             return build(*args, **options)
 
         engine.context_manager.build_context = build_context  # type: ignore[method-assign]
@@ -5913,6 +5917,10 @@ class SessionManager:
                 state.metadata[guest_turns.WROTE_KEY] = True
                 state.session.metadata[guest_turns.WROTE_KEY] = True
                 await self.sessions.update_metadata(state.session.id, state.session.metadata)
+        if not continue_turn:
+            # Before the context and the engine, both of which follow it: the turn boundary is where a
+            # live link takes the tools away or gives them back (daedalus.host.share_tools).
+            await share_tools.refresh(self, state)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
         if state.engine is None or not continue_turn:
@@ -6068,6 +6076,8 @@ class SessionManager:
             volatile.append("\n" + memory.text)
         if privacy.is_private(state):
             volatile.append("\n- " + privacy.TURN_NOTE)
+        if share_tools.held(self, state.session.id, state.metadata):
+            volatile.append("\n- " + share_tools.turn_note())
         switched_off = await self._take_mcp_switched_off(state)
         if switched_off:
             volatile.append("\n" + switched_off)
@@ -6180,6 +6190,9 @@ class SessionManager:
             # in the history (taking it out would rewrite the cached head); nothing new is added.
             return False
         if privacy.is_private(state) or self.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
+            return False
+        if share_tools.held(self, state.session.id, state.metadata):
+            # Whoever holds a live link reads this conversation; the operator's memory is not theirs.
             return False
         # A guest the operator trusts is given what the operator's own turn has, memory included.
         return state.run_origin == "operator" or (state.guest_turn is not None and state.guest_turn.trusted)
@@ -7488,6 +7501,8 @@ class SessionManager:
             # Off the surface rather than refusing when called: with no quick model chosen the tool can
             # only fail, and its definition and the prompt's paragraph about it would cost every request.
             blocked.add("QuickAgent")
+        if share_tools.held(self, state.session.id, state.metadata):
+            blocked |= share_tools.withheld_names(known)
         return blocked
 
     async def _load_capability_ancestors(self, state: SessionState) -> None:
@@ -7515,6 +7530,8 @@ class SessionManager:
             # Its own registry is its whole allowlist; the operator may still switch a tool off.
             own = {t.name for t in self.dispatcher_tools.list_all()}
             off = {str(n) for n in (state.metadata.get("tools_off") or ()) if str(n) in own}
+            if share_tools.held(self, state.session.id, state.metadata):
+                off |= share_tools.withheld_names(own)
             return guest_turns.narrowed(ToolVisibilityPolicy(blocked=off), state.guest_turn, own)
         policy = ToolVisibilityPolicy(blocked=self.blocked_tools_for(state))
         return guest_turns.narrowed(policy, state.guest_turn, (t.name for t in self.tools.list_all()))
@@ -8146,6 +8163,8 @@ class SessionManager:
 
         def decide(tool: str, arguments: dict[str, Any]) -> Decision:
             state = self._states.get(session_id)
+            if state is not None and tool not in share_tools.STAYS and share_tools.held(self, session_id, state.metadata):
+                return Decision("deny", "not available while this conversation is shared by a link", share_tools.RULE, told=share_tools.refusal(tool))
             if state is not None and not policy_admits(self.tool_policy_for(state), tool):
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
             turn = guest_turns.restricted(state.guest_turn) if state is not None else None
