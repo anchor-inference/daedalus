@@ -92,10 +92,15 @@ async def describe(app: Application, session_id: str) -> list[dict[str, Any]]:
         if not offered:
             # A role nothing can serve (no quick models chosen, no model that sees) has nothing to set.
             continue
+        presets = [entry(pid) for pid in offered if pid in config.presets]
+        # A model that takes no effort setting has none to name: its "none" is the absence of a choice,
+        # and the dialog sending it back as a value was refused as an effort the preset does not have.
+        if effort not in next((found["efforts"] for found in presets if found["id"] == preset), []):
+            effort = ""
         roles.append({
             "id": role, "label": label, "pickable": pickable,
             "current": {"preset": preset, "effort": effort, "account": account_for(preset) if preset else ""},
-            "presets": [entry(pid) for pid in offered if pid in config.presets],
+            "presets": presets,
         })
     return roles
 
