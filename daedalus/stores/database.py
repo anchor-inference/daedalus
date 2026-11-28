@@ -4202,6 +4202,28 @@ MIGRATIONS.append(PROJECT_APPROVAL_MIGRATION)
 # ring's index by task goes, since nothing reads the ring by task any more.
 MIGRATIONS.append(DataMigration(TASK_HISTORY_SQL, backfill_task_history))
 
+# A live link's own limits: a name the operator gave it, a password a visitor types before anything
+# opens (an scrypt hash with its salt inside; NULL is a link with none), what its visitors may pick and
+# spend (``policy``, the JSON of ``daedalus.extensions.share_policy``; ``{}`` is today's link, with no
+# limits), and what they have spent so far. A visitor's pass is keyed by the hash, whose salt is new on
+# every change of the password, so a new password ends every pass handed out before without a column of
+# its own.
+async def _share_limits(conn: aiosqlite.Connection) -> None:
+    """Each column is added only when it is missing, for the reason ``_usage_speed`` gives."""
+    present = {row[1] for row in await (await conn.execute("PRAGMA table_info(session_shares)")).fetchall()}
+    for name, definition in (
+        ("label", "TEXT NOT NULL DEFAULT ''"),
+        ("password_hash", "TEXT"),
+        ("policy", "TEXT NOT NULL DEFAULT '{}'"),
+        ("spent_usd", "REAL NOT NULL DEFAULT 0"),
+        ("spent_weekly_pct", "REAL NOT NULL DEFAULT 0"),
+    ):
+        if name not in present:
+            await conn.execute(f"ALTER TABLE session_shares ADD COLUMN {name} {definition}")
+
+
+MIGRATIONS.append(DataMigration("SELECT 1;", _share_limits))
+
 CACHE_PAGES = -65536
 """Page cache, as negative kibibytes: 64 MiB. The default is two megabytes, which a session
 open walks straight through."""
