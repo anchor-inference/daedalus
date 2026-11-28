@@ -6113,7 +6113,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "live.win.title": { en: "Live link settings", ru: "Настройки живой ссылки" },
   "live.win.links": { en: "Links of this conversation", ru: "Ссылки этого диалога" },
   "live.win.new": { en: "New link", ru: "Новая ссылка" },
-  "live.win.none": { en: "No live links yet. Set up the first one on the right.", ru: "Живых ссылок пока нет. Настройте первую справа." },
+  "live.win.none": { en: "No live links yet: the settings of the first one are open.", ru: "Живых ссылок пока нет: открыты настройки первой." },
   "live.sec.access": { en: "Access", ru: "Доступ" },
   "live.label": { en: "Name", ru: "Название" },
   "live.label.placeholder": { en: "For example: Anna, menu review", ru: "Например: Анна, проверка меню" },
