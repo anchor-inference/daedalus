@@ -273,9 +273,11 @@ function LinkPane({ sessionId, link, options, phone, toast, onCreated }: { sessi
         setSaved(true);
       }
     } catch (e) {
-      // The host names the field it refused (`password`, `policy.roles.main`, `policy.budget_usd`):
-      // the message goes under that field, and the window scrolls to its section.
-      const field = e instanceof ApiError && typeof e.data.field === "string" ? e.data.field : "";
+      // The host names the field it refused at the start of its sentence (`password: …`,
+      // `policy.roles.main.preset: …`, `policy.budget_usd: …`): the message goes under that field,
+      // and the window scrolls to its section.
+      const detail = e instanceof ApiError && typeof e.data.detail === "string" ? e.data.detail : "";
+      const field = /^([A-Za-z_][\w.-]*): /.exec(detail)?.[1] ?? "";
       if (field) {
         setErrors({ [field]: errorText(e) });
         const section = fieldSection(field);

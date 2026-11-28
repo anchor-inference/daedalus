@@ -2059,7 +2059,7 @@ class LiveLinks:
             self.writes.append((method, link_id, sent))
             wrong = self.refused(sent)
             if wrong:
-                return 422, "application/json", json.dumps({"detail": wrong[1], "field": wrong[0]})
+                return 400, "application/json", json.dumps({"detail": f"{wrong[0]}: {wrong[1]}"})
         if method == "POST" and not link_id:
             hours = sent.get("expires_hours")
             at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
