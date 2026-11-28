@@ -3,6 +3,7 @@
 // should reproduce (`?panel=preview&path=reports/menu.md`), the browser remembers the width and the
 // last open tab, and the component in panel.tsx is the only thing that turns either into pixels.
 
+import { inShare } from "./visit";
 export type PanelTab = "overview" | "details" | "files" | "preview" | "jobs" | "notes" | "subagents" | "board" | "brief" | "wakeups" | "folders" | "questions" | "browser" | "sources" | "agents" | "changes" | "context" | "usage" | "memory" | "canvas" | "attachments";
 
 /** Every tool a panel can hold, for a route or a stored state to be read against. */
@@ -40,9 +41,11 @@ export type ToolOffer = { browser?: boolean; preview?: boolean; subagents?: bool
  * the project and the staff's worktrees by. A session inside a project gains the project's tools.
  * The chat's own board (`board`) is offered where a page for it is mounted.
  */
+// A live link's visitor has no Memory tab: the installation-wide memory is withheld from a shared
+// session, and the tab's own request answers 404 behind the link.
 export function tabsFor(context: PanelContext, opts: ToolOffer = {}): PanelTab[] {
   const work: PanelTab[] = [...(opts.changes ? (["changes"] as PanelTab[]) : []), "files", "preview", "jobs", ...(opts.browser ? (["browser"] as PanelTab[]) : [])];
-  const agent: PanelTab[] = [...(opts.board && context !== "member" ? (["board"] as PanelTab[]) : []), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), ...(opts.agents ? (["agents"] as PanelTab[]) : []), "context", "memory", ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
+  const agent: PanelTab[] = [...(opts.board && context !== "member" ? (["board"] as PanelTab[]) : []), ...(opts.subagents ? (["subagents"] as PanelTab[]) : []), ...(opts.agents ? (["agents"] as PanelTab[]) : []), "context", ...(inShare() ? [] : (["memory"] as PanelTab[])), ...(opts.sources ? (["sources"] as PanelTab[]) : [])];
   const materials: PanelTab[] = ["notes", "canvas", "attachments"];
   const info: PanelTab[] = ["details", "usage"];
   if (context === "orchestrator") {

@@ -142,7 +142,7 @@ export function summarize(form: LiveForm, options: LiveOptions, password: boolea
   parts.push(others ? plural("live.sum.others.open", others) : t("live.sum.others.locked"));
   const usd = amount(form.budgetUsd);
   const pct = amount(form.budgetPct);
-  const limits = [usd && !Number.isNaN(usd) ? t("live.sum.usd", { n: formatUsd(usd) }) : "", pct && !Number.isNaN(pct) ? t("live.sum.pct", { n: formatPct(pct) }) : ""].filter(Boolean);
+  const limits = [usd && !Number.isNaN(usd) ? formatUsd(usd) : "", pct && !Number.isNaN(pct) ? t("live.sum.pct", { n: formatPct(pct) }) : ""].filter(Boolean);
   parts.push(limits.length ? t("live.sum.limits", { limits: limits.join(t("live.sum.and")) }) : t("live.sum.nolimits"));
   parts.push(t(`live.sum.term.${form.terminals}`));
   if (options.withheld?.length) parts.push(plural("live.sum.withheld", options.withheld.length));

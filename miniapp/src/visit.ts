@@ -66,7 +66,7 @@ const VISITOR_KEY = "daedalus.visitor.id";
 const NAME_KEY = "daedalus.visitor.name";
 
 /** The link's token when this page is a live link's, else null. */
-export function shareToken(pathname: string = window.location.pathname): string | null {
+export function shareToken(pathname: string = typeof window === "undefined" ? "" : window.location.pathname): string | null {
   return LINK.exec(pathname)?.[1] ?? null;
 }
 

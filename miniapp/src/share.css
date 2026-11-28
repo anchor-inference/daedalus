@@ -47,7 +47,7 @@
 .live-win-list .live-reach { margin-top: 8px; }
 .live-win-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .live-win-body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
-.live-win-loading { padding: 24px; }
+.live-win-loading { padding: 16px; }
 .live-win-url { display: flex; gap: 8px; margin-bottom: 4px; }
 .live-win-url .field { flex: 1; min-width: 0; }
 .live-win-foot { display: flex; align-items: center; gap: 16px; padding: 12px 0 4px; border-top: 1px solid var(--line); background: var(--surface-1); }
@@ -55,6 +55,7 @@
 .live-summary .ic { flex: none; margin-top: 1px; color: var(--ok); }
 .live-summary.open .ic { color: var(--warn); }
 .live-save { flex: none; }
+.live-saved { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ok); font-size: var(--fs-13); }
 
 .live-sec { display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-top: 1px solid var(--line); }
 .live-win-body > .live-sec:first-of-type, .live-win-body > .live-warning + .live-sec, .live-win-url + .live-sec { border-top: 0; padding-top: 8px; }
@@ -82,12 +83,12 @@
 .live-role-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-14); }
 .live-role-text .sub { font-size: var(--fs-12); line-height: 1.4; }
 .live-role-value { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.live-role-value .live-role-preset { max-width: 100%; }
+.live-role-value .live-role-preset { flex: 1 1 100%; max-width: 100%; }
 .live-role-current { font-size: var(--fs-12); }
 .live-role-choice { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .live-role-choice-label, .live-role-fixed { font-size: var(--fs-12); }
 .live-role-error { grid-column: 1 / -1; }
-.live-bill { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); font-size: var(--fs-11, 11px); white-space: nowrap; color: var(--fg-2); background: var(--surface-2); }
+.live-bill { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--radius-pill); font-size: var(--fs-12); white-space: nowrap; color: var(--fg-2); background: var(--surface-2); }
 .live-bill.subscription { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .live-bill:empty { display: none; }
 
@@ -96,18 +97,27 @@
 .live-allowed-search { flex: 1 1 240px; display: flex; align-items: center; gap: 6px; padding-left: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); color: var(--fg-3); }
 .live-allowed-search .field { flex: 1; min-width: 0; border: 0; background: none; padding-left: 2px; }
 .live-allowed-count { font-size: var(--fs-12); }
-.live-allowed-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; }
-.live-allowed-list.phone { grid-template-columns: minmax(0, 1fr); max-height: none; }
+/* The model picker's shape: the providers by name in a column, the chosen one's presets beside it,
+   both one height so a long provider list and a long preset list each scroll alone. */
+.live-allowed-split { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(var(--row-h) * 12); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); overflow: hidden; }
+.live-allowed-provs { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; padding: 4px; border-right: 1px solid var(--line); }
+.live-allowed-prov { display: flex; align-items: center; gap: 8px; flex: none; height: var(--row-h); padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--fg); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.live-allowed-prov:hover { background: var(--hover); }
+.live-allowed-prov.on { background: var(--selected); }
+.live-allowed-prov.none { color: var(--fg-3); }
+.live-allowed-provcount { flex: none; color: var(--fg-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.live-allowed-provcount.some { color: var(--accent); }
+.live-allowed-models { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px; }
+.live-allowed-mhead { position: sticky; top: -4px; z-index: 1; display: flex; align-items: center; gap: 12px; min-height: var(--row-h); margin: -4px -4px 4px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--card); font-size: var(--fs-13); }
+.live-allowed-provall { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; white-space: nowrap; }
 .live-allowed-empty { padding: 8px; }
-.live-allowed-group { display: flex; flex-direction: column; align-self: start; padding: 4px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--line); }
-.live-allowed-ghead { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 0 8px; font-size: var(--fs-13); cursor: pointer; }
 .live-allowed-row { border-radius: var(--radius-sm); }
 .live-allowed-row.on { background: var(--selected); }
-.live-allowed-main { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 4px 8px 4px 24px; font-size: var(--fs-13); cursor: pointer; }
+.live-allowed-main { display: flex; align-items: center; gap: 8px; min-height: var(--row-h); padding: 4px 8px; font-size: var(--fs-13); cursor: pointer; }
 .live-allowed-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.live-allowed-name .mono { font-size: var(--fs-11, 11px); }
-.live-allowed-own { font-size: var(--fs-11, 11px); }
-.live-allowed-subs { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 8px 48px; }
+.live-allowed-name .mono { font-size: var(--fs-12); }
+.live-allowed-own { font-size: var(--fs-12); }
+.live-allowed-subs { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 8px 32px; }
 .live-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .live-chips-label { min-width: 5.5em; font-size: var(--fs-12); }
 .live-chipbtn { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--card); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
@@ -149,19 +159,25 @@
 /* A phone: the whole sheet scrolls as one page inside 16 px gutters, the links above the settings, the
    roles one column, and the decision pinned to the bottom. */
 @media (max-width: 1023px) {
-  /* The body is a plain block here: as a flex column it squeezed the pane to the screen's height, and
-     the pinned foot, held inside the squeezed pane, stopped pinning after the first screenful. The
-     scroll padding keeps a field brought into view clear of that foot. */
-  .live-sheet > .sheet-body { display: block; padding: 0; scroll-padding-bottom: 200px; }
-  .live-win { padding: 0 var(--gutter); gap: 12px; }
-  .live-win-list { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  /* The body is a plain block here: as a flex column it squeezed the pane to the screen's height and
+     the rest of the settings spilled out of it. */
+  .sheet.live-sheet > .sheet-body { display: block; padding: 0; }
+  .live-win { display: block; padding: 0 var(--gutter); }
+  .live-win-pane, .live-win-body { min-height: auto; }
+  .live-win-list { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
   .live-grid2, .live-withheld { grid-template-columns: minmax(0, 1fr); }
   .live-role { grid-template-columns: minmax(0, 1fr); }
   .live-role-choice { grid-column: 1; }
   .live-allowed { padding: 8px; }
-  .live-allowed-main { padding-left: 12px; min-height: var(--row-h-touch); }
-  .live-allowed-subs { padding-left: 12px; }
-  .live-win-foot { position: sticky; bottom: 0; flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 0 calc(8px + env(safe-area-inset-bottom)); }
+  .live-allowed-split.phone { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .live-allowed-split.phone .live-allowed-provs { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); }
+  .live-allowed-split.phone .live-allowed-prov { height: var(--ctl-h-sm); max-width: 70%; }
+  .live-allowed-split.phone .live-allowed-models { max-height: 60vh; }
+  .live-allowed-main { min-height: var(--row-h-touch); }
+  .live-allowed-subs { padding-left: 8px; }
+  /* The summary and the decision end the page rather than float over it: pinned, the summary's four or
+     five lines covered a third of a phone's screen and the very fields it summed up. */
+  .live-win-foot { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 0 calc(16px + env(safe-area-inset-bottom)); }
   .live-save { width: 100%; justify-content: center; }
   .live-sheet input.field { font-size: var(--fs-16); }
   .live-pw-field { flex-wrap: wrap; }
@@ -169,3 +185,5 @@
   .live-win-url { flex-wrap: wrap; }
   .live-win-url .field { flex-basis: 100%; }
 }
+@media (max-width: 1023px) { .live-allowed-split.phone .live-allowed-mhead > b { display: none; } .live-allowed-split.phone .live-allowed-mhead { justify-content: flex-end; } }
+.live-role-value .live-role-preset .dropdown-btn { width: 100%; max-width: 100%; }

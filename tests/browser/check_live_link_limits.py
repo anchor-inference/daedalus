@@ -4,7 +4,7 @@ The operator opens the share dialog, then the live link's window: wide on a desk
 at 1366), a full-screen sheet on a phone at 390 with 16 px gutters and nothing scrolling sideways. A link
 is made with a password, every role locked but the conversation's, which is opened to all of one provider
 with one effort narrowed, a money and a weekly limit and no terminals, and the POST body must equal what
-the host's contract says. The same link is then edited: a short password is refused by the host and the
+the host's routes take. The same link is then edited: a short password is refused by the host and the
 refusal shows at the password, and a new label and limit go out as a PATCH. The visitor's page meets a
 password screen (a wrong password, too many tries with the wait counted down, the right one), then a
 locked model that opens no menu, what is left of the budget, and a send refused with 402.
@@ -99,12 +99,27 @@ def stub(route) -> None:  # type: ignore[no-untyped-def]
     return installation(route)
 
 
-def shot(page: Page, name: str) -> None:
+def shot(page: Page, name: str, at: str = "") -> None:
+    """A picture; ``at`` names a section of the window to scroll to first (its top otherwise stays where the steps left it)."""
     if not SHOTS:
         return
+    if at:
+        page.evaluate("(s) => { const el = document.querySelector(`[data-live-window] [data-section='${s}']`); const box = el && (el.closest('.live-win-body') && getComputedStyle(el.closest('.live-win-body')).overflowY === 'auto' ? el.closest('.live-win-body') : el.closest('.sheet-body')); if (el && box) box.scrollTop = el.offsetTop - (box === el.closest('.live-win-body') ? 0 : 0) - 8; }", at)
     page.wait_for_timeout(450)
     Path(SHOTS).mkdir(parents=True, exist_ok=True)
     page.screenshot(path=f"{SHOTS}/{name}.png")
+
+
+def press(locator) -> None:  # type: ignore[no-untyped-def]
+    """A click on a control of the window brought to the middle first: on a phone the decision's foot is
+    pinned over the bottom of the screen, and a control scrolled just into view sits under it."""
+    locator.evaluate("el => el.scrollIntoView({block: 'center'})")
+    try:
+        locator.click(timeout=3000)
+    except Exception:
+        if SHOTS:
+            locator.page.screenshot(path=f"{SHOTS}/debug-press.png")
+        raise
 
 
 def open_window(page: Page, words: dict[str, str]) -> None:
@@ -136,7 +151,7 @@ def check_layout(page: Page, width: int, problems: list[str]) -> None:
 
 
 def expected_create(words: dict[str, str]) -> dict:
-    """The POST the window must build for the link the check fills in, in the contract's shape."""
+    """The POST the window must build for the link the check fills in, in the shape the host's routes take."""
     options = live_options()
     roles = {role["id"]: {**role["current"], "allowed": []} for role in options["roles"]}
     codex = [p["id"] for p in options["roles"][0]["presets"] if p["provider"] == "codex"]
@@ -162,16 +177,22 @@ def operator(browser, lang: str, width: int, height: int, scheme: str, problems:
     window.locator("#live-label").fill("Анна — меню")
     window.locator("#live-password").fill(PASSWORD)
     main = window.locator(".live-role[data-role='main']")
-    main.get_by_role("radio", name=words["set"]).click()
-    main.locator(".live-allowed-group[data-provider='codex'] .live-allowed-ghead input").check()
-    main.locator(".live-allowed-row[data-preset='gpt-6-codex'] .live-chipbtn", has_text=words["high"]).click()
+    press(main.get_by_role("radio", name=words["set"]))
+    press(main.locator(".live-allowed-prov[data-prov='codex']"))
+    main.locator(".live-allowed-provall input").evaluate("el => el.scrollIntoView({block: 'center'})")
+    main.locator(".live-allowed-provall input").check()
+    press(main.locator(".live-allowed-row[data-preset='gpt-6-codex'] .live-chipbtn", has_text=words["high"]))
     window.locator("#live-limit-usd").fill("5")
     window.locator("#live-limit-pct").fill("3")
+    window.locator("[data-terminals='none'] input").evaluate("el => el.scrollIntoView({block: 'center'})")
     window.locator("[data-terminals='none'] input").check()
     summary = window.locator("[data-live-summary]").inner_text()
     if not summary.strip():
         problems.append("the summary strip is empty")
+    page.locator(".live-win-body, .live-sheet .sheet-body").evaluate_all("els => els.forEach(e => { e.scrollTop = 0; })")
     shot(page, f"window-filled-{width}-{scheme}-{lang}")
+    shot(page, f"window-filled-models-{width}-{scheme}-{lang}", at="models")
+    shot(page, f"window-filled-limits-{width}-{scheme}-{lang}", at="limits")
     window.locator(".live-save").click()
     deadline = time.monotonic() + 5
     while not api_stub.LIVE.writes and time.monotonic() < deadline:
@@ -183,16 +204,16 @@ def operator(browser, lang: str, width: int, height: int, scheme: str, problems:
     method, _link, body = api_stub.LIVE.writes[0]
     want = expected_create(words)
     if method != "POST" or body != want:
-        problems.append(f"the POST body differs from the contract's shape:\n  sent {json.dumps(body, ensure_ascii=False)}\n  want {json.dumps(want, ensure_ascii=False)}")
+        problems.append(f"the POST body differs from the shape the host takes:\n  sent {json.dumps(body, ensure_ascii=False)}\n  want {json.dumps(want, ensure_ascii=False)}")
     # The new link is chosen in the list, and its settings open for editing.
     expect(window.locator(".live-win-row.on")).to_have_count(1)
     expect(window.locator(".live-pw[data-password='set']")).to_be_visible()
-    window.locator(".live-pw-change").click()
+    press(window.locator(".live-pw-change"))
     window.locator("#live-password").fill("abc")
     window.locator(".live-save").click()
     expect(window.locator(".live-pw .field-error")).to_be_visible()
     window.locator("#live-password").fill("")
-    window.get_by_role("button", name="Keep the current one" if lang == "en" else "Оставить текущий").click()
+    press(window.get_by_role("button", name="Keep the current one" if lang == "en" else "Оставить текущий"))
     window.locator("#live-label").fill("Анна — зимнее меню")
     window.locator("#live-limit-usd").fill("7,5")
     window.locator(".live-save").click()
@@ -208,7 +229,9 @@ def operator(browser, lang: str, width: int, height: int, scheme: str, problems:
             problems.append(f"the refused PATCH did not carry the short password: {refused}")
         if saved.get("label") != "Анна — зимнее меню" or saved.get("policy", {}).get("budget_usd") != 7.5 or "password" in saved or "clear_password" in saved:
             problems.append(f"the saved PATCH is not the edit: {saved}")
+    page.locator(".live-win-body, .live-sheet .sheet-body").evaluate_all("els => els.forEach(e => { e.scrollTop = 0; })")
     shot(page, f"window-edit-{width}-{scheme}-{lang}")
+    shot(page, f"window-edit-limits-{width}-{scheme}-{lang}", at="limits")
     context.close()
 
 
@@ -272,7 +295,7 @@ def run() -> int:
         operator(browser, "en", 1920, 1080, "dark", problems, full=True)
         operator(browser, "ru", 1366, 768, "dark", problems, full=True)
         operator(browser, "ru", 390, 844, "dark", problems, full=True)
-        operator(browser, "ru", 1920, 1080, "light", problems, full=False)
+        operator(browser, "ru", 1920, 1080, "light", problems, full=True)
         visitor(browser, "ru", 1920, 1080, problems)
         visitor(browser, "ru", 390, 844, problems)
         browser.close()

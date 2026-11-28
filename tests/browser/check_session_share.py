@@ -309,9 +309,14 @@ def main() -> None:
         sheet = own.locator(".sheet")
         expect(sheet.locator(".live-warning")).to_be_visible()
         expect(sheet.locator(".live-reach")).to_have_attribute("data-reach", "machine")
+        # The dialog's button opens the link's own window; its decision makes the link (no password, every
+        # role at the session's value), and the window then shows the link beside its settings.
         sheet.get_by_role("button", name=word("Create live link", "Создать живую ссылку")).click()
-        own.locator("[role=alertdialog]").get_by_role("button", name=word("Create live link", "Создать живую ссылку")).click()
-        field = sheet.locator(".live-link input.field")
+        window = own.locator("[data-live-window]")
+        window.locator(".live-save").click(timeout=15000)
+        expect(window.locator(".live-win-row.on")).to_have_count(1, timeout=10000)
+        own.keyboard.press("Escape")
+        field = own.locator(".live-links .live-link input.field")
         expect(field).to_be_visible(timeout=10000)
         link = field.input_value()
         assert link.startswith(f"http://localhost:{host.door}/v/") and link.endswith("/"), link

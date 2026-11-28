@@ -10,7 +10,7 @@
 // as the secrets manager: the operator turned down narrow dialogs for this twice, and a role's set of
 // presets with dozens of rows grouped by provider does not fit a 560 px column.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { useQuery, invalidate } from "./store";
 import { t, plural } from "./i18n";
@@ -236,8 +236,11 @@ function LinkPane({ sessionId, link, options, phone, toast, onCreated }: { sessi
   const [form, setForm] = useState<LiveForm>(() => (link ? formOf(link.policy, options) : freshForm(options)));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  // Said beside the button until the next change, rather than in a toast that would cover the composer.
+  const [saved, setSaved] = useState(false);
   const [copied, copyValue] = useCopied();
   const body = useRef<HTMLDivElement>(null);
+  useEffect(() => setSaved(false), [label, expiry, password, form]);
 
   const willHavePassword = password.mode === "keep" ? !!link?.has_password : password.mode === "set" && !!password.value;
   const sentence = useMemo(() => summarize(form, options, willHavePassword), [form, options, willHavePassword]);
@@ -257,7 +260,7 @@ function LinkPane({ sessionId, link, options, phone, toast, onCreated }: { sessi
         if (password.mode === "set" && password.value) sent.password = password.value;
         const made = await api.post<LiveLink>(key, sent);
         invalidate(key);
-        toast(t("live.made"));
+        // No toast: the link appears chosen in the list with its address on top, which is the news.
         if (made?.id) onCreated(made.id);
       } else {
         const sent: Record<string, unknown> = { label: label.trim(), policy };
@@ -267,7 +270,7 @@ function LinkPane({ sessionId, link, options, phone, toast, onCreated }: { sessi
         await api.patch(`${key}/${encodeURIComponent(link.id)}`, sent);
         invalidate(key);
         setPassword({ mode: willHavePassword ? "keep" : "set", value: "", shown: false });
-        toast(t("live.saved"));
+        setSaved(true);
       }
     } catch (e) {
       // The host names the field it refused (`password`, `policy.roles.main`, `policy.budget_usd`):
@@ -356,6 +359,7 @@ function LinkPane({ sessionId, link, options, phone, toast, onCreated }: { sessi
           <Icon name={willHavePassword ? "shield" : "alert"} size={16} />
           <span>{sentence}</span>
         </div>
+        {saved && <span className="sub live-saved" role="status"><Icon name="check" size={14} /> {t("live.saved")}</span>}
         <Button variant="primary" className="live-save" busy={busy} disabled={busy || badAmount || (password.mode === "set" && !!link?.has_password && !password.value)} onClick={() => void save()}>
           {t(link ? "common.save" : "live.create")}
         </Button>
@@ -456,25 +460,36 @@ function effortLabel(id: string): string {
   return known.startsWith("[") ? id : known;
 }
 
-/** A role's set: every preset grouped by provider under the provider's name, a search over all of them,
- *  a whole provider in one press, and for each chosen preset the efforts and accounts it may use. */
+/** A role's set, in the model picker's shape: the providers by name in a column with how many of each
+ *  are chosen and a box that takes a whole provider, the chosen provider's presets beside it, and a
+ *  search over all of them that lists matches from every provider at once. A chosen preset opens the
+ *  efforts and accounts it may use. */
 function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareRole; value: string; allowed: AllowedEntry[]; onChange: (next: AllowedEntry[]) => void; phone: boolean }) {
   const [query, setQuery] = useState("");
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const groups = useMemo(() => {
+  const providers = useMemo(() => {
     const byProvider = new Map<string, { name: string; presets: RolePreset[] }>();
     for (const preset of role.presets) {
-      const hay = `${preset.label} ${preset.model} ${preset.provider_name}`.toLowerCase();
-      if (words.some((word) => !hay.includes(word))) continue;
       const group = byProvider.get(preset.provider) ?? { name: preset.provider_name, presets: [] };
       group.presets.push(preset);
       byProvider.set(preset.provider, group);
     }
     return [...byProvider.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
-  }, [role.presets, words.join(" ")]);
+  }, [role.presets]);
+  const [shown, setShown] = useState(() => role.presets.find((item) => item.id === value)?.provider ?? providers[0]?.[0] ?? "");
   const chosen = new Set(allowed.map((entry) => entry.preset));
+  const matches = (preset: RolePreset) => words.every((word) => `${preset.label} ${preset.model} ${preset.provider_name}`.toLowerCase().includes(word));
+  const searching = words.length > 0;
+  const rows = searching ? role.presets.filter(matches) : providers.find(([id]) => id === shown)?.[1].presets ?? [];
   const entry = (id: string) => allowed.find((item) => item.preset === id);
   const setEntry = (id: string, patch: Partial<AllowedEntry>) => onChange(allowed.map((item) => (item.preset === id ? { ...item, ...patch } : item)));
+  const setMany = (presets: RolePreset[], on: boolean) => {
+    let next = allowed;
+    for (const preset of presets) if (preset.id !== value) next = toggleAllowed(next, preset.id, on);
+    onChange(next);
+  };
+  const shownGroup = providers.find(([id]) => id === shown)?.[1];
+  const shownAll = !!shownGroup && shownGroup.presets.every((preset) => chosen.has(preset.id) || preset.id === value);
 
   return (
     <div className="live-allowed" data-allowed={role.id}>
@@ -486,53 +501,62 @@ function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareR
         <span className="sub live-allowed-count">{t("live.allowed.count", { n: allowed.length, total: role.presets.length })}</span>
         {allowed.length > 0 && <Button size="sm" variant="quiet" onClick={() => onChange([])}>{t("live.allowed.clear")}</Button>}
       </div>
-      <div className={`live-allowed-list ${phone ? "phone" : ""}`}>
-        {groups.length === 0 && <div className="sub live-allowed-empty">{t("live.allowed.nothing")}</div>}
-        {groups.map(([provider, group]) => {
-          const all = group.presets.every((preset) => chosen.has(preset.id) || preset.id === value);
-          const some = group.presets.some((preset) => chosen.has(preset.id));
-          return (
-            <div key={provider} className="live-allowed-group" data-provider={provider}>
-              <label className="live-allowed-ghead">
-                <input type="checkbox" checked={all && some} ref={(el) => { if (el) el.indeterminate = some && !all; }}
-                  onChange={(e) => {
-                    let next = allowed;
-                    for (const preset of group.presets) if (preset.id !== value) next = toggleAllowed(next, preset.id, e.target.checked);
-                    onChange(next);
-                  }} aria-label={t("live.allowed.all", { provider: group.name })} />
-                <b className="grow">{group.name}</b>
-                <span className="sub">{group.presets.length}</span>
+      <div className={`live-allowed-split ${phone ? "phone" : ""}`}>
+        <div className="live-allowed-provs" role="tablist" aria-label={t("composer.model.providers")}>
+          {providers.map(([id, group]) => {
+            const count = group.presets.filter((preset) => chosen.has(preset.id)).length;
+            const hits = searching ? group.presets.filter(matches).length : group.presets.length;
+            return (
+              <button key={id} type="button" role="tab" aria-selected={!searching && id === shown} data-prov={id}
+                className={`live-allowed-prov ${!searching && id === shown ? "on" : ""} ${searching && !hits ? "none" : ""}`} onClick={() => { setQuery(""); setShown(id); }}>
+                <span className="truncate grow">{group.name}</span>
+                <span className={`live-allowed-provcount ${count ? "some" : ""}`}>{count ? `${count}/${group.presets.length}` : group.presets.length}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="live-allowed-models">
+          <div className="live-allowed-mhead">
+            <b className="grow truncate">{searching ? t("live.allowed.found", { n: rows.length }) : shownGroup?.name}</b>
+            {!searching && shownGroup && (
+              <label className="live-allowed-provall">
+                <input type="checkbox" checked={shownAll} onChange={(e) => setMany(shownGroup.presets, e.target.checked)} />
+                <span>{t("live.allowed.all", { provider: shownGroup.name })}</span>
               </label>
-              {group.presets.map((preset) => {
-                const own = preset.id === value;
-                const on = own || chosen.has(preset.id);
-                const kept = entry(preset.id);
-                return (
-                  <div key={preset.id} className={`live-allowed-row ${on ? "on" : ""}`} data-preset={preset.id}>
-                    <label className="live-allowed-main">
-                      <input type="checkbox" checked={on} disabled={own} onChange={(e) => onChange(toggleAllowed(allowed, preset.id, e.target.checked))} aria-label={preset.label} />
-                      <span className="live-allowed-name"><span className="truncate">{preset.label}</span><span className="sub mono truncate">{preset.model}</span></span>
-                      {own && <span className="sub live-allowed-own">{t("live.allowed.own")}</span>}
-                      <span className={`live-bill ${preset.billing}`}>{billingWord(preset)}</span>
-                    </label>
-                    {kept && (preset.efforts.length > 1 || preset.accounts.length > 1) && (
-                      <div className="live-allowed-subs">
-                        {preset.efforts.length > 1 && (
-                          <Chips label={t("live.allowed.efforts")} anyLabel={t("live.allowed.any")} values={preset.efforts.map((id) => ({ id, label: effortLabel(id) }))} chosen={kept.efforts}
-                            onToggle={(id, next) => setEntry(preset.id, { efforts: id === "" ? [] : toggleIn(kept.efforts, id, next) })} />
-                        )}
-                        {preset.accounts.length > 1 && (
-                          <Chips label={t("live.allowed.accounts")} anyLabel={t("live.allowed.any")} values={preset.accounts.map((a) => ({ id: a.id, label: a.name }))} chosen={kept.accounts}
-                            onToggle={(id, next) => setEntry(preset.id, { accounts: id === "" ? [] : toggleIn(kept.accounts, id, next) })} />
-                        )}
-                      </div>
+            )}
+          </div>
+          {rows.length === 0 && <div className="sub live-allowed-empty">{t("live.allowed.nothing")}</div>}
+          {rows.map((preset) => {
+            const own = preset.id === value;
+            const on = own || chosen.has(preset.id);
+            const kept = entry(preset.id);
+            return (
+              <div key={preset.id} className={`live-allowed-row ${on ? "on" : ""}`} data-preset={preset.id}>
+                <label className="live-allowed-main">
+                  <input type="checkbox" checked={on} disabled={own} onChange={(e) => onChange(toggleAllowed(allowed, preset.id, e.target.checked))} aria-label={preset.label} />
+                  <span className="live-allowed-name">
+                    <span className="truncate">{preset.label}</span>
+                    <span className="sub mono truncate">{searching ? `${preset.provider_name} · ${preset.model}` : preset.model}</span>
+                  </span>
+                  {own && <span className="sub live-allowed-own">{t("live.allowed.own")}</span>}
+                  <span className={`live-bill ${preset.billing}`}>{billingWord(preset)}</span>
+                </label>
+                {kept && (preset.efforts.length > 1 || preset.accounts.length > 1) && (
+                  <div className="live-allowed-subs">
+                    {preset.efforts.length > 1 && (
+                      <Chips label={t("live.allowed.efforts")} anyLabel={t("live.allowed.any")} values={preset.efforts.map((id) => ({ id, label: effortLabel(id) }))} chosen={kept.efforts}
+                        onToggle={(id, next) => setEntry(preset.id, { efforts: id === "" ? [] : toggleIn(kept.efforts, id, next) })} />
+                    )}
+                    {preset.accounts.length > 1 && (
+                      <Chips label={t("live.allowed.accounts")} anyLabel={t("live.allowed.any")} values={preset.accounts.map((a) => ({ id: a.id, label: a.name }))} chosen={kept.accounts}
+                        onToggle={(id, next) => setEntry(preset.id, { accounts: id === "" ? [] : toggleIn(kept.accounts, id, next) })} />
                     )}
                   </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
