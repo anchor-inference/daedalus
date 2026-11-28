@@ -21,8 +21,8 @@ import { Icon } from "./icons";
 import { Button, Select, Segmented, Sheet } from "./ui/primitives";
 import { useMedia } from "./shell";
 import {
-  amount, billingsInUse, buildPolicy, fieldSection, formatPct, formatUsd, formOf, freshForm, generatePassword, lockAll, summarize,
-  toggleAllowed, toggleIn, type AllowedEntry, type LiveForm, type LiveOptions, type LivePolicy, type RoleForm, type RolePreset, type ShareRole, type Terminals,
+  amount, billingsInUse, buildPolicy, fieldSection, formatPct, formatUsd, formOf, freshForm, generatePassword, lockAll, revalue, summarize,
+  toggleAllowed, toggleIn, withOwn, type AllowedEntry, type LiveForm, type LiveOptions, type LivePolicy, type RoleForm, type RolePreset, type ShareRole, type Terminals,
 } from "./livepolicy";
 import "./share.css";
 
@@ -409,7 +409,8 @@ function presetOption(preset: RolePreset) {
   return { id: preset.id, label: `${preset.provider_name} · ${preset.label}`, hint: `${preset.model} · ${billingWord(preset)}` };
 }
 
-/** One role: what it is for, the value its turns use, and what the visitor may switch to. */
+/** One role: what it is for, the value its turns use, and what the visitor (or, for a helper's model, the
+ *  agent) may switch to. Who chooses is the host's word (`chooser`), never guessed from the role's id. */
 function RoleRow({ role, value, onChange, error, phone }: { role: ShareRole; value: RoleForm; onChange: (next: RoleForm) => void; error?: string; phone: boolean }) {
   const preset = role.presets.find((item) => item.id === value.preset);
   const sorted = useMemo(() => [...role.presets].sort((a, b) => a.provider_name.localeCompare(b.provider_name) || a.label.localeCompare(b.label)), [role.presets]);
@@ -417,6 +418,8 @@ function RoleRow({ role, value, onChange, error, phone }: { role: ShareRole; val
   const name = known.startsWith("[") ? role.label : known;
   const what = t(`live.role.${role.id}.sub`);
   const isCurrent = value.preset === role.current.preset && value.effort === role.current.effort && value.account === role.current.account;
+  const agentWords = t(`live.choose.agent.${role.id}`);
+  const chooseLabel = role.chooser === "agent" ? (agentWords.startsWith("[") ? t("live.choose.agent") : agentWords) : t("live.choose.label");
   return (
     <div className={`live-role ${error ? "bad" : ""}`} data-role={role.id}>
       <div className="live-role-text">
@@ -425,32 +428,32 @@ function RoleRow({ role, value, onChange, error, phone }: { role: ShareRole; val
       </div>
       <div className="live-role-value">
         <Select size="md" className="live-role-preset" label={t("live.role.model", { role: name })} value={value.preset} options={sorted.map(presetOption)}
-          onChange={(id) => { const next = role.presets.find((item) => item.id === id); onChange({ ...value, preset: id, effort: next?.efforts.includes(value.effort) ? value.effort : "", account: "" }); }} />
+          onChange={(id) => { const next = role.presets.find((item) => item.id === id); onChange(revalue(value, { preset: id, effort: next?.efforts.includes(value.effort) ? value.effort : "", account: "" }, role)); }} />
         {preset && preset.efforts.length > 0 && (
           <Select size="md" className="live-role-effort" label={t("live.role.effort", { role: name })} value={value.effort || "_"}
             options={[{ id: "_", label: t("live.effort.default") }, ...preset.efforts.map((id) => ({ id, label: effortLabel(id) }))]}
-            onChange={(id) => onChange({ ...value, effort: id === "_" ? "" : id })} />
+            onChange={(id) => onChange(revalue(value, { ...value, effort: id === "_" ? "" : id }, role))} />
         )}
         {preset && preset.accounts.length > 1 && (
           <Select size="md" className="live-role-account" label={t("live.role.account", { role: name })} value={value.account || "_"}
             options={[{ id: "_", label: t("live.account.default") }, ...preset.accounts.map((a) => ({ id: a.id, label: a.name }))]}
-            onChange={(id) => onChange({ ...value, account: id === "_" ? "" : id })} />
+            onChange={(id) => onChange(revalue(value, { ...value, account: id === "_" ? "" : id }, role))} />
         )}
         <span className={`live-bill ${preset?.billing ?? ""}`}>{billingWord(preset)}</span>
         {isCurrent && <span className="sub live-role-current">{t("live.role.iscurrent")}</span>}
       </div>
-      <div className="live-role-choice">
-        {role.pickable ? (
+      <div className="live-role-choice" data-chooser={role.chooser}>
+        {role.chooser !== "none" ? (
           <>
-            <span className="sub live-role-choice-label">{t("live.choose.label")}</span>
-            <Segmented size="sm" label={t("live.choose.label")} value={value.mode} className="live-role-mode"
+            <span className="sub live-role-choice-label">{chooseLabel}</span>
+            <Segmented size="sm" label={chooseLabel} value={value.mode} className="live-role-mode"
               options={[{ id: "locked", label: t("live.choose.locked") }, { id: "set", label: value.mode === "set" && value.allowed.length ? t("live.choose.set.n", { n: value.allowed.length }) : t("live.choose.set") }]}
-              onChange={(mode) => onChange({ ...value, mode })} />
+              onChange={(mode) => onChange(withOwn({ ...value, mode }))} />
           </>
         ) : <span className="sub live-role-fixed">{t("live.choose.none")}</span>}
       </div>
-      {role.pickable && value.mode === "set" && (
-        <AllowedPicker role={role} value={value.preset} allowed={value.allowed} onChange={(allowed) => onChange({ ...value, allowed })} phone={phone} />
+      {role.chooser !== "none" && value.mode === "set" && (
+        <AllowedPicker role={role} value={value} allowed={value.allowed} onChange={(allowed) => onChange(withOwn({ ...value, allowed }))} phone={phone} />
       )}
       {error && <div className="field-error live-role-error">{error}</div>}
     </div>
@@ -458,7 +461,8 @@ function RoleRow({ role, value, onChange, error, phone }: { role: ShareRole; val
 }
 
 function effortLabel(id: string): string {
-  const known = t(`add.effort.${id}`);
+  // The host names no thinking "none"; the app's word for it is the one the composer shows, "Off".
+  const known = t(id === "none" ? "add.effort.off" : `add.effort.${id}`);
   return known.startsWith("[") ? id : known;
 }
 
@@ -466,7 +470,8 @@ function effortLabel(id: string): string {
  *  are chosen and a box that takes a whole provider, the chosen provider's presets beside it, and a
  *  search over all of them that lists matches from every provider at once. A chosen preset opens the
  *  efforts and accounts it may use. */
-function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareRole; value: string; allowed: AllowedEntry[]; onChange: (next: AllowedEntry[]) => void; phone: boolean }) {
+function AllowedPicker({ role, value: own, allowed, onChange, phone }: { role: ShareRole; value: RoleForm; allowed: AllowedEntry[]; onChange: (next: AllowedEntry[]) => void; phone: boolean }) {
+  const value = own.preset;
   const [query, setQuery] = useState("");
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const providers = useMemo(() => {
@@ -501,8 +506,9 @@ function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareR
           <input type="search" className="field" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("live.allowed.search")} aria-label={t("live.allowed.search")} />
         </label>
         <span className="sub live-allowed-count">{t("live.allowed.count", { n: allowed.length, total: role.presets.length })}</span>
-        {allowed.length > 0 && <Button size="sm" variant="quiet" onClick={() => onChange([])}>{t("live.allowed.clear")}</Button>}
+        {allowed.length > 1 && <Button size="sm" variant="quiet" onClick={() => onChange([])}>{t("live.allowed.clear")}</Button>}
       </div>
+      {role.chooser === "agent" && <p className="sub live-allowed-note">{t("live.allowed.agent")}</p>}
       <div className={`live-allowed-split ${phone ? "phone" : ""}`}>
         <div className="live-allowed-provs" role="tablist" aria-label={t("composer.model.providers")}>
           {providers.map(([id, group]) => {
@@ -529,29 +535,29 @@ function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareR
           </div>
           {rows.length === 0 && <div className="sub live-allowed-empty">{t("live.allowed.nothing")}</div>}
           {rows.map((preset) => {
-            const own = preset.id === value;
-            const on = own || chosen.has(preset.id);
+            const isOwn = preset.id === value;
+            const on = isOwn || chosen.has(preset.id);
             const kept = entry(preset.id);
             return (
               <div key={preset.id} className={`live-allowed-row ${on ? "on" : ""}`} data-preset={preset.id}>
                 <label className="live-allowed-main">
-                  <input type="checkbox" checked={on} disabled={own} onChange={(e) => onChange(toggleAllowed(allowed, preset.id, e.target.checked))} aria-label={preset.label} />
+                  <input type="checkbox" checked={on} disabled={isOwn} onChange={(e) => onChange(toggleAllowed(allowed, preset.id, e.target.checked))} aria-label={preset.label} />
                   <span className="live-allowed-name">
                     <span className="truncate">{preset.label}</span>
                     <span className="sub mono truncate">{searching ? `${preset.provider_name} · ${preset.model}` : preset.model}</span>
                   </span>
-                  {own && <span className="sub live-allowed-own">{t("live.allowed.own")}</span>}
+                  {isOwn && <span className="sub live-allowed-own">{t("live.allowed.own")}</span>}
                   <span className={`live-bill ${preset.billing}`}>{billingWord(preset)}</span>
                 </label>
                 {kept && (preset.efforts.length > 1 || preset.accounts.length > 1) && (
                   <div className="live-allowed-subs">
                     {preset.efforts.length > 1 && (
                       <Chips label={t("live.allowed.efforts")} anyLabel={t("live.allowed.any")} values={preset.efforts.map((id) => ({ id, label: effortLabel(id) }))} chosen={kept.efforts}
-                        onToggle={(id, next) => setEntry(preset.id, { efforts: id === "" ? [] : toggleIn(kept.efforts, id, next) })} />
+                        fixed={isOwn ? own.effort : ""} onToggle={(id, next) => setEntry(preset.id, { efforts: id === "" ? [] : toggleIn(kept.efforts, id, next) })} />
                     )}
                     {preset.accounts.length > 1 && (
                       <Chips label={t("live.allowed.accounts")} anyLabel={t("live.allowed.any")} values={preset.accounts.map((a) => ({ id: a.id, label: a.name }))} chosen={kept.accounts}
-                        onToggle={(id, next) => setEntry(preset.id, { accounts: id === "" ? [] : toggleIn(kept.accounts, id, next) })} />
+                        fixed={isOwn ? own.account : ""} onToggle={(id, next) => setEntry(preset.id, { accounts: id === "" ? [] : toggleIn(kept.accounts, id, next) })} />
                     )}
                   </div>
                 )}
@@ -564,15 +570,23 @@ function AllowedPicker({ role, value, allowed, onChange, phone }: { role: ShareR
   );
 }
 
-/** A row of toggles where nothing pressed means "any": the host reads an empty list that way. */
-function Chips({ label, anyLabel, values, chosen, onToggle }: { label: string; anyLabel: string; values: { id: string; label: string }[]; chosen: string[]; onToggle: (id: string, on: boolean) => void }) {
+/** A row of toggles where nothing pressed means "any": the host reads an empty list that way. `fixed` is
+ *  the value's own effort or account on the value's own preset: drawn pressed and not to be pressed off,
+ *  because the value is always allowed whatever the set says. */
+function Chips({ label, anyLabel, values, chosen, fixed, onToggle }: { label: string; anyLabel: string; values: { id: string; label: string }[]; chosen: string[]; fixed: string; onToggle: (id: string, on: boolean) => void }) {
   return (
     <div className="live-chips" role="group" aria-label={label}>
       <span className="sub live-chips-label">{label}</span>
       <button type="button" className={`live-chipbtn ${chosen.length === 0 ? "on" : ""}`} aria-pressed={chosen.length === 0} onClick={() => onToggle("", true)}>{anyLabel}</button>
       {values.map((item) => {
-        const on = chosen.includes(item.id);
-        return <button key={item.id} type="button" className={`live-chipbtn ${on ? "on" : ""}`} aria-pressed={on} onClick={() => onToggle(item.id, !on)}>{item.label}</button>;
+        const own = item.id === fixed;
+        const on = own || chosen.includes(item.id);
+        return (
+          <button key={item.id} type="button" className={`live-chipbtn ${on ? "on" : ""} ${own ? "own" : ""}`} aria-pressed={on} disabled={own} data-own={own ? "" : undefined}
+            title={own ? t("live.allowed.own.fixed") : undefined} onClick={() => onToggle(item.id, !on)}>
+            {own && <Icon name="lock" size={11} />}{item.label}
+          </button>
+        );
       })}
     </div>
   );

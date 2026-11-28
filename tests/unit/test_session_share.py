@@ -463,6 +463,28 @@ async def test_the_visitor_sees_the_limits_and_only_the_presets_it_may_pick(rig:
         assert (await door.post(f"{v}/api/sessions/{mine}/model", json={"preset": first})).status_code == 200
 
 
+async def test_a_visitor_switches_effort_within_the_conversation_s_own_model(rig: Rig) -> None:
+    from daedalus.extensions.share_policy import validate
+
+    mine = await rig.session()
+    first = next(iter(rig.manager.config.presets))
+    rule = {"preset": first, "effort": "high", "account": "", "allowed": [{"preset": first, "accounts": [], "efforts": ["low", "medium", "high"]}]}
+    roles_here = [{"id": "main", "presets": [{"id": first, "efforts": ["none", "low", "medium", "high", "xhigh"], "accounts": []}]}]
+    link = await rig.shares.create(mine, policy=validate({"roles": {"main": rule}}, roles_here, "container"))
+    v = f"/v/{token_of(link)}"
+    _app, door = rig.clients()
+    async with door:
+        assert (await door.get(f"{v}/api/share")).json()["limits"]["roles"]["main"]["allowed"] == rule["allowed"]
+        assert list((await door.get(f"{v}/api/settings")).json()["presets"]) == [first]
+        switched = await door.post(f"{v}/api/sessions/{mine}/model", json={"preset": first, "reasoning_effort": "low"})
+        assert switched.status_code == 200 and switched.json()["share_pick"] == {"preset": first, "effort": "low", "account": ""}
+        for body in ({"reasoning_effort": "xhigh"}, {"preset": first, "thinking": False}):
+            refused = await door.post(f"{v}/api/sessions/{mine}/model", json=body)
+            assert refused.status_code == 403 and refused.json()["code"] == "not_allowed", body
+    # The operator's own model was not touched by the visitor's pick.
+    assert (await rig.manager.live.load(mine)).get("reasoning_effort") in (None, "")
+
+
 async def test_terminals_follow_the_links_setting(rig: Rig) -> None:
     mine = await rig.session()
     link = await rig.shares.create(mine)

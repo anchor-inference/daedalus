@@ -18,23 +18,28 @@ if TYPE_CHECKING:
     from daedalus.app import Application
 
 ROLES = (
-    ("main", "Conversation", True),
-    ("subagents", "Subagents", False),
-    ("quick", "Quick agent", False),
-    ("vision", "Picture reading", False),
+    ("main", "Conversation", True, "visitor"),
+    ("subagents", "Subagents", False, "agent"),
+    ("quick", "Quick agent", False, "agent"),
+    ("vision", "Picture reading", False, "none"),
 )
-"""``(id, label, pickable)``. Only the conversation has a control on a visitor's screen (the model picker);
-the subagent models are shown to a visitor but not changed by one, and vision has no visitor route."""
+"""``(id, label, pickable, chooser)``. Only the conversation has a control on a visitor's screen (the model
+picker). The helpers' models are chosen by the agent, from a set, when it starts one: the installation lets
+the operator name several, and a link narrows that set instead of the visitor. Vision has one value."""
 
 
 async def describe(app: Application, session_id: str) -> list[dict[str, Any]]:
     """Every role of the session, in the order the dialog lists them.
 
-    Each is ``{"id", "label", "pickable", "current": {"preset", "effort", "account"}, "presets": [{"id",
-    "label", "provider", "provider_name", "model", "billing", "efforts": [...], "accounts": [{"id",
-    "name"}]}]}``. ``pickable`` says the visitor's own screen has a control for the role, so leaving it
-    open means something; ``billing`` is ``subscription`` or ``metered``, which decides whether the money
-    limit or the weekly share applies to it.
+    Each is ``{"id", "label", "pickable", "chooser", "current": {"preset", "effort", "account", "allowed"},
+    "presets": [{"id", "label", "provider", "provider_name", "model", "billing", "efforts": [...],
+    "accounts": [{"id", "name"}]}]}``. ``pickable`` says the visitor's own screen has a control for the role,
+    so leaving it open means something; ``chooser`` says who picks within the role's set: ``visitor``,
+    ``agent`` (a helper's model, named when the agent starts it) or ``none``. ``current.allowed`` is the
+    set the session uses now, in the policy's shape, for a role whose agent chooses (the session's list of
+    helper models, each with any effort); the value is ``preset``/``effort``/``account`` as before.
+    ``billing`` is ``subscription`` or ``metered``, which decides whether the money limit or the weekly
+    share applies to it.
 
     Only the roles a link's policy is enforced for are listed: a role the dialog offered and the runtime
     did not hold would be a limit the operator believes in and a visitor walks past."""
@@ -86,8 +91,10 @@ async def describe(app: Application, session_id: str) -> list[dict[str, Any]]:
         "quick": (quick[0] if quick else "", config.subagents.quick_effort, list(quick)),
         "vision": (vision[0] if vision else "", manager.vision_effort_for(session_id), [pid for pid in ready if config.presets[pid].images]),
     }
+    # The installation's own lists name presets and no efforts: a helper may be started on any effort of them.
+    sets = {"subagents": list(helpers), "quick": list(quick)}
     roles = []
-    for role, label, pickable in ROLES:
+    for role, label, pickable, chooser in ROLES:
         preset, effort, offered = currents[role]
         if not offered:
             # A role nothing can serve (no quick models chosen, no model that sees) has nothing to set.
@@ -97,9 +104,14 @@ async def describe(app: Application, session_id: str) -> list[dict[str, Any]]:
         # and the dialog sending it back as a value was refused as an effort the preset does not have.
         if effort not in next((found["efforts"] for found in presets if found["id"] == preset), []):
             effort = ""
+        listed = [pid for pid in sets.get(role, []) if pid in config.presets]
+        account = account_for(preset) if preset else ""
         roles.append({
-            "id": role, "label": label, "pickable": pickable,
-            "current": {"preset": preset, "effort": effort, "account": account_for(preset) if preset else ""},
+            "id": role, "label": label, "pickable": pickable, "chooser": chooser,
+            # The value's preset keeps the value's account in the set: a helper on it is held to that account,
+            # and "any" there would read as a choice the agent does not have.
+            "current": {"preset": preset, "effort": effort, "account": account,
+                        "allowed": [{"preset": pid, "accounts": [account] if pid == preset and account else [], "efforts": []} for pid in listed]},
             "presets": presets,
         })
     return roles

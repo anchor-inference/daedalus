@@ -1946,41 +1946,38 @@ def link_export(method: str, parts: list[str]) -> tuple[int, str, str | bytes] |
 
 
 # The operator's providers as a live link's window lists them: fourteen, two of them subscriptions with
-# several accounts, dozens of presets with long names. Four tidy rows would hide every layout fault the
-# real list shows (a provider column too narrow, a set that does not scroll, a Russian label cut off).
+# several accounts named by their plan's price, dozens of presets labelled "provider/model" as the operator's
+# are. Four tidy rows would hide every layout fault the real list shows (a provider column too narrow, a set
+# that does not scroll, a long label cut off).
 LIVE_PROVIDERS: list[tuple[str, str, str, list[tuple[str, str]], list[tuple[str, str, list[str]]]]] = [
-    ("claude", "Claude (подписка Max)", "subscription", [("acc-work", "Рабочий аккаунт"), ("acc-home", "Домашний аккаунт"), ("acc-team", "Командный Max 20x")],
-     [("claude-opus-5", "Claude Opus 5 — основной для сложных задач", ["low", "medium", "high", "xhigh"]), ("claude-sonnet-5", "Claude Sonnet 5", ["low", "medium", "high"]),
-      ("claude-haiku-5", "Claude Haiku 5 — быстрые ответы", []), ("claude-opus-5-1m", "Claude Opus 5 с окном 1M токенов", ["medium", "high", "xhigh"])]),
-    ("codex", "ChatGPT Pro (Codex)", "subscription", [("cx-main", "Личный Pro"), ("cx-spare", "Запасной Plus")],
-     [("gpt-6-codex", "GPT-6 Codex", ["low", "medium", "high", "xhigh"]), ("gpt-6", "GPT-6", ["low", "medium", "high"]), ("gpt-6-mini", "GPT-6 mini", ["low", "medium"])]),
-    ("openrouter", "OpenRouter", "metered", [], [("or-deepseek-v4", "DeepSeek V4 через OpenRouter", ["low", "high"]), ("or-qwen-4-max", "Qwen 4 Max", []), ("or-llama-5-405b", "Llama 5 405B Instruct", []),
-      ("or-mistral-large-3", "Mistral Large 3", []), ("or-kimi-k3", "Kimi K3 Thinking", ["medium", "high"]), ("or-glm-5", "GLM-5", [])]),
-    ("anthropic-api", "Anthropic API (по ключу)", "metered", [], [("api-opus-5", "Claude Opus 5 по API", ["low", "medium", "high"]), ("api-sonnet-5", "Claude Sonnet 5 по API", ["low", "high"])]),
-    ("openai", "OpenAI API", "metered", [], [("oa-gpt-6", "GPT-6 по API", ["low", "medium", "high"]), ("oa-gpt-6-mini", "GPT-6 mini по API", []), ("oa-o5", "o5 для рассуждений", ["medium", "high", "xhigh"])]),
-    ("gemini", "Google Gemini", "metered", [], [("gem-3-pro", "Gemini 3 Pro", ["low", "high"]), ("gem-3-flash", "Gemini 3 Flash — дешёвый и быстрый", []), ("gem-3-flash-lite", "Gemini 3 Flash Lite", [])]),
-    ("deepseek", "DeepSeek", "metered", [], [("ds-v4", "DeepSeek V4", ["low", "high"]), ("ds-v4-flash", "DeepSeek V4 Flash", [])]),
-    ("xai", "xAI Grok", "metered", [], [("grok-5", "Grok 5", ["low", "high"]), ("grok-5-fast", "Grok 5 Fast", [])]),
-    ("mistral", "Mistral", "metered", [], [("mi-large-3", "Mistral Large 3", []), ("mi-codestral-3", "Codestral 3", [])]),
-    ("groq", "Groq", "metered", [], [("gq-llama-5-70b", "Llama 5 70B на Groq", []), ("gq-qwen-4-32b", "Qwen 4 32B на Groq", [])]),
-    ("together", "Together AI", "metered", [], [("tg-qwen-4-coder", "Qwen 4 Coder 480B", []), ("tg-deepseek-v4", "DeepSeek V4 на Together", [])]),
-    ("yandex", "YandexGPT", "metered", [], [("ya-gpt-6-pro", "YandexGPT 6 Pro", []), ("ya-gpt-6-lite", "YandexGPT 6 Lite — для перевода", [])]),
-    ("ollama", "Ollama на этой машине", "metered", [], [("ol-qwen-4-14b", "Qwen 4 14B локально", []), ("ol-gemma-4-12b", "Gemma 4 12B локально", [])]),
-    ("lmstudio", "LM Studio в локальной сети", "metered", [], [("lm-llama-5-8b", "Llama 5 8B", []), ("lm-phi-6", "Phi 6", [])]),
+    ("claude", "Claude (подписка Max)", "subscription", [("acc-100", "$100"), ("acc-200", "$200"), ("acc-team", "$200 команда")],
+     [("claude-opus-5", "claude/claude-opus-5-5", ["none", "low", "medium", "high", "xhigh"]), ("claude-sonnet-5", "claude/claude-sonnet-5-5", ["none", "low", "medium", "high", "xhigh"]),
+      ("claude-haiku-5", "claude/claude-haiku-5-1", []), ("claude-opus-5-1m", "claude/claude-opus-5-5[1m]", ["none", "low", "medium", "high", "xhigh"])]),
+    ("codex", "ChatGPT Pro (Codex)", "subscription", [("cx-200", "$200"), ("cx-20", "$20")],
+     [("gpt-6-codex", "codex/gpt-6-codex", ["none", "low", "medium", "high", "xhigh"]), ("gpt-6", "codex/gpt-6", ["none", "low", "medium", "high", "xhigh"]), ("gpt-6-mini", "codex/gpt-6-mini", ["none", "low", "medium", "high", "xhigh"])]),
+    ("openrouter", "OpenRouter", "metered", [], [("or-deepseek-v4", "openrouter/deepseek/deepseek-v4", ["none", "low", "medium", "high", "xhigh"]), ("or-qwen-4-max", "openrouter/qwen/qwen-4-max", []),
+      ("or-llama-5-405b", "openrouter/meta-llama/llama-5-405b-instruct", []), ("or-mistral-large-3", "openrouter/mistralai/mistral-large-3", []),
+      ("or-kimi-k3", "openrouter/moonshotai/kimi-k3-thinking", ["none", "low", "medium", "high", "xhigh"]), ("or-glm-5", "openrouter/z-ai/glm-5", [])]),
+    ("anthropic-api", "Anthropic API (по ключу)", "metered", [], [("api-opus-5", "anthropic/claude-opus-5-5", ["none", "low", "medium", "high", "xhigh"]), ("api-sonnet-5", "anthropic/claude-sonnet-5-5", ["none", "low", "medium", "high", "xhigh"])]),
+    ("openai", "OpenAI API", "metered", [], [("oa-gpt-6", "openai/gpt-6", ["none", "low", "medium", "high", "xhigh"]), ("oa-gpt-6-mini", "openai/gpt-6-mini", []), ("oa-o5", "openai/o5", ["none", "low", "medium", "high", "xhigh"])]),
+    ("gemini", "Google Gemini", "metered", [], [("gem-3-pro", "gemini/gemini-3-pro", ["none", "low", "medium", "high", "xhigh"]), ("gem-3-flash", "gemini/gemini-3-flash", []), ("gem-3-flash-lite", "gemini/gemini-3-flash-lite", [])]),
+    ("deepseek", "DeepSeek", "metered", [], [("ds-v4", "deepseek/deepseek-v4", ["none", "low", "medium", "high", "xhigh"]), ("ds-v4-flash", "deepseek/deepseek-v4-flash", [])]),
+    ("xai", "xAI Grok", "metered", [], [("grok-5", "xai/grok-5", ["none", "low", "medium", "high", "xhigh"]), ("grok-5-fast", "xai/grok-5-fast", [])]),
+    ("mistral", "Mistral", "metered", [], [("mi-large-3", "mistral/mistral-large-3", []), ("mi-codestral-3", "mistral/codestral-3", [])]),
+    ("groq", "Groq", "metered", [], [("gq-llama-5-70b", "groq/llama-5-70b", []), ("gq-qwen-4-32b", "groq/qwen-4-32b", [])]),
+    ("together", "Together AI", "metered", [], [("tg-qwen-4-coder", "together/qwen-4-coder-480b", []), ("tg-deepseek-v4", "together/deepseek-v4", [])]),
+    ("yandex", "YandexGPT", "metered", [], [("ya-gpt-6-pro", "yandex/yandexgpt-6-pro", []), ("ya-gpt-6-lite", "yandex/yandexgpt-6-lite", [])]),
+    ("ollama", "Ollama на этой машине", "metered", [], [("ol-qwen-4-14b", "ollama/qwen-4-14b", []), ("ol-gemma-4-12b", "ollama/gemma-4-12b", [])]),
+    ("lmstudio", "LM Studio в локальной сети", "metered", [], [("lm-llama-5-8b", "lmstudio/llama-5-8b", []), ("lm-phi-6", "lmstudio/phi-6", [])]),
 ]
-# Only the conversation's own model has a control on the visitor's screen; every other role is a value the
-# link sets and the visitor cannot change, as ``share_roles.describe`` reports them.
-LIVE_ROLES: list[tuple[str, str, bool, tuple[str, str, str]]] = [
-    ("main", "Conversation", True, ("claude-opus-5", "high", "")),
-    ("subagents", "Subagents", False, ("claude-sonnet-5", "medium", "")),
-    ("vision", "Image reading", False, ("gem-3-flash", "", "")),
-    ("translation", "Translation", False, ("ya-gpt-6-lite", "", "")),
-    ("quick", "Quick agent", False, ("claude-haiku-5", "", "")),
-    ("coach", "Prompt coach", False, ("gpt-6-mini", "low", "")),
-    ("review", "Action review", False, ("claude-sonnet-5", "low", "")),
-    ("injection", "Injection guard", False, ("gem-3-flash-lite", "", "")),
-    ("title", "Titles", False, ("claude-haiku-5", "", "")),
-    ("compaction", "Compaction", False, ("claude-sonnet-5", "", "")),
+# The roles ``share_roles.describe`` lists, as it lists them: only the conversation's model is the visitor's
+# to pick; the helpers' models are the agent's, from the session's present list; vision has one value. A
+# subscription preset's value names its account, as the host's does when the upstream has several.
+LIVE_ROLES: list[tuple[str, str, bool, str, tuple[str, str, str], list[str]]] = [
+    ("main", "Conversation", True, "visitor", ("claude-opus-5", "high", "acc-100"), []),
+    ("subagents", "Subagents", False, "agent", ("claude-sonnet-5", "medium", "acc-100"), ["claude-sonnet-5", "claude-opus-5", "gpt-6-codex", "or-deepseek-v4"]),
+    ("quick", "Quick agent", False, "agent", ("claude-haiku-5", "", "acc-100"), ["claude-haiku-5", "gem-3-flash"]),
+    ("vision", "Picture reading", False, "none", ("gem-3-flash", "", ""), []),
 ]
 LIVE_WITHHELD: list[tuple[str, str, str]] = [
     ("selfdev", "Self-development", "Changing Daedalus's own code reaches beyond this chat."),
@@ -2000,16 +1997,18 @@ LIVE_WITHHELD: list[tuple[str, str, str]] = [
 
 def live_presets() -> list[dict]:
     """Every preset of :data:`LIVE_PROVIDERS` in the shape ``share_roles.describe`` gives one."""
-    return [{"id": pid, "label": label, "provider": provider, "provider_name": name, "model": pid.split("-", 1)[-1] if provider not in ("claude", "codex") else pid,
+    return [{"id": pid, "label": label, "provider": provider, "provider_name": name, "model": label.split("/", 1)[-1],
              "billing": billing, "efforts": efforts, "accounts": [{"id": aid, "name": an} for aid, an in accounts]}
             for provider, name, billing, accounts, presets in LIVE_PROVIDERS for pid, label, efforts in presets]
 
 
 def live_options(place: str = "container") -> dict:
-    """``GET …/live-shares/options``: every role with its current value and every preset it may use."""
+    """``GET …/live-shares/options``: every role with who chooses in it, its current value and present set, and every preset it may use."""
     presets = live_presets()
-    roles = [{"id": rid, "label": label, "pickable": pickable, "current": {"preset": preset, "effort": effort, "account": account}, "presets": presets}
-             for rid, label, pickable, (preset, effort, account) in LIVE_ROLES]
+    roles = [{"id": rid, "label": label, "pickable": pickable, "chooser": chooser,
+              "current": {"preset": preset, "effort": effort, "account": account, "allowed": [{"preset": pid, "accounts": [account] if pid == preset and account else [], "efforts": []} for pid in listed]},
+              "presets": presets}
+             for rid, label, pickable, chooser, (preset, effort, account), listed in LIVE_ROLES]
     terminals = ["all", "container", "none"] if place == "container" else ["all", "none"]
     return {"roles": roles, "place": place, "terminals": terminals, "withheld": [{"id": wid, "label": label, "why": why} for wid, label, why in LIVE_WITHHELD]}
 
@@ -2022,7 +2021,7 @@ class LiveLinks:
     window should have built; a refusal names the field it is about, as the host's does."""
 
     BASE = "https://services.example.org"
-    ROLE_IDS = {rid for rid, _label, _pickable, _current in LIVE_ROLES}
+    ROLE_IDS = {rid for rid, *_rest in LIVE_ROLES}
 
     def __init__(self) -> None:
         self.links: dict[str, list[dict]] = {}

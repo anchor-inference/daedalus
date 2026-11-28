@@ -461,6 +461,9 @@ class SessionState:
     link_choices: dict[str, dict[str, str]] = field(default_factory=dict)
     """Role → what the link's policy runs it on, read when the run's engine is built. Held on the state
     because the account and vision lookups happen inside a call and cannot wait on the database."""
+    link_rules: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Role → the link's rule for it, read with ``link_choices``: the sets the agent may start its helpers
+    on in a visitor's turn are looked up inside a tool call, which cannot wait on the database either."""
     review_holds_send: bool = False
     """The review of the ``AgentTalk`` send about to run did not pass: that message waits for the operator."""
     last_error_kind: str = ""
@@ -7878,15 +7881,26 @@ class SessionManager:
         default = self.config.default_preset()
         return default[0] if default else None
 
-    def subagent_allowance(self, metadata: dict[str, Any], overrides: dict[str, Any]) -> subagent_models.Allowance:
-        """The presets this session's helpers may run on (:mod:`daedalus.host.subagent_models`)."""
+    def subagent_allowance(self, metadata: dict[str, Any], overrides: dict[str, Any], *, session_id: str | None = None) -> subagent_models.Allowance:
+        """The presets this session's helpers may run on (:mod:`daedalus.host.subagent_models`).
+
+        In a visitor's turn whose link sets the subagents' models (``session_id`` names the leader), the
+        link's set takes the place of the session's list: a helper naming no model runs on the set's value,
+        so the leader's own model being outside the set does not matter."""
+        linked = self._link_members(session_id, "subagents")
+        if linked is not None:
+            return subagent_models.Allowance("chosen", tuple(linked), True)
         available = set(self.providers.available())
         ready = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
         mode, chosen, _ = subagent_models.choice(metadata, self.config.subagents.models)
         return subagent_models.allowance(mode, chosen, available=ready, session_preset=self.session_preset_id(overrides))
 
-    def quick_models(self, metadata: dict[str, Any]) -> list[str]:
-        """The presets this session's quick agents may run on now, the default first (:mod:`daedalus.host.quick_agent`)."""
+    def quick_models(self, metadata: dict[str, Any], *, session_id: str | None = None) -> list[str]:
+        """The presets this session's quick agents may run on now, the default first (:mod:`daedalus.host.quick_agent`);
+        in a visitor's turn whose link sets them (``session_id`` names the leader), the link's set, value first."""
+        linked = self._link_members(session_id, "quick")
+        if linked is not None:
+            return linked
         available = set(self.providers.available())
         ready = [pid for pid, preset in self.config.presets.items() if preset.provider in available and preset.model]
         return quick_agent.allowed(metadata, self.config.subagents.quick_models, ready=ready)
@@ -7975,15 +7989,18 @@ class SessionManager:
         if note is not None and state.services is not None:
             # The sandbox line of the environment section describes this process's commands, not these.
             parts.append(note(state.services.workspace_dir))
-        allowed = self.subagent_allowance(state.metadata, overrides or {})
-        if allowed.presets:
+        allowed = self.subagent_allowance(state.metadata, overrides or {}, session_id=state.session.id)
+        if self.link_rule(state.session.id, "subagents") is not None:
+            # The link's set: its value is what a SubAgent call naming no model runs on, not the leader's model.
+            parts.append("- Models SubAgent accepts in this turn (preset ids, the first is its default): " + (", ".join(allowed.presets) or "none"))
+        elif allowed.presets:
             parts.append("- Models SubAgent accepts (preset ids): " + ", ".join(allowed.presets)
                          + ("" if allowed.leader_model else "; your own model is not among them, so always name one"))
         elif allowed.limited and allowed.leader_model:
             parts.append("- SubAgent runs only on your own model in this session: do not pass `model`")
         elif allowed.limited:
             parts.append("- No model is allowed for helpers in this session: SubAgent and SpawnAgent will refuse")
-        quick = self.quick_models(state.metadata) if not state.metadata.get("subagent_of") else []
+        quick = self.quick_models(state.metadata, session_id=state.session.id) if not state.metadata.get("subagent_of") else []
         if quick:
             parts.append("- Models QuickAgent accepts (preset ids, the first is its default): " + ", ".join(quick))
         loop_note = str(state.metadata.get("loop_note") or "").strip()
@@ -8958,18 +8975,31 @@ class SessionManager:
         """The run's overrides with its link's policy applied, or unchanged outside a visitor's turn."""
         if not state.share_id:
             state.link_choices = {}
+            state.link_rules = {}
             return overrides
         policy = await share_turns.policy_of(self.db, state.share_id)
         role = share_turns.role_of(state.metadata)
         leader = self._states.get(str(state.metadata.get("subagent_of") or ""))
         picks_from = state.metadata if leader is None else leader.metadata
         choices: dict[str, dict[str, str]] = {}
+        rules: dict[str, dict[str, Any]] = {}
         for name in ("main", "subagents", "quick", "vision"):
             rule = share_turns.rule_of(policy, name)
-            if rule is not None:
-                # Only the conversation has a control on the visitor's screen, so only its pick is read.
-                choices[name] = share_turns.choice(rule, share_turns.pick_of(picks_from, state.share_id) if name == "main" else None)
+            if rule is None:
+                continue
+            rules[name] = rule
+            # The conversation's pick is the visitor's, kept beside the link; a helper's is the one its
+            # leader made from the link's set when it started the helper, kept on the helper itself. Either
+            # is judged against the rule again here, so a set narrowed since holds at once.
+            if name == "main":
+                pick = share_turns.pick_of(picks_from, state.share_id)
+            elif name == role:
+                pick = share_turns.pick_of(state.metadata, state.share_id)
+            else:
+                pick = None
+            choices[name] = share_turns.choice(rule, pick)
         state.link_choices = choices
+        state.link_rules = rules
         chosen = choices.get(role)
         return share_turns.applied(overrides, chosen, self.config.presets) if chosen is not None else overrides
 
@@ -8986,6 +9016,21 @@ class SessionManager:
         conf = self.config.providers.get(preset.provider) if preset is not None else None
         # Held only on the preset's own upstream: a fallback on another subscription keeps that one's order.
         return account if conf is not None and keyproxy_upstream(conf.base_url) == upstream else ""
+
+    def link_rule(self, session_id: str | None, role: str) -> dict[str, Any] | None:
+        """The link's rule for ``role`` while the session runs a visitor's turn whose policy names it, else None."""
+        state = self._states.get(session_id or "")
+        if state is None or not state.share_id:
+            return None
+        return state.link_rules.get(role)
+
+    def _link_members(self, session_id: str | None, role: str) -> list[str] | None:
+        """The presets of the link's set for ``role`` that can run now, value first; None outside a visitor's turn."""
+        rule = self.link_rule(session_id, role)
+        if rule is None:
+            return None
+        available = set(self.providers.available())
+        return [pid for pid in share_turns.members(rule) if pid in self.config.presets and self.config.presets[pid].provider in available and self.config.presets[pid].model]
 
     def _link_vision(self, session_id: str | None) -> dict[str, str] | None:
         state = self._states.get(session_id or "")

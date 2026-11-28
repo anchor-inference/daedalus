@@ -35,6 +35,19 @@ export type VisitLimits = {
 };
 
 let limits: VisitLimits | null = null;
+/** The conversation's model the visitor's turns run on: their pick, else the link's value. */
+export type VisitPick = { preset: string; effort: string; account: string };
+let pick: VisitPick | null = null;
+
+/** What the visitor's own turns run on, when the link sets the conversation's model; null otherwise. The
+ *  session's reading reports the operator's model, which a visitor's pick never changes. */
+export function visitPick(): VisitPick | null {
+  return pick;
+}
+
+export function setVisitPick(next: VisitPick | null): void {
+  pick = next;
+}
 
 /** What the link lets this visitor choose, as ``GET /api/share`` said; null in the operator's app. */
 export function visitLimits(): VisitLimits | null {

@@ -445,7 +445,7 @@ async def test_a_real_helper_run_waits_for_the_handoff_and_carries_on_in_the_sam
         subs: Subagents = app.extensions["subagents"]
         service: Browsers = app.extensions["browser"]
         manager.providers.rungs_for = lambda config, preset_id=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
-        manager.quick_models = lambda metadata: [FALLBACK_PRESET]  # type: ignore[method-assign]
+        manager.quick_models = lambda metadata, session_id=None: [FALLBACK_PRESET]  # type: ignore[method-assign]
         leader = await manager.create_session("lead")
         lid = leader.session.id
         for meta in (leader.metadata, leader.session.metadata):

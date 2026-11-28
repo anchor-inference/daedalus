@@ -30,7 +30,7 @@ import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { effortWord } from "./effortselect";
 import { SubscriptionAccount, accountName, statusOf, useSubscriptionAccounts } from "./accounts";
 import { navigate, pathFor } from "./router";
-import { allowedEfforts, inShare, roleLocked } from "./visit";
+import { allowedEfforts, inShare, roleLocked, visitPick } from "./visit";
 
 export type ModelChoice = { clear: true } | { preset: string } | { model: string };
 
@@ -434,7 +434,11 @@ function ModelPicker({ cat, failed, model, fallback, onPick, onStar, onClose, ef
   }
 
   // A live link's owner may narrow the efforts of a preset; the row then offers only those.
-  const visitEfforts = inShare() && currentEntry ? allowedEfforts("main", currentEntry[0]) : null;
+  // A visitor's turns run on their pick (else the link's value), not on the session's model the label
+  // names, and the pick is known before the presets load: reading the preset from the loaded list left
+  // every effort on offer until it came. The host names no thinking "none"; this row names it "off".
+  const visitPreset = inShare() ? visitPick()?.preset || currentEntry?.[0] : undefined;
+  const visitEfforts = visitPreset ? allowedEfforts("main", visitPreset)?.map((id) => (id === "none" ? "off" : id)) ?? null : null;
   const efforts = onChooseEffort ? <EffortRow presetThinks={currentEntry ? currentEntry[1].thinking !== false : true} effort={effort} thinking={thinking} onChoose={onChooseEffort} account={account} only={visitEfforts} /> : null;
   const settingsKey = MAC ? "⌘ ," : "Ctrl ,";
   return (

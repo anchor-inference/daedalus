@@ -20,7 +20,12 @@ export type RolePreset = {
   accounts: RoleAccount[];
 };
 export type RoleValue = { preset: string; effort: string; account: string };
-export type ShareRole = { id: string; label: string; pickable: boolean; current: RoleValue; presets: RolePreset[] };
+/** Who picks within a role's set: the visitor (the model picker on their screen), the agent (a helper's
+ *  model, named when it starts one) or nobody (the role has one value). */
+export type Chooser = "visitor" | "agent" | "none";
+/** `current.allowed` is the set the session uses now for a role the agent chooses in (its list of helper
+ *  models); a role the visitor chooses in has none, since outside a link the visitor does not exist. */
+export type ShareRole = { id: string; label: string; pickable: boolean; chooser: Chooser; current: RoleValue & { allowed?: AllowedEntry[] }; presets: RolePreset[] };
 export type Terminals = "all" | "container" | "none";
 /** `withheld` is what the agent loses for the whole conversation while any link is live. */
 export type LiveOptions = { roles: ShareRole[]; place: "container" | "host"; terminals: Terminals[]; withheld?: { id: string; label: string; why: string }[] };
@@ -34,7 +39,9 @@ export type LivePolicy = {
   terminals?: Terminals;
 };
 
-/** `locked`: the visitor gets the value and nothing else. `set`: the value or one of `allowed`. */
+/** `locked`: the role runs on the value and nothing else. `set`: on one of `allowed`, which in the form
+ *  always holds the value's own preset (see `withOwn`), so that preset can be given efforts and accounts
+ *  of its own like any other member. */
 export type RoleForm = RoleValue & { mode: "locked" | "set"; allowed: AllowedEntry[] };
 export type LiveForm = {
   roles: Record<string, RoleForm>;
@@ -44,10 +51,70 @@ export type LiveForm = {
   terminals: Terminals;
 };
 
-/** A form for a new link: every role locked to what the session uses now, the safest start. */
+const valueOf = (role: ShareRole): RoleValue => ({ preset: role.current.preset, effort: role.current.effort, account: role.current.account });
+
+/** The entry that lets the value and nothing more: its own effort and account. */
+export function ownEntry(value: RoleValue): AllowedEntry {
+  return { preset: value.preset, accounts: value.account ? [value.account] : [], efforts: value.effort ? [value.effort] : [] };
+}
+
+/** A list of efforts or accounts that names some keeps the value's among them: the value is always
+ *  allowed, and a chip row that let it be pressed off would show a set the host does not keep. */
+function keeping(list: string[], own: string): string[] {
+  return list.length && own && !list.includes(own) ? [own, ...list] : list;
+}
+
+/** A role in a set, with the value's own preset first in it and carrying the value's effort and account.
+ *  The operator's wish this serves most is "this model, but low, medium or high", which a set that could
+ *  not hold the value's own preset had no way to say. */
+export function withOwn(form: RoleForm): RoleForm {
+  if (form.mode !== "set" || !form.preset) return form;
+  const found = form.allowed.find((entry) => entry.preset === form.preset);
+  const own = found ? { ...found, efforts: keeping(found.efforts, form.effort), accounts: keeping(found.accounts, form.account) } : ownEntry(form);
+  return { ...form, allowed: [own, ...form.allowed.filter((entry) => entry.preset !== form.preset)] };
+}
+
+/** Whether an entry of the value's own preset lets nothing beyond the value: then the policy leaves it
+ *  out, and a set of only that entry is the same as "only this". */
+export function onlyValue(entry: AllowedEntry, value: RoleValue, preset: RolePreset | undefined): boolean {
+  if (entry.preset !== value.preset) return false;
+  const one = (list: string[], own: string, offered: number) => (list.length ? list.every((item) => item === own) : offered === 0);
+  // A value with no account named is not held to one: the router already spreads it over every account,
+  // which is all "any" adds.
+  return one(entry.efforts, value.effort, preset?.efforts.length ?? 0) && (one(entry.accounts, value.account, preset?.accounts.length ?? 0) || (!value.account && !entry.accounts.length));
+}
+
+/** The value changed (its preset, effort or account): the old value's entry leaves the set when it was
+ *  there only as the value, so the old effort is not left allowed behind the operator's back, and the new
+ *  value joins, keeping what the operator had already set for its preset. */
+export function revalue(form: RoleForm, next: RoleValue, role: ShareRole): RoleForm {
+  const old = role.presets.find((item) => item.id === form.preset);
+  const allowed = form.allowed.filter((entry) => !(entry.preset === form.preset && onlyValue(entry, form, old)));
+  return withOwn({ ...form, ...next, allowed });
+}
+
+/** The set a role's policy keeps: none when no one chooses in it or it is "only this", and without the
+ *  value's own entry when that entry adds nothing to the value. */
+export function keptSet(role: ShareRole, form: RoleForm | undefined): AllowedEntry[] {
+  if (!form || role.chooser === "none" || form.mode !== "set") return [];
+  const preset = role.presets.find((item) => item.id === form.preset);
+  return withOwn(form).allowed
+    .filter((entry) => entry.preset && !onlyValue(entry, form, preset))
+    .map((entry) => ({ preset: entry.preset, accounts: [...entry.accounts], efforts: [...entry.efforts] }));
+}
+
+/** A role's form from a value and a stored set: "only this" when the set is empty, which is what every
+ *  link made before sets could hold the value's own preset still carries. */
+function roleForm(value: RoleValue, allowed: AllowedEntry[]): RoleForm {
+  return withOwn({ ...value, mode: allowed.length ? "set" : "locked", allowed: allowed.map((entry) => ({ preset: entry.preset, accounts: [...(entry.accounts ?? [])], efforts: [...(entry.efforts ?? [])] })) });
+}
+
+/** A form for a new link. A role the visitor would choose in is locked to what the session uses now, the
+ *  safest start; a role the agent chooses in opens with the session's present list, the one its helpers
+ *  are started from today, so a new link does not quietly take models away from the agent. */
 export function freshForm(options: LiveOptions): LiveForm {
   const roles: Record<string, RoleForm> = {};
-  for (const role of options.roles) roles[role.id] = { ...role.current, mode: "locked", allowed: [] };
+  for (const role of options.roles) roles[role.id] = roleForm(valueOf(role), role.chooser === "agent" ? role.current.allowed ?? [] : []);
   const terminals: Terminals = options.terminals.includes("none") ? "none" : options.terminals[0] ?? "none";
   return { roles, budgetUsd: "", budgetPct: "", terminals };
 }
@@ -58,7 +125,7 @@ export function formOf(policy: LivePolicy | undefined, options: LiveOptions): Li
   const form = freshForm(options);
   for (const [id, kept] of Object.entries(policy?.roles ?? {})) {
     if (!form.roles[id]) continue;
-    form.roles[id] = { preset: kept.preset, effort: kept.effort ?? "", account: kept.account ?? "", mode: kept.allowed?.length ? "set" : "locked", allowed: kept.allowed ?? [] };
+    form.roles[id] = roleForm({ preset: kept.preset, effort: kept.effort ?? "", account: kept.account ?? "" }, kept.allowed ?? []);
   }
   form.budgetUsd = policy?.budget_usd != null ? String(policy.budget_usd) : "";
   form.budgetPct = policy?.budget_weekly_pct != null ? String(policy.budget_weekly_pct) : "";
@@ -75,15 +142,14 @@ export function amount(text: string): number | null {
   return Number.isFinite(value) && value > 0 ? value : NaN;
 }
 
-/** The host's policy from the form. A role that cannot be picked by the visitor never carries a set,
- *  whatever the form held before the options said so. */
+/** The host's policy from the form. A role no one chooses in never carries a set, whatever the form held
+ *  before the options said so. */
 export function buildPolicy(form: LiveForm, options: LiveOptions): LivePolicy {
   const roles: Record<string, RolePolicy> = {};
   for (const role of options.roles) {
     const kept = form.roles[role.id];
     if (!kept) continue;
-    const allowed = role.pickable && kept.mode === "set" ? kept.allowed.filter((entry) => entry.preset).map((entry) => ({ preset: entry.preset, accounts: [...entry.accounts], efforts: [...entry.efforts] })) : [];
-    roles[role.id] = { preset: kept.preset, effort: kept.effort, account: kept.account, allowed };
+    roles[role.id] = { preset: kept.preset, effort: kept.effort, account: kept.account, allowed: keptSet(role, kept) };
   }
   const usd = amount(form.budgetUsd);
   const pct = amount(form.budgetPct);
@@ -96,7 +162,7 @@ export function billingsInUse(form: LiveForm, options: LiveOptions): Set<Billing
   for (const role of options.roles) {
     const kept = form.roles[role.id];
     if (!kept) continue;
-    const ids = [kept.preset, ...(role.pickable && kept.mode === "set" ? kept.allowed.map((entry) => entry.preset) : [])];
+    const ids = [kept.preset, ...keptSet(role, kept).map((entry) => entry.preset)];
     for (const id of ids) {
       const preset = role.presets.find((item) => item.id === id);
       if (preset) found.add(preset.billing);
@@ -108,7 +174,7 @@ export function billingsInUse(form: LiveForm, options: LiveOptions): Set<Billing
 /** Every role back to the session's current value, locked: the one-press safe state. */
 export function lockAll(form: LiveForm, options: LiveOptions): LiveForm {
   const roles = { ...form.roles };
-  for (const role of options.roles) roles[role.id] = { ...role.current, mode: "locked", allowed: [] };
+  for (const role of options.roles) roles[role.id] = { ...valueOf(role), mode: "locked", allowed: [] };
   return { ...form, roles };
 }
 
@@ -130,16 +196,23 @@ export function summarize(form: LiveForm, options: LiveOptions, password: boolea
   const parts: string[] = [];
   parts.push(t(password ? "live.sum.password" : "live.sum.nopassword"));
   const main = options.roles.find((role) => role.id === "main") ?? options.roles[0];
-  const open = options.roles.filter((role) => role.pickable && form.roles[role.id]?.mode === "set" && form.roles[role.id].allowed.length > 0);
+  const presetsOf = (role: ShareRole) => new Set([form.roles[role.id].preset, ...keptSet(role, form.roles[role.id]).map((entry) => entry.preset)]);
   if (main && form.roles[main.id]) {
     const kept = form.roles[main.id];
     const label = main.presets.find((item) => item.id === kept.preset)?.label ?? kept.preset;
-    parts.push(main.pickable && kept.mode === "set" && kept.allowed.length
-      ? t("live.sum.main.set", { model: label, n: String(kept.allowed.length) })
+    const more = presetsOf(main).size - 1;
+    // A set of the value's own preset alone is not "only": the visitor may still change its effort or account.
+    parts.push(more > 0 ? t("live.sum.main.set", { model: label, n: String(more) })
+      : keptSet(main, kept).length ? t("live.sum.main.tuned", { model: label })
       : t("live.sum.main.locked", { model: label }));
   }
-  const others = open.filter((role) => role.id !== main?.id).length;
+  const others = options.roles.filter((role) => role.id !== main?.id && role.chooser === "visitor" && form.roles[role.id] && keptSet(role, form.roles[role.id]).length > 0).length;
   parts.push(others ? plural("live.sum.others.open", others) : t("live.sum.others.locked"));
+  for (const role of options.roles) {
+    if (role.chooser !== "agent" || !form.roles[role.id] || !keptSet(role, form.roles[role.id]).length) continue;
+    const known = t(`live.role.${role.id}`);
+    parts.push(plural("live.sum.agent", presetsOf(role).size, { role: known.startsWith("[") ? role.label : known }));
+  }
   const usd = amount(form.budgetUsd);
   const pct = amount(form.budgetPct);
   const limits = [usd && !Number.isNaN(usd) ? formatUsd(usd) : "", pct && !Number.isNaN(pct) ? t("live.sum.pct", { n: formatPct(pct) }) : ""].filter(Boolean);
