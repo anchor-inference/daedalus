@@ -12,6 +12,7 @@ import { EnvPill } from "./envpill";
 import { Icon } from "./icons";
 import { navigate, pathFor, projectPagePath } from "./router";
 import { invalidate, useOffline, useQuery } from "./store";
+import { ownerOnly } from "./visit";
 import { confirmAsync, errorText } from "./ui";
 import { plural, t } from "./i18n";
 import { ProjectEnvironment } from "./project/ProjectEnvironment";
@@ -293,7 +294,7 @@ function savedSettingsDraft(projectId: string): SettingsDraft | null {
 
 /** Where a folder may live, asked once and kept: it changes only when the host terminal bridge is installed. */
 export function useEnvironments() {
-  return useQuery<ProjectEnvironments>("/api/project-environments", { staleMs: 60000 });
+  return useQuery<ProjectEnvironments>(ownerOnly("/api/project-environments"), { staleMs: 60000 });
 }
 
 /** One folder of a project: what it is, who can reach it, the read-only switch and the way to forget it. */

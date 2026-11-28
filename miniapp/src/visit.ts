@@ -27,6 +27,14 @@ export function inShare(): boolean {
   return shareToken() !== null;
 }
 
+/** A read only the operator's own app makes: null on a live link's page, which `useQuery` takes as "do not
+ *  ask". What such a read names is not the link's session (the computer, the folders' homes, what this
+ *  installation can do, a subscription's usage), so the door answers 404 to it and the page spent its
+ *  first seconds filling the network log with refusals. Nothing the page draws waits on any of them. */
+export function ownerOnly(path: string): string | null {
+  return inShare() ? null : path;
+}
+
 /** An API or socket path as this page must ask for it: under the link's prefix on a live link's page,
  *  unchanged in the operator's app. Absolute addresses of this page's own origin are rewritten too. */
 export function routed(path: string, token: string | null = shareToken()): string {

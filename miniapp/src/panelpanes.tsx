@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { api, type MemoryRecord, type ProviderUsage, type SessionDetail } from "./api";
 import { useEvent, useStreamUp } from "./events";
 import { useQuery } from "./store";
+import { routed } from "./visit";
 import type { BoardTask } from "./board/tasks";
 import { Icon } from "./icons";
 import { plural, t } from "./i18n";
@@ -202,7 +203,8 @@ export function AttachmentsPane({ sessionId, onJump }: { sessionId: string; onJu
       {rows.map((file) => (
         <div key={file.id} className="tool-row" data-attachment={file.id}>
           <Icon name={fileIcon(file.name)} size={16} />
-          <a className="tool-row-main" href={file.url} target="_blank" rel="noreferrer" title={file.name}>
+          {/* The host names the address as the operator's app asks for it; a live link's page puts its own prefix on it. */}
+          <a className="tool-row-main" href={routed(file.url)} target="_blank" rel="noreferrer" title={file.name}>
             <span className="tool-row-name truncate">{file.name}</span>
             <span className="tool-row-meta">{[t(file.source === "agent" ? "panel.attachments.agent" : "panel.attachments.you"), file.size != null ? bytes(file.size) : "", shortDateTime(file.created_at)].filter(Boolean).join(" · ")}</span>
           </a>

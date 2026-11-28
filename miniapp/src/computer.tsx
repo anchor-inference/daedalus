@@ -26,6 +26,7 @@ import { DICT, t } from "./i18n";
 import { Icon } from "./icons";
 import { invalidate, useQuery } from "./store";
 import { errorText } from "./ui";
+import { ownerOnly } from "./visit";
 import { Sheet } from "./ui/dialogs";
 import { COMPUTER, type ComputerDisplay, type ComputerScope } from "./computerscope";
 import { ComputerScopePicker } from "./computerpicker";
@@ -134,7 +135,7 @@ async function send(path: string, body: unknown, onError: (text: string) => void
  *  while the control is open its sheet polls instead, and on a server nothing does. The probe is the
  *  same cached entry without a timer: whether to poll is only known once it has answered. */
 export function useComputer(sessionId: string, open: boolean): { state: ComputerState | undefined; view: ComputerView } {
-  const probe = useQuery<ComputerState>(COMPUTER, { staleMs: 2000 });
+  const probe = useQuery<ComputerState>(ownerOnly(COMPUTER), { staleMs: 2000 });
   const native = !!probe.data?.native;
   const query = useQuery<ComputerState>(native ? COMPUTER : null, { pollMs: open ? 0 : IDLE_POLL_MS, staleMs: 2000 });
   const state = query.data ?? probe.data;
@@ -163,7 +164,7 @@ export function ComputerButton({ view, onOpen }: { view: ComputerView; onOpen: (
 /** The banner above the composer while this conversation controls the computer: what is happening,
  *  how long it has left, Stop, and Resume while the operator's hand has paused it. */
 export function ComputerBanner({ sessionId }: { sessionId: string }) {
-  const probe = useQuery<ComputerState>(COMPUTER, { staleMs: 2000 });
+  const probe = useQuery<ComputerState>(ownerOnly(COMPUTER), { staleMs: 2000 });
   const shown = computerView(probe.data, sessionId);
   const holding = shown === "mine" || shown === "paused";
   const query = useQuery<ComputerState>(holding ? COMPUTER : null, { pollMs: POLL_MS, staleMs: 2000 });
