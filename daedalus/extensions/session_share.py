@@ -40,6 +40,7 @@ from urllib.parse import urlsplit
 
 from daedalus import public_address
 from daedalus.extensions import share_policy
+from daedalus.host.share_tools import live, parse_time
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -114,27 +115,9 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _parse(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-def live(row: dict[str, Any], at: datetime | None = None) -> bool:
-    """Whether a link still opens anything: not revoked, and not past its expiry."""
-    if row.get("revoked_at"):
-        return False
-    expires = _parse(row.get("expires_at"))
-    return expires is None or expires > (at or datetime.now(UTC))
-
-
 def seconds_left(row: dict[str, Any]) -> float | None:
     """Until the link expires; None for one that does not."""
-    expires = _parse(row.get("expires_at"))
+    expires = parse_time(row.get("expires_at"))
     return None if expires is None else max(0.0, (expires - datetime.now(UTC)).total_seconds())
 
 

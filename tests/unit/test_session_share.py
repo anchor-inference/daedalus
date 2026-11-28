@@ -333,7 +333,7 @@ async def test_the_operator_sets_a_policy_and_reads_it_back_without_the_password
     app, _door = rig.clients()
     async with app:
         options = (await app.get(f"/api/sessions/{mine}/live-shares/options", headers=OWNER)).json()
-        assert options["roles"] == roles and options["place"] in ("container", "host") and options["withheld"] == []
+        assert options["roles"] == roles and options["place"] in ("container", "host") and {row["id"] for row in options["withheld"]} >= {"self", "memory", "agents"}
         assert options["terminals"] == (["all", "container", "none"] if options["place"] == "container" else ["all", "none"])
         made = await app.post(f"/api/sessions/{mine}/live-shares", headers=OWNER, json={"label": "for Ann\n", "password": "open sesame", "policy": POLICY})
         assert made.status_code == 200, made.text

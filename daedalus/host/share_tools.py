@@ -178,10 +178,26 @@ def _lineage(manager: Any, session_id: str, metadata: Mapping[str, Any] | None =
         current = getattr(states.get(parent), "metadata", None) or {}
 
 
+def parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def live(row: dict[str, Any], at: datetime | None = None) -> bool:
+    """Whether a link still opens anything: not revoked, and not past its expiry."""
+    if row.get("revoked_at"):
+        return False
+    expires = parse_time(row.get("expires_at"))
+    return expires is None or expires > (at or datetime.now(UTC))
+
+
 async def live_links(db: Any, session_ids: Sequence[str]) -> int:
     """How many live links point at any of ``session_ids``. One indexed read: it runs at every turn."""
-    from daedalus.extensions.session_share import live
-
     if not session_ids:
         return 0
     marks = ", ".join("?" for _ in session_ids)
@@ -295,9 +311,11 @@ def without_carried_memory(history: Sequence[Any], carriers: Iterable[str], key_
     The block an earlier turn of the operator's put there is still in the history, and a visitor's turn
     would read it. The whole context goes, not the block alone: it is stale in every old message anyway,
     and a block cut by its words could leave a line behind."""
-    from protocore.contracts.types import TextBlock
+    from protocore.contracts.types import TextBlock  # Lazy: only a turn of a shared session needs the core's types here
 
-    from daedalus.host import prompts
+    from daedalus.host import (
+        prompts,  # Lazy: the prompt builder imports half the host, and the door reads this module at start
+    )
 
     marked = set(carriers)
     if not marked:

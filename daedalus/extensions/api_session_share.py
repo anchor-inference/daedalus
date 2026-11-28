@@ -43,7 +43,6 @@ operator's cookie, and a visitor's page there would be the one thing the separat
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
 import re
@@ -70,7 +69,7 @@ from daedalus.extensions.session_share import (
     pass_valid,
     seconds_left,
 )
-from daedalus.host import share_roles, share_spend
+from daedalus.host import share_roles, share_spend, share_tools
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -132,6 +131,11 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", _S + "/runtime-state", SESSION),
         ("GET", _S + "/browser-approvals", SESSION),
         ("GET", _S + "/services", SESSION),
+        # The conversation's own preview servers: read their output, stop them, and give one an address
+        # others can open, which is what a person shown a thing being built asks for next.
+        ("GET", _S + f"/services/{_PART}/logs", SESSION),
+        ("POST", _S + f"/services/{_PART}/stop", SESSION),
+        ("POST", _S + f"/services/{_PART}/share", SESSION),
         ("GET", _S + "/agent-talks", SESSION),
         ("GET", _S + "/subagent-models", SESSION),
         ("GET", _S + "/mcp", SESSION),
@@ -621,14 +625,6 @@ class SharePatch(BaseModel):
     quietly become one that does not."""
 
 
-async def withheld_tools(app: Application, session_id: str) -> list[dict[str, Any]]:
-    """What the session's tools keep from a visitor, as the dialog lists it; [] where that is not known."""
-    try:
-        # Looked up when asked: the module that knows this is written apart from the door and may be absent.
-        share_tools = importlib.import_module("daedalus.host.share_tools")
-    except ImportError:
-        return []
-    return list(await share_tools.withheld(app, session_id))
 
 
 async def pick_refused(app: Application, who: dict[str, Any], body: dict[str, Any]) -> str:
@@ -780,11 +776,15 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             raise HTTPException(404, "no such session")
         policy = await policy_of(session_id, body.policy)
         try:
-            return await found.create(session_id, expires_hours=body.expires_hours, label=body.label, password=body.password, policy=policy)
+            made = await found.create(session_id, expires_hours=body.expires_hours, label=body.label, password=body.password, policy=policy)
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        # A turn already under way was given its tools before the link existed; a visitor's steer into
+        # it must not find the ones a shared conversation does not have.
+        share_tools.mark_shared(manager, session_id)
+        return made
 
     @api.get("/api/sessions/{session_id}/live-shares/options")
     async def live_share_options(session_id: str, _: dict[str, Any] = Depends(operator)) -> dict[str, Any]:
@@ -795,7 +795,7 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
             "roles": await share_roles.describe(app, session_id),
             "place": place,
             "terminals": share_policy.terminal_choices(place),
-            "withheld": await withheld_tools(app, session_id),
+            "withheld": share_tools.withheld(app, session_id),
         }
 
     @api.patch("/api/sessions/{session_id}/live-shares/{share_id}")
