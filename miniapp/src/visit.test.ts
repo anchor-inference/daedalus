@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { routed, shareToken } from "./visit";
+import { ownerOnly, routed, shareToken } from "./visit";
 
 const TOKEN = "A".repeat(43);
 
@@ -20,5 +20,15 @@ describe("a live link's page", () => {
     expect(routed("https://elsewhere.example/api/x", TOKEN)).toBe("https://elsewhere.example/api/x");
     expect(routed("/v/assets/index.js", TOKEN)).toBe("/v/assets/index.js");
     expect(routed("/api/sessions/s1", null)).toBe("/api/sessions/s1");
+  });
+
+  it("leaves the operator's own reads out of the page, so the door has nothing to refuse", () => {
+    expect(ownerOnly("/api/computer")).toBe("/api/computer");
+    window.history.pushState({}, "", `/v/${TOKEN}/`);
+    try {
+      expect(ownerOnly("/api/computer")).toBeNull();
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
   });
 });

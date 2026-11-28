@@ -665,17 +665,21 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       .then((all) => setSchedules(all.filter((x) => x.target_session === id || x.created_by_session === id || x.active_session_id === id)))
       .catch(() => undefined);
   }, [id]);
+  // Not for a live link's visitor: the list is the whole installation's, filtered here, and the door
+  // opens nothing that names no session.
   useEffect(() => {
+    if (visit) return;
     loadSchedules();
     const t = setInterval(loadSchedules, 60000);
     return () => clearInterval(t);
-  }, [loadSchedules]);
+  }, [loadSchedules, visit]);
 
   // Usage of the provider the session talks to: a subscription's windows, or the day's metered spend.
   const provider = detail?.provider ?? "";
   const activeAccount = detail?.account || detail?.account_default || "";
+  // A visitor is not shown the operator's account: its windows and spend are not the link's to read.
   useEffect(() => {
-    if (!provider) return;
+    if (!provider || visit) return;
     let gone = false;
     const qs = new URLSearchParams();
     if (activeAccount) qs.set("account", activeAccount);
@@ -692,7 +696,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       gone = true;
       clearInterval(t);
     };
-  }, [id, provider, activeAccount, detail?.usage.c]);
+  }, [id, provider, activeAccount, detail?.usage.c, visit]);
 
   // The card's run and delete are the schedule commands the Schedules dialog sends, revision and
   // command identity included. The card used to call `/api/schedules/{id}/run` and `DELETE
