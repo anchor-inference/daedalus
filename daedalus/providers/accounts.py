@@ -62,6 +62,10 @@ class AccountRouter:
         self._preset_account = preset_account
         self.on_switch: AccountSwitch | None = None
         """Set by the session runner, which says on the run's screen that the call moved."""
+        self.forced: Callable[[str | None, str], str] | None = None
+        """``(session id, upstream)`` → the one account a live link's policy holds this session's call to, ""
+        for none. Set by the session runner. Without fallover: a link held to one plan must not spill onto
+        another account the operator did not hand over."""
 
     def upstream(self, endpoint: ProviderEndpoint) -> str:
         """The subscription upstream ``endpoint`` reaches through the key proxy, or "" when it has no accounts."""
@@ -76,6 +80,9 @@ class AccountRouter:
         if not upstream or not self.store.several(upstream):
             # One account is the default login and goes out exactly as it did before there were accounts.
             return []
+        held = self.forced(session_id, upstream) if self.forced is not None else ""
+        if held and self.store.account(upstream, held) is not None:
+            return [held]
         return self.store.chain(upstream, self._preset_account(endpoint.id, model), session_id)
 
     async def limited(self, endpoint: ProviderEndpoint, account: str, evidence: FailureEvidence) -> None:

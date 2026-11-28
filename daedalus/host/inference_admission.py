@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from protocore.contracts.llm import LLMProviderError, LLMRequest, ProviderFailure, ProviderFailureReason
 
+from daedalus.host import share_spend
 from daedalus.providers.failure_evidence import FailureEvidence
 from daedalus.providers.openai_compat import ProviderEndpoint
 from daedalus.providers.pricing import ModelPricing, complete_usage
@@ -169,6 +170,7 @@ class HostInferenceAdmission:
         return tuple(result)
 
     async def start(self, endpoint: ProviderEndpoint, request: LLMRequest, body: dict[str, Any]) -> str | None:
+        await self._refuse_spent_link(request)
         try:
             async with self.db.transaction() as conn:
                 await assert_admission_open_in(conn)
@@ -244,6 +246,22 @@ class HostInferenceAdmission:
             # and not retryable is final, which is what a refusal by the operator's control plane means.
             raise LLMProviderError(f"inference authority: {exc}", classified=ProviderFailure(
                 reason=ProviderFailureReason.unknown, retryable=False, provider_message=str(exc))) from exc
+
+    async def _refuse_spent_link(self, request: LLMRequest) -> None:
+        """Refuse a call of a live link's visitor's turn once the link's limit is spent.
+
+        Here, before every call, rather than only after one: the core's cooperative stop, asked for from
+        the event of a finished call, let the same turn make two more calls before it ended."""
+        observer = request.observability
+        link_of = getattr(self.manager, "link_of", None)
+        share = link_of(observer.session_id) if link_of is not None and observer is not None and observer.session_id else ""
+        if not share:
+            return
+        spent = await share_spend.exhausted(self.manager, share)
+        if spent is not None:
+            note = share_spend.STOPPED[spent]
+            raise LLMProviderError(f"inference budget: {note}", classified=ProviderFailure(
+                reason=ProviderFailureReason.budget, retryable=False, provider_message=note))
 
     async def cost(self, reservation_id: str, raw: dict[str, Any], normalized: dict[str, Any]) -> float | None:
         row = await self.db.fetchone("SELECT quote_json FROM inference_reservations WHERE id = ?", (reservation_id,))
