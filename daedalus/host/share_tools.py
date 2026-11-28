@@ -59,19 +59,18 @@ class Kind:
 
 
 KINDS: dict[str, Kind] = {
-    "self": Kind("Changing Daedalus itself", "Its code, rebuilds, settings, skills and installed servers outlive the link and act on every conversation."),
+    "self": Kind("Changing Daedalus itself", "Its code, rebuilds, settings, new skills and saved prompts, and installed servers outlive the link and act on every conversation."),
     "chats": Kind("Other conversations", "Searching or listing the operator's other chats and the installation's run reports would show what was said elsewhere."),
     "memory": Kind("Long-term memory", "The operator's memory is neither read nor written here, so nothing said under the link is kept as theirs."),
     "agents": Kind("Other agents", "Starting a separate agent, talking to another agent or a peer, or reading one, reaches beyond this conversation. Its own subagents stay."),
     "projects": Kind("Projects and teams", "A project's board, brief, journal, folders, goals and team members belong to more than this conversation."),
     "messages": Kind("Messages as the operator", "Notifications, Telegram messages and reports would reach the operator's phone and contacts in their name."),
-    "later": Kind("Work that outlives the link", "Schedules, standing intents, loop wake-ups and background services keep running after the link is revoked."),
+    "later": Kind("Work that outlives the link", "Schedules and standing intents keep running after the link is revoked."),
     "calendar": Kind("Calendar and planner", "The operator's own calendars and to-do list."),
     "accounts": Kind("Connected servers and accounts", "MCP servers carry the operator's sign-ins to mail, code hosting and other services."),
     "computer": Kind("The operator's desktop", "Seeing and driving the operator's own computer."),
-    "chrome": Kind("The operator's own browser", "Their Chrome signed in as them, the tasks they recorded and the cookies of the agent's browser. The agent's own browser stays."),
-    "pages": Kind("Pages and canvases", "Custom pages are published to the operator's app, and canvases belong to the project as well as this chat."),
-    "skills": Kind("The skill library", "Skills and saved prompts are the installation's, written for the operator's own work."),
+    "chrome": Kind("The operator's own browser", "Their Chrome signed in as them, and the cookies of the agent's browser. The agent's own browser stays."),
+    "pages": Kind("Custom pages", "Custom pages are published to the operator's app."),
 }
 """The kinds of withheld tools, in the order the share dialog lists them."""
 
@@ -79,7 +78,7 @@ KINDS: dict[str, Kind] = {
 GOES: dict[str, str] = {
     # Changing Daedalus itself.
     **dict.fromkeys(("SelfApply", "SelfPropose", "SelfRebuild", "SelfRollback", "SelfWorkspace", "SettingsGet", "SettingsChange",
-                     "SkillDraft", "BrowserNote", "McpAdd", "McpRemove"), "self"),
+                     "SkillDraft", "SavePrompt", "BrowserNote", "McpAdd", "McpRemove"), "self"),
     # Other conversations.
     **dict.fromkeys(("ChatSearch", "RecentChats", "LearningReport"), "chats"),
     "Remember": "memory", "Recall": "memory", "Forget": "memory",
@@ -94,8 +93,7 @@ GOES: dict[str, str] = {
                      # The main orchestrator's own registry.
                      "CreateProject", "Files", "Progress", "Cancel"), "projects"),
     **dict.fromkeys(("Notify", "SendFile", "ProjectReport"), "messages"),
-    **dict.fromkeys(("ScheduleCreate", "ScheduleDelete", "ScheduleList", "IntentCreate", "IntentDelete", "IntentList",
-                     "LoopNext", "LoopResume", "ServiceStart"), "later"),
+    **dict.fromkeys(("ScheduleCreate", "ScheduleDelete", "ScheduleList", "IntentCreate", "IntentDelete", "IntentList"), "later"),
     **dict.fromkeys(("CalendarBlockPatch", "CalendarBulkCreate", "CalendarCreate", "CalendarDelete", "CalendarEventHistory",
                      "CalendarEvents", "CalendarFindTime", "CalendarGroupCreate", "CalendarGroupDelete", "CalendarGroupDuplicate",
                      "CalendarGroupShift", "CalendarGroupUpdate", "CalendarList", "CalendarTypeDelete", "CalendarTypeList",
@@ -103,11 +101,9 @@ GOES: dict[str, str] = {
                      "PlannerTasks"), "calendar"),
     **dict.fromkeys(("McpEnable", "McpDisable", "McpList", "McpOAuthBegin", "McpOAuthDisconnect", "McpOAuthFinish", "McpOAuthStatus"), "accounts"),
     **dict.fromkeys(("Computer", "ComputerApps", "ComputerUI"), "computer"),
-    **dict.fromkeys(("BrowserAskOperatorChrome", "BrowserReplay", "BrowserCookies"), "chrome"),
+    **dict.fromkeys(("BrowserAskOperatorChrome", "BrowserCookies"), "chrome"),
     **dict.fromkeys(("PageBind", "PageCheck", "PageCreate", "PageDelete", "PageEmit", "PageFiles", "PageImport", "PageList",
-                     "PagePublish", "PageRead", "PageRemove", "PageRollback", "PageShow", "PageStorage", "PageWrite",
-                     "CanvasCreate", "CanvasEdit", "CanvasInspect", "CanvasList", "CanvasRead", "CanvasShow"), "pages"),
-    "Skill": "skills", "SavePrompt": "skills",
+                     "PagePublish", "PageRead", "PageRemove", "PageRollback", "PageShow", "PageStorage", "PageWrite"), "pages"),
 }
 """Every host tool that goes, with its kind. A tool of an MCP server goes as ``accounts`` without being named."""
 
@@ -119,7 +115,14 @@ STAYS: frozenset[str] = frozenset({
     # Its own transcript, board, notes, loop, services and questions.
     "HistorySearch", "HistoryExpand", "BoardAdd", "BoardGet", "BoardList", "BoardUpdate",
     "NoteAttach", "NoteDelete", "NoteRead", "NoteWrite", "NotesList",
-    "LoopStatus", "LoopPause", "LoopStop", "ServiceList", "ServiceLogs", "ServiceStop",
+    "LoopStatus", "LoopPause", "LoopStop", "LoopNext", "LoopResume",
+    # A service the conversation starts is its own preview server, and the canvases it draws are shown in
+    # it. Both were withheld at first and handed back: a shared conversation that can build a thing but
+    # not run or show it is of little use to the person it was shared with.
+    "ServiceStart", "ServiceList", "ServiceLogs", "ServiceStop",
+    "CanvasCreate", "CanvasEdit", "CanvasInspect", "CanvasList", "CanvasRead", "CanvasShow",
+    # Reading a skill and replaying a recorded browser task change nothing of the installation's.
+    "Skill", "BrowserReplay",
     "AskUser", "SideQuestion", "DropSideQuestion", "WithdrawQuestions", "Decide", "StaySilent",
     # Its own subagents, and a quick helper, which is one.
     "SubAgent", "SubAgentList", "SubAgentSend", "SubAgentDelete", "ReportToLeader", "QuickAgent",

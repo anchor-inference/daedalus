@@ -26,20 +26,19 @@ from tests.unit.test_session_runner import ScriptedProvider
 from tests.unit.test_tool_surface import _manager
 
 WITHHELD = {
-    "self": ("SettingsChange", "SettingsGet", "McpAdd", "McpRemove", "SkillDraft"),
+    "self": ("SettingsChange", "SettingsGet", "McpAdd", "McpRemove", "SkillDraft", "SavePrompt"),
     "chats": ("ChatSearch", "RecentChats"),
     "memory": ("Remember", "Recall", "Forget"),
     "agents": ("SpawnAgent", "Delegate", "AskPeer", "AgentTalk", "SendToAgent", "ListAgents"),
     "projects": ("Tasks", "Team", "Hire", "Projects", "GoalCreate"),
     "messages": ("Notify", "SendFile", "ProjectReport"),
-    "later": ("ScheduleCreate", "IntentCreate", "LoopNext", "ServiceStart"),
+    "later": ("ScheduleCreate", "IntentCreate"),
     "calendar": ("CalendarCreate", "PlannerTasks"),
     "accounts": ("McpEnable", "McpList", "McpOAuthBegin"),
-    "pages": ("PageCreate", "PagePublish", "CanvasCreate"),
-    "skills": ("Skill", "SavePrompt"),
+    "pages": ("PageCreate", "PagePublish"),
 }
 KEPT = ("Read", "Write", "Edit", "Exec", "Find", "Search", "WebSearch", "WebFetch", "SubAgent", "SubAgentSend",
-        "BoardAdd", "BoardList", "NoteWrite", "NotesList", "HistorySearch", "AskUser", "ToolSearch", "ServiceStop")
+        "BoardAdd", "BoardList", "NoteWrite", "NotesList", "HistorySearch", "AskUser", "ToolSearch", "ServiceStop", "ServiceStart", "LoopNext", "LoopResume", "CanvasCreate", "Skill", "BrowserReplay")
 
 
 async def _link(db: Database, session_id: str, *, expires: datetime | None = None) -> str:
@@ -79,7 +78,7 @@ async def test_a_live_link_takes_the_tools_away_and_revoking_it_gives_them_back(
         assert await share_tools.refresh(manager, state) is False
         before = _blocked(manager, state)
         # Most of them are an ordinary chat's; the team's and the mesh's are other roles' already.
-        assert {"Remember", "Recall", "SpawnAgent", "Notify", "SettingsChange", "ScheduleCreate", "McpAdd", "Skill"}.isdisjoint(before)
+        assert {"Remember", "Recall", "SpawnAgent", "Notify", "SettingsChange", "ScheduleCreate", "McpAdd"}.isdisjoint(before)
 
         share_id = await _link(db, sid)
         assert await share_tools.refresh(manager, state) is True
