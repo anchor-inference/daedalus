@@ -18,16 +18,19 @@ import asyncio
 import os
 import re
 import socket
+import struct
 import sys
 import tempfile
 import threading
 import time
 import urllib.request
+import zlib
 from collections.abc import AsyncIterator
 from pathlib import Path
 from queue import Queue
 from typing import Any
 
+import httpx
 from playwright.sync_api import expect, sync_playwright
 from protocore.contracts.llm import ProviderDelta, ProviderDeltaKind
 
@@ -43,6 +46,17 @@ CHROMIUM = os.environ.get("CHROMIUM") or None
 LANG = os.environ.get("LANG_UI", "en")
 SHOTS = Path(os.environ["SHOTS"]) if os.environ.get("SHOTS") else None
 ANSWER = ["The menu ", "is written ", "to menu.md: ", "bread three euros, ", "coffee two."]
+MEDIA_REF = re.compile(r"!\[[^\]\n]{0,500}\]\(daedalus-media:[0-9a-f-]{36}\)")
+
+
+def png(width: int, height: int, colour: tuple[int, int, int]) -> bytes:
+    """A real picture of one colour, small enough to read from the page's own bytes and big enough to be seen."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    row = b"\x00" + bytes(colour) * width
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b"")
 
 
 class SlowProvider(ScriptedProvider):
@@ -62,6 +76,16 @@ class SlowProvider(ScriptedProvider):
         if self.script and "tool" in self.script[0]:
             async for delta in super().stream_with_tools(request):
                 yield delta
+            return
+        if self.script and self.script[0].get("echo_media"):
+            # The answer that places the file AttachMedia prepared: the line it returned is the only way a
+            # picture reaches the answer, and its id is made by the host, so it is read back from the request.
+            self.requests.append(request)
+            self.script.pop(0)
+            found = MEDIA_REF.search(repr(request.messages))
+            yield ProviderDelta(kind=ProviderDeltaKind.text, content=f"Here it is: {found.group(0) if found else 'no media line came back'}")
+            yield ProviderDelta(kind=ProviderDeltaKind.usage, usage={"input_tokens": 10, "output_tokens": 5, "cache_read_tokens": 0})
+            yield ProviderDelta(kind=ProviderDeltaKind.finish, finish_reason="stop")
             return
         self.requests.append(request)
         if self.script:
@@ -170,6 +194,94 @@ def shot(page: Any, name: str) -> None:
         page.screenshot(path=str(SHOTS / f"session-share-{name}-{LANG}.png"))
 
 
+def attached_files(browser: Any, host: Host, base: str, token: str, api: Any) -> None:
+    """A visitor sees what the conversation carries: the files and pictures the operator attached to a
+    message, the file the agent sent, and the picture it placed in its answer. Each is loaded by the
+    visitor's own page, under the link's prefix, and counted as shown only when the browser decoded it."""
+    gallery = api("POST", "/api/sessions", {"title": word("Gallery", "Галерея")})["id"]
+    headers = {"x-daedalus-token": token}
+    put = httpx.post(f"{base}/api/sessions/{gallery}/files/upload", headers=headers, timeout=30,
+                     files=[("files", ("sent-chart.png", png(48, 32, (200, 60, 60)), "image/png")),
+                            ("files", ("sent-report.csv", b"item,price\nbread,3\ncoffee,2\n", "text/csv"))])
+    assert put.status_code == 200, put.text
+    script = [
+        {"tool": "SendFile", "args": {"path": "sent-report.csv"}},
+        {"tool": "SendFile", "args": {"path": "sent-chart.png"}},
+        {"tool": "AttachMedia", "args": {"items": [{"path": "sent-chart.png", "alt": "chart"}]}},
+        {"echo_media": True},
+    ]
+    host.provider.script = script
+    sent = httpx.post(f"{base}/api/sessions/{gallery}/upload", headers=headers, timeout=30, data={"text": "Here are my pictures"},
+                      files=[("files", ("photo.png", png(64, 48, (30, 90, 200)), "image/png")),
+                             ("files", ("notes.txt", b"call the baker at nine\n", "text/plain"))])
+    assert sent.status_code == 200, sent.text
+    for _ in range(300):
+        time.sleep(0.2)
+        if not host.provider.script and api("GET", f"/api/sessions/{gallery}")["status"] == "idle":
+            break
+    else:
+        raise AssertionError("the gallery's run did not finish")
+    link = api("POST", f"/api/sessions/{gallery}/live-shares", {})["url"]
+
+    guest = browser.new_context(viewport={"width": 1440, "height": 900})
+    page = guest.new_page()
+    refused: list[str] = []
+    page.on("response", lambda r: refused.append(f"{r.request.method} {r.url.split('/v/')[-1].split('/', 1)[-1]}") if r.status >= 400 and "/v/" in r.url else None)
+    page.goto(f"{link}?lang={LANG}")
+    expect(page.locator(".chat-title")).to_have_text(word("Gallery", "Галерея"), timeout=15000)
+
+    def decoded(selector: str) -> list[int]:
+        return page.eval_on_selector_all(selector, "els => els.map(e => e.complete ? e.naturalWidth : 0)")
+
+    # The picture the operator attached: a thumbnail above their message.
+    expect(page.locator(".msg-thumb.ready img")).to_have_count(1, timeout=15000)
+    page.wait_for_function("() => [...document.querySelectorAll('.msg-thumb.ready img')].every(e => e.complete && e.naturalWidth > 0)", timeout=10000)
+    assert decoded(".msg-thumb.ready img") == [64], decoded(".msg-thumb.ready img")
+    # The file they attached: a card that opens the file in the panel with its words in it.
+    card = page.locator(".msg-file", has_text="notes.txt")
+    expect(card).to_have_count(1)
+    card.click()
+    expect(page.locator(".panel")).to_contain_text("call the baker at nine", timeout=10000)
+    # The file the agent sent: a card whose download link is under the link's prefix and answers.
+    sent_card = page.locator(".artifact[data-path='sent-report.csv']")
+    expect(sent_card).to_have_count(1, timeout=10000)
+    # The picture the agent placed in its answer: drawn, not a retry button.
+    expect(page.locator(".inline-media, .inline-media-error")).to_have_count(1, timeout=15000)
+    assert page.locator(".inline-media-error").count() == 0, f"the placed picture shows a retry button; routes the door refused: {sorted(set(refused))}"
+    expect(page.locator(".inline-media img")).to_have_count(1)
+    page.wait_for_function("() => [...document.querySelectorAll('.inline-media img')].every(e => e.complete && e.naturalWidth > 0)", timeout=10000)
+    assert decoded(".inline-media img") == [48], decoded(".inline-media img")
+    # Every download link on the page, as the browser would follow it, is under the link and answers.
+    hrefs = page.eval_on_selector_all(".artifact a[href], .inline-file a[href]", "els => els.map(e => e.href)")
+    assert hrefs, "no download link was drawn"
+    for href in hrefs:
+        assert f"/v/{link.split('/v/')[1].rstrip('/')}/api/" in href, href
+        got = page.evaluate("href => fetch(href, {credentials: 'omit'}).then(r => r.status)", href)
+        assert got == 200, (href, got)
+    # The Attachments tab lists all of it, and each row's address answers for the visitor too.
+    open_attachments(page)
+    rows = page.locator("[data-tool-page=attachments] [data-attachment] a.tool-row-main")
+    expect(rows.first).to_be_visible(timeout=10000)
+    assert rows.count() >= 4, rows.count()
+    for href in rows.evaluate_all("els => els.map(e => e.href)"):
+        assert "/v/" in href, f"an attachment row points outside the link: {href}"
+        got = page.evaluate("href => fetch(href, {credentials: 'omit'}).then(r => r.status)", href)
+        assert got == 200, (href, got)
+    unexpected = sorted({entry for entry in refused if not entry.startswith("POST api/presence")})
+    assert not unexpected, f"the visitor's page asked for routes the door refused: {unexpected}"
+    guest.close()
+
+
+def open_attachments(page: Any) -> None:
+    """The Attachments tab of the visitor's panel, through the menu a visitor has."""
+    page.get_by_role("button", name=word("Session actions", "Действия с сессией")).click()
+    page.get_by_role("menuitem", name=word("Project files", "Файлы проекта")).click()
+    panel = page.locator(".panel")
+    expect(panel).to_be_visible()
+    panel.locator(".panel-add").click()
+    page.locator("[data-tool=attachments]").click()
+
+
 def main() -> None:
     host = Host()
     with host as (base, token), sync_playwright() as playwright:
@@ -271,6 +383,9 @@ def main() -> None:
         # Two: the desktop browser and the phone, each with its own random id.
         expect(chip).to_contain_text(word("2 visitors", "2 гостя"), timeout=20000)
         shot(own, "header")
+
+        # 5b. What the conversation carries — pictures, files, what the agent sent — reaches the visitor too.
+        attached_files(browser, host, base, token, api)
 
         # 6. Revoked: the open page loses the conversation at once.
         listed = api("GET", f"/api/sessions/{mine}/live-shares")

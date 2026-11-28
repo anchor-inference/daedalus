@@ -4,6 +4,7 @@
 
 import { memo, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { inShare } from "./visit";
 import { plural, t } from "./i18n";
 import { Icon } from "./icons";
 import { type Search, type TurnSources, type WebSource, knownSource, rememberSources, siteOf, sourceCount, turnSources, type SourceTool } from "./rich";
@@ -16,6 +17,9 @@ import { type Search, type TurnSources, type WebSource, knownSource, rememberSou
 const marks = new Map<string, Promise<string | null>>();
 
 export function faviconUrl(host: string): Promise<string | null> {
+  // A live link's door opens no route that is not the session's own, and a site's mark is not: the
+  // visitor's page keeps the site's letter, which is what any site with no mark gets.
+  if (inShare()) return Promise.resolve(null);
   const known = marks.get(host);
   if (known) return known;
   const asked = fetch(`/api/favicon?host=${encodeURIComponent(host)}`, { headers: api.authHeaders() })
@@ -31,6 +35,7 @@ export function faviconUrl(host: string): Promise<string | null> {
 const pictures = new Map<string, Promise<string | null>>();
 
 export function cardImageUrl(address: string): Promise<string | null> {
+  if (inShare()) return Promise.resolve(null);
   const known = pictures.get(address);
   if (known) return known;
   const asked = fetch(`/api/card-image?url=${encodeURIComponent(address)}`, { headers: api.authHeaders() })

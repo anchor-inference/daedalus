@@ -125,6 +125,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", _S + r"/policy/similar/[^/]{1,512}", SESSION),
         ("GET", _S + r"/media/[0-9a-f-]{36}/[0-9a-f-]{36}/content", SESSION),
         ("GET", _S + r"/media/[0-9a-f-]{36}/download", SESSION),
+        ("GET", _S + "/attachments", SESSION),
         ("GET", _S + "/attachments/download", SESSION),
         ("GET", _S + f"/sent/{_PART}/download", SESSION),
         ("GET", _S + f"/widgets/{_ID}/storage", SESSION),

@@ -92,13 +92,15 @@ async def test_the_door_matrix(rig: Rig) -> None:
         assert page.status_code == 200 and page.json()["id"] == mine
         assert (await door.get(f"{v}/api/sessions/{mine}/files")).status_code == 200
         assert (await door.get(f"{v}/api/sessions/{mine}/notes")).status_code == 200
+        # What the conversation carries: the list the Attachments tab reads, beside the downloads it links to.
+        assert (await door.get(f"{v}/api/sessions/{mine}/attachments")).json() == {"attachments": []}
         assert (await door.get(f"{v}/api/share")).json()["session_id"] == mine
         assert (await door.get(f"{v}/api/auth/me")).json()["via"] == "share"
         picked = (await door.get(f"{v}/api/settings")).json()
         assert set(picked) == {"presets", "providers", "model"} and "base_url" not in repr(picked) and "api_key" not in repr(picked)
         assert (await door.get(f"{v}/api/commands")).json() == []
         # Another session does not exist, whatever is asked of it.
-        for method, suffix in (("GET", ""), ("POST", "/messages"), ("POST", "/stop"), ("GET", "/files"), ("GET", "/stream"), ("GET", "/download")):
+        for method, suffix in (("GET", ""), ("POST", "/messages"), ("POST", "/stop"), ("GET", "/files"), ("GET", "/stream"), ("GET", "/download"), ("GET", "/attachments")):
             answer = await door.request(method, f"{v}/api/sessions/{other}{suffix}", json={"text": "hi"})
             assert answer.status_code == 404, (method, suffix, answer.status_code)
         # Nothing past the session: the list, a new one, deleting, renaming, sharing, the secrets, settings' writes.
@@ -111,6 +113,11 @@ async def test_the_door_matrix(rig: Rig) -> None:
             ("POST", f"/api/sessions/{mine}/command"), ("POST", f"/api/sessions/{mine}/btw"), ("POST", f"/api/sessions/{mine}/loop"),
             ("GET", "/api/notes/n_none"), ("GET", "/api/terminals/t_none"), ("GET", "/api/browsers/g_none"), ("POST", "/api/presence"),
             ("GET", "/api/../api/sessions"),
+            # What names no session of the link's: signing a browser in as the operator, and the reads the
+            # app makes about the installation. The visitor's page does not ask for them (``ownerOnly``).
+            ("POST", "/api/media/access"), ("GET", "/api/computer"), ("GET", "/api/schedules"), ("GET", "/api/capabilities"),
+            ("GET", "/api/project-environments"), ("GET", "/api/folder-moves?active=true"), ("GET", "/api/favicon?host=example.com"),
+            ("GET", f"/api/usage/provider/fake?session_id={mine}"),
         ):
             answer = await door.request(method, f"{v}{path}", json={})
             assert answer.status_code == 404, (method, path, answer.status_code)

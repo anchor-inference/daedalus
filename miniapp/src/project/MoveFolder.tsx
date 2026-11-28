@@ -18,6 +18,7 @@ import { bytes } from "../format";
 import { plural, t } from "../i18n";
 import { Icon } from "../icons";
 import { invalidate, useQuery } from "../store";
+import { ownerOnly } from "../visit";
 import { MOVES_KEY, useFolderMove } from "./moves";
 import { errorText } from "../ui";
 import { Sheet } from "../ui/dialogs";
@@ -62,7 +63,7 @@ function joinPath(base: string, name: string): string {
 /** The button a folder row and a chat's workspace section show. */
 export function MoveFolderButton({ projectId, folder, toast }: { projectId: string; folder: ProjectDir; toast: (text: string) => void }) {
   const [open, setOpen] = useState(false);
-  const environments = useQuery<ProjectEnvironments>("/api/project-environments", { staleMs: 60000 }).data;
+  const environments = useQuery<ProjectEnvironments>(ownerOnly("/api/project-environments"), { staleMs: 60000 }).data;
   const running = useFolderMove(folder.id);
   if (!movable(folder, environments)) return null;
   return (

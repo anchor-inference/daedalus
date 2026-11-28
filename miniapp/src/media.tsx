@@ -9,7 +9,7 @@ import { downloadHref, openOrSave, saveFromPanel, useBlobUrl, type PreviewSource
 import { ArtifactCard } from "./artifact";
 import { bytes } from "./format";
 import { sourceKey, viewerKind, type HostSource } from "./mediaroute";
-import { routed } from "./visit";
+import { inShare, routed } from "./visit";
 export { mediaCopyText, splitMediaAnswer, withoutMediaRefs } from "./mediaformat";
 
 // A clip opened from a chat used to start at the browser's full volume. A tenth is loud enough
@@ -422,13 +422,18 @@ export function InlineMedia({ sessionId, presentation, onPreview }: { sessionId:
   // only hold the card back behind a spinner, or behind a retry button if the upgrade failed.
   // The side panel has no cookie to upgrade: the upgrade answered 401, and every picture and clip
   // there stopped at the retry button.
+  // A live link's page is in the same case from the other side: its addresses carry the link, the only
+  // credential it has, and the door drops cookies. The upgrade is a route that signs a browser in as the
+  // operator, which no link opens, so asking for it answered 404 and every picture stopped at the retry
+  // button while the file cards beside it, which never ask, were drawn.
   const file = presentation.items.length === 1 && presentation.items[0].kind === "file" ? presentation.items[0] : null;
   const panel = inPanel();
+  const visiting = inShare();
   const [open, setOpen] = useState<number | null>(null);
-  const [access, setAccess] = useState<"loading" | "ready" | "error">(file || panel ? "ready" : "loading");
+  const [access, setAccess] = useState<"loading" | "ready" | "error">(file || panel || visiting ? "ready" : "loading");
   const rail = useRef<HTMLDivElement>(null);
   const load = () => {
-    if (file || panel) return;
+    if (file || panel || visiting) return;
     setAccess("loading");
     requestMediaAccess().then(() => setAccess("ready")).catch(() => setAccess("error"));
   };
