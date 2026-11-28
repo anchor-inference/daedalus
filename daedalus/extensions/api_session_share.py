@@ -43,6 +43,7 @@ operator's cookie, and a visitor's page there would be the one thing the separat
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import re
@@ -623,7 +624,8 @@ class SharePatch(BaseModel):
 async def withheld_tools(app: Application, session_id: str) -> list[dict[str, Any]]:
     """What the session's tools keep from a visitor, as the dialog lists it; [] where that is not known."""
     try:
-        from daedalus.host import share_tools  # type: ignore[attr-defined]
+        # Looked up when asked: the module that knows this is written apart from the door and may be absent.
+        share_tools = importlib.import_module("daedalus.host.share_tools")
     except ImportError:
         return []
     return list(await share_tools.withheld(app, session_id))
