@@ -330,7 +330,20 @@ def main() -> None:
         visit = guest.new_page()
         refused: list[str] = []
         visit.on("response", lambda r: refused.append(f"{r.request.method} {r.url.split('/v/')[-1].split('/', 1)[-1]}") if r.status == 404 and "/v/" in r.url else None)
+        # The operator puts a password on the link first: the page asks for it before it shows anything,
+        # a wrong one is refused, and the right one opens the conversation. Everything after this point,
+        # the stream and the downloads included, rides on the pass the browser was given.
+        made = api("GET", f"/api/sessions/{mine}/live-shares")["links"][0]["id"]
+        api("PATCH", f"/api/sessions/{mine}/live-shares/{made}", {"password": "four small words"})
         visit.goto(f"{link}?lang={LANG}")
+        lock = visit.locator("[data-unlock]")
+        expect(lock).to_be_visible(timeout=15000)
+        expect(visit.locator(".visit-bar")).to_have_count(0)
+        lock.locator("input").fill("not the password")
+        lock.locator("button[type=submit]").click()
+        expect(lock.locator("[role=alert]")).to_be_visible(timeout=10000)
+        lock.locator("input").fill("four small words")
+        lock.locator("button[type=submit]").click()
         expect(visit.locator(".visit-bar")).to_be_visible(timeout=15000)
         expect(visit.locator(".chat-title")).to_have_text(word("Bakery menu", "Меню пекарни"), timeout=15000)
         visit.locator(".visit-name-btn").click()
@@ -360,6 +373,9 @@ def main() -> None:
         phone = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         small = phone.new_page()
         small.goto(f"{link}?lang={LANG}")
+        # Another browser holds no pass: the phone is asked too.
+        small.locator("[data-unlock] input").fill("four small words")
+        small.locator("[data-unlock] button[type=submit]").click()
         expect(small.locator(".msg-visitor").last).to_be_visible(timeout=15000)
         expect(small.locator(".answer").last).to_contain_text("coffee two.")
         shot(small, "phone")
@@ -367,6 +383,8 @@ def main() -> None:
 
         # 5. With the token in hand: another session, the settings, the secrets, the list. All refused.
         request = playwright.request.new_context(base_url=f"http://localhost:{host.door}")
+        assert request.get(f"/v/{share_token}/api/sessions/{mine}").status == 401, "a locked link answered without its password"
+        assert request.post(f"/v/{share_token}/api/share/unlock", data={"password": "four small words"}).ok
         v = f"/v/{share_token}"
         assert request.get(f"{v}/api/sessions/{mine}").ok
         for method, path in (("GET", f"/api/sessions/{other}"), ("POST", f"/api/sessions/{other}/messages"), ("GET", "/api/sessions"),
