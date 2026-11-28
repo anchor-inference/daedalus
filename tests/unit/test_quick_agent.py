@@ -303,7 +303,7 @@ async def test_a_real_run_hands_the_task_over_and_continues_with_the_reply(setti
     await manager.start()
     try:
         manager.providers.rungs_for = lambda config, preset_id=None: [(provider, "scripted-model")]  # type: ignore[method-assign]
-        manager.quick_models = lambda metadata: [FALLBACK_PRESET]  # type: ignore[method-assign]
+        manager.quick_models = lambda metadata, session_id=None: [FALLBACK_PRESET]  # type: ignore[method-assign]
         app = SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None, extensions={})
         subs = Subagents(app)  # type: ignore[arg-type]
         manager.service_hooks["subagents"] = subs.service

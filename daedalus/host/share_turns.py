@@ -8,7 +8,9 @@ in the same session carry none, so nothing here ever reaches them.
 Inside a visitor's turn a role named in the link's policy runs on the policy's value, or on the visitor's
 own pick when the policy allows that pick. The pick is kept beside the link in the session's metadata
 (``PICKS_KEY``, keyed by link), never in the session's model: written there, the operator's next turn
-would have run on whatever a visitor last chose.
+would have run on whatever a visitor last chose. A helper's model is the agent's pick, not the visitor's:
+the leader makes it from the link's set when it starts the helper (:func:`agent_pick`), and it is kept on
+the helper's own metadata under the same key.
 """
 
 from __future__ import annotations
@@ -118,6 +120,41 @@ def choice(rule: dict[str, Any], pick: dict[str, Any] | None) -> dict[str, str]:
     return value
 
 
+def members(rule: dict[str, Any]) -> list[str]:
+    """The presets of a rule's set, its value first: what the agent may start a helper on in a visitor's turn."""
+    found = [str(rule.get("preset") or "")]
+    found += [str(entry.get("preset") or "") for entry in rule.get("allowed") or () if isinstance(entry, dict)]
+    return [preset for preset in dict.fromkeys(found) if preset]
+
+
+def agent_pick(rule: dict[str, Any], preset: str | None, effort: str | None) -> dict[str, str]:
+    """What a helper the agent starts in a visitor's turn runs on, for a role whose set the agent chooses from.
+
+    ``preset`` None is the rule's value. ``effort`` None is the value's effort on the value's preset, and on
+    another preset the first effort its entry names (else the preset's own). The account is never the
+    agent's to choose: the value's on the value's preset, else the first its entry names. A preset or an
+    effort outside the set is a ``ValueError`` saying what is inside, as the installation's own list
+    refuses a model it does not hold rather than running the helper on something else."""
+    chosen = preset or str(rule.get("preset") or "")
+    inside = members(rule)
+    if chosen not in inside:
+        raise ValueError(f"model {chosen!r} is not one this live link lets helpers run on; allowed: {', '.join(inside)}")
+    own = chosen == str(rule.get("preset") or "")
+    entry = next((item for item in rule.get("allowed") or () if isinstance(item, dict) and item.get("preset") == chosen), None)
+    listed = [str(item) for item in (entry or {}).get("efforts") or ()]
+    if effort is None:
+        effort = str(rule.get("effort") or "") if own else (listed[0] if listed else "")
+    if own:
+        account = str(rule.get("account") or "")
+    else:
+        accounts = [str(item) for item in (entry or {}).get("accounts") or ()]
+        account = accounts[0] if accounts else ""
+    if not allows(rule, chosen, effort, account):
+        offered = sorted({*listed, *([str(rule.get("effort") or "")] if own else [])} - {""})
+        raise ValueError(f"effort {effort!r} is not one this live link lets helpers use on {chosen!r}; allowed: {', '.join(offered) or 'the model own effort'}")
+    return {"preset": chosen, "effort": effort, "account": account}
+
+
 def pick_of(metadata: dict[str, Any], share_id: str) -> dict[str, Any] | None:
     picks = metadata.get(PICKS_KEY)
     found = picks.get(share_id) if isinstance(picks, dict) else None
@@ -140,4 +177,4 @@ def applied(overrides: dict[str, Any], chosen: dict[str, str], presets: dict[str
     return result
 
 
-__all__ = ["PICKS_KEY", "allows", "applied", "choice", "pick_of", "policy_of", "role_of", "rule_of", "starting_share", "visiting"]
+__all__ = ["PICKS_KEY", "agent_pick", "allows", "applied", "choice", "members", "pick_of", "policy_of", "role_of", "rule_of", "starting_share", "visiting"]

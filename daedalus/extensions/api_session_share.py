@@ -69,7 +69,7 @@ from daedalus.extensions.session_share import (
     pass_valid,
     seconds_left,
 )
-from daedalus.host import share_roles, share_spend, share_tools
+from daedalus.host import share_roles, share_spend, share_tools, share_turns
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -722,11 +722,16 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         row = await app.db.fetchone("SELECT expires_at, policy, spent_usd, spent_weekly_pct FROM session_shares WHERE id = ?", (who["share"],))
         state = await manager.get_state(str(who["session_id"]))
         policy = share_policy.parse(row["policy"] if row is not None else None)
+        rule = share_turns.rule_of(policy, "main")
         return {
             "session_id": who["session_id"],
             "title": state.session.title if state is not None else "",
             "expires_at": row["expires_at"] if row is not None else None,
             "limits": share_policy.limits(policy, row["spent_usd"] if row is not None else 0, row["spent_weekly_pct"] if row is not None else 0),
+            # What the visitor's turns run on now, the pick kept beside the link or else the link's value. The
+            # session's own model, which the page's session reading reports, stays the operator's, so without
+            # this the visitor's effort control went on showing the operator's effort after a pick.
+            "pick": share_turns.choice(rule, share_turns.pick_of(state.metadata, str(who["share"]))) if rule is not None and state is not None else None,
         }
 
     @api.get("/api/share/settings")

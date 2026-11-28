@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from protocore.contracts.types import Message, MessageRole, TextBlock, ToolUseBlock
 
 from daedalus.config import REASONING_EFFORTS
-from daedalus.host import quick_agent, subagent_models, tool_groups
+from daedalus.host import quick_agent, share_turns, subagent_models, tool_groups
 from daedalus.host.prompts import split_headline
 from daedalus.host.session_runner import BUDGET_WAY_OUT, PROVIDER_OUTAGE_KINDS
 from daedalus.tools._common import idle_words
@@ -86,6 +86,22 @@ def settings_effort(effort: str) -> str | None:
     if effort == "none":
         return "off"
     return effort or None
+
+
+def link_pick(manager: Any, leader_id: str, role: str, model: str | None, effort: str | None) -> dict[str, str] | None:
+    """What a helper started now runs on when the leader is in a visitor's turn whose link sets ``role``:
+    the model and effort the leader named, held to the link's set (a ``ValueError`` outside it), with the
+    link's account. None outside such a turn, where the session's own lists apply."""
+    rule = manager.link_rule(leader_id, role)
+    if rule is None:
+        return None
+    asked = None if effort is None else ("none" if effort == "off" else effort)
+    return share_turns.agent_pick(rule, (model or "").strip() or None, asked)
+
+
+def link_effort(pick: dict[str, str]) -> str | None:
+    """A link's effort as a leader's: ``none`` is ``off``, and empty keeps the preset's own."""
+    return "off" if pick["effort"] == "none" else pick["effort"] or None
 
 
 async def set_effort(manager: Any, session_id: str, effort: str) -> None:
@@ -330,7 +346,7 @@ class Subagents:
         leader = await manager.get_state(leader_id)
         if leader is None:
             raise ValueError("unknown leader session")
-        return manager.subagent_allowance(leader.metadata, await manager.live.load(leader_id))
+        return manager.subagent_allowance(leader.metadata, await manager.live.load(leader_id), session_id=leader_id)
 
     async def models(self, leader_id: str) -> list[str]:
         return list((await self.allowance(leader_id)).presets)
@@ -378,6 +394,9 @@ class Subagents:
             )
         effort = check_effort(effort)
         allowed = await self.allowance(leader_id)
+        linked = link_pick(manager, leader_id, "subagents", model, effort)
+        if linked is not None:
+            model, effort = linked["preset"], link_effort(linked)
         if model is not None:
             model = model.strip()
             if model not in allowed.presets and (model not in self.app.config.presets or not allowed.limited):
@@ -414,6 +433,8 @@ class Subagents:
             metadata["tools_off"] = withheld
         if allowed.inherited() is not None:
             metadata[subagent_models.KEY] = allowed.inherited()
+        if linked is not None:
+            metadata[share_turns.PICKS_KEY] = {manager.link_of(leader_id): linked}
         if leader.metadata.get("mcp") is not None:
             metadata["mcp"] = leader.metadata["mcp"]
         # A subagent works beside its leader, which in a project means inside the project: the same
@@ -495,13 +516,16 @@ class Subagents:
             raise ValueError("the task is empty: write the whole instruction, with the values and what to report")
         if leader.project is None:
             raise RuntimeError("the leader has no project")
-        models = manager.quick_models(leader.metadata)
+        models = manager.quick_models(leader.metadata, session_id=leader_id)
         if not models:
             raise ValueError("no quick model is chosen for this session; the operator picks them in Settings → Models for tasks → Quick agent models, or in this chat's details")
         preset = (model or "").strip() or models[0]
         if preset not in models:
             raise ValueError(f"model {preset!r} is not a quick model here; choose one of: {', '.join(models)}")
         effort = check_effort(effort)
+        linked = link_pick(manager, leader_id, "quick", preset, effort)
+        if linked is not None:
+            effort = link_effort(linked)
         working = [c for c in await self.quick_children(leader_id) if c["running"]]
         if len(working) >= self.app.config.subagents.max_active:
             # Calls in one batch run at once; the subagents' cap holds them too, so a fan-out of quick
@@ -524,6 +548,8 @@ class Subagents:
         for key in CARRIED_FROM_LEADER:
             if leader.metadata.get(key):
                 metadata[key] = leader.metadata[key]
+        if linked is not None:
+            metadata[share_turns.PICKS_KEY] = {manager.link_of(leader_id): linked}
         child = await manager.create_session(f"[quick] {task.splitlines()[0][:48]}", metadata=metadata, project_id=leader.project.id, folder_id=leader.metadata.get("folder_id") or None)
         cid = child.session.id
         # Lifted for its whole life, whatever the leader's switch: a question would wait on nobody while the

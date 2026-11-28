@@ -122,6 +122,9 @@
 .live-chips-label { min-width: 5.5em; font-size: var(--fs-12); }
 .live-chipbtn { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--card); color: var(--fg-2); font: inherit; font-size: var(--fs-12); cursor: pointer; }
 .live-chipbtn.on { border-color: var(--accent); color: var(--fg); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* The value's own effort or account: pressed for good, so it reads as part of the set and not as a choice. */
+.live-chipbtn.own { display: inline-flex; align-items: center; gap: 4px; cursor: default; opacity: 1; }
+.live-allowed-note { margin: 0 0 8px; }
 
 .live-limit { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--card); }
 .live-limit.quiet { background: none; border-style: dashed; }

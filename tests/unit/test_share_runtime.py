@@ -314,3 +314,162 @@ async def test_a_helper_started_in_a_visitor_turn_is_the_visitor_s_and_runs_on_t
         blocker.set()
         await leader.task
     await manager.close()
+
+
+# -- the sets --------------------------------------------------------------------------
+
+
+def test_a_set_may_hold_the_value_s_own_preset_with_several_efforts() -> None:
+    from daedalus.extensions.share_policy import allows as door_allows
+    from daedalus.extensions.share_policy import validate
+
+    roles = [{"id": "main", "presets": [{"id": "a", "efforts": ["none", "low", "medium", "high"], "accounts": [{"id": "one"}, {"id": "two"}]}]},
+             {"id": "subagents", "presets": [{"id": "a", "efforts": ["low", "high"], "accounts": []}, {"id": "b", "efforts": [], "accounts": []}]}]
+    raw = {"roles": {"main": {"preset": "a", "effort": "high", "account": "one", "allowed": [{"preset": "a", "accounts": ["one"], "efforts": ["low", "medium", "high"]}]},
+                     "subagents": {"preset": "a", "effort": "low", "account": "", "allowed": [{"preset": "a", "accounts": [], "efforts": ["low", "high"]}, {"preset": "b", "accounts": [], "efforts": []}]}}}
+    kept = validate(raw, roles, "host")
+    assert kept["roles"] == raw["roles"]
+    # The door, judging a visitor's pick: another effort of the value's own preset is in, one left out is not.
+    assert door_allows(kept, "main", "a", "low", None) and door_allows(kept, "main", "a", "medium", "one")
+    assert not door_allows(kept, "main", "a", "none", None) and not door_allows(kept, "main", "a", "low", "two")
+    # The runtime, choosing what the turn runs on.
+    rule = kept["roles"]["main"]
+    assert share_turns.choice(rule, {"preset": "a", "effort": "low", "account": "one"}) == {"preset": "a", "effort": "low", "account": "one"}
+    assert share_turns.choice(rule, {"preset": "a", "effort": "none", "account": "one"}) == {"preset": "a", "effort": "high", "account": "one"}
+    # A set as links made before the value could be in it wrote it: an empty list is still the value alone.
+    assert share_turns.members({"preset": "a", "allowed": []}) == ["a"]
+    assert share_turns.members(kept["roles"]["subagents"]) == ["a", "b"]
+
+
+def test_the_agent_picks_a_helper_s_model_from_the_link_s_set() -> None:
+    rule = {"preset": "a", "effort": "low", "account": "acc-1",
+            "allowed": [{"preset": "a", "accounts": [], "efforts": ["low", "high"]}, {"preset": "b", "accounts": ["acc-2", "acc-3"], "efforts": ["medium"]}]}
+    assert share_turns.agent_pick(rule, None, None) == {"preset": "a", "effort": "low", "account": "acc-1"}
+    assert share_turns.agent_pick(rule, "a", "high") == {"preset": "a", "effort": "high", "account": "acc-1"}
+    assert share_turns.agent_pick(rule, "b", None) == {"preset": "b", "effort": "medium", "account": "acc-2"}
+    with pytest.raises(ValueError, match="'c' is not one this live link lets helpers run on; allowed: a, b"):
+        share_turns.agent_pick(rule, "c", None)
+    with pytest.raises(ValueError, match="effort 'xhigh' is not one .* allowed: high, low"):
+        share_turns.agent_pick(rule, "a", "xhigh")
+    with pytest.raises(ValueError, match="effort 'high'"):
+        share_turns.agent_pick(rule, "b", "high")
+    # The links made before sets: the value alone, any other model refused.
+    with pytest.raises(ValueError, match="allowed: a"):
+        share_turns.agent_pick({"preset": "a", "effort": "", "account": "", "allowed": []}, "b", None)
+
+
+def _local_config() -> Any:
+    from daedalus.config import ModelPresetConfig, RuntimeConfig
+
+    runtime = RuntimeConfig(
+        providers={"local": ProviderConfig(kind="openai_compat", base_url="http://127.0.0.1:9/v1")},
+        presets={pid: ModelPresetConfig(provider="local", model=pid.split(".")[1]) for pid in ("local.a", "local.b", "local.c")},
+        model={"preset": "local.a"},
+    )
+    runtime.subagents.quick_models = ["local.c", "local.a"]
+    return runtime
+
+
+async def test_a_subagent_of_a_visitor_turn_starts_on_the_link_s_set_and_runs_on_it(settings: Settings, db: Database) -> None:
+    from daedalus.extensions.subagents import Subagents
+    from tests.unit.test_subagents import _capture
+
+    manager = SessionManager(settings, _local_config(), db=db)
+    await manager.start()
+    subs = Subagents(SimpleNamespace(settings=settings, config=manager.config, db=db, manager=manager, front=None, extensions={}))  # type: ignore[arg-type]
+    _capture(manager)
+    leader = await manager.create_session("lead")
+    lid = leader.session.id
+    await _link(db, lid, "s1", {"roles": {
+        "subagents": {"preset": "local.b", "effort": "low", "account": "", "allowed": [{"preset": "local.a", "accounts": [], "efforts": ["high"]}]},
+        "quick": {"preset": "local.a", "effort": "", "account": "", "allowed": []},
+    }})
+    blocker = asyncio.Event()
+    leader.task = asyncio.ensure_future(blocker.wait())
+    try:
+        # The operator's own turn: the installation's list, every model.
+        assert manager.subagent_allowance(leader.metadata, {}, session_id=lid).presets == ("local.a", "local.b", "local.c")
+        leader.share_id = "s1"
+        await manager._link_overrides(leader, {})
+        assert manager.subagent_allowance(leader.metadata, {}, session_id=lid).presets == ("local.b", "local.a")
+        assert await subs.service("models", leader_id=lid) == ["local.b", "local.a"]
+        assert manager.quick_models(leader.metadata, session_id=lid) == ["local.a"]
+        notes = manager.notes_for(leader, overrides={})
+        assert "Models SubAgent accepts in this turn (preset ids, the first is its default): local.b, local.a" in notes
+        assert "Models QuickAgent accepts (preset ids, the first is its default): local.a" in notes
+
+        # Outside the set: refused, as the installation's own list refuses, and no helper is made.
+        before = len(await subs.children(lid))
+        with pytest.raises(ValueError, match="'local.c' is not one this live link lets helpers run on"):
+            await subs.spawn(leader_id=lid, task="t", model="local.c")
+        with pytest.raises(ValueError, match="effort 'medium'"):
+            await subs.spawn(leader_id=lid, task="t", model="local.a", effort="medium")
+        assert len(await subs.children(lid)) == before
+
+        # Inside it: the helper runs on the model it was started on, with the effort the set names.
+        started = await subs.spawn(leader_id=lid, task="t", model="local.a")
+        child = await manager.get_state(started["session_id"])
+        assert child is not None and child.metadata[share_turns.PICKS_KEY] == {"s1": {"preset": "local.a", "effort": "high", "account": ""}}
+        child.share_id = manager._share_of_run(child, None)
+        assert child.share_id == "s1"
+        overrides = await manager._link_overrides(child, await manager.live.load(child.session.id))
+        assert overrides["preset"] == "local.a" and overrides["reasoning_effort"] == "high" and overrides["thinking_enabled"] is True
+        assert child.link_choices["subagents"] == {"preset": "local.a", "effort": "high", "account": ""}
+
+        # Naming none is the set's value, at its effort.
+        plain = await manager.get_state((await subs.spawn(leader_id=lid, task="t"))["session_id"])
+        assert plain is not None
+        plain.share_id = "s1"
+        overrides = await manager._link_overrides(plain, await manager.live.load(plain.session.id))
+        assert overrides["preset"] == "local.b" and overrides["reasoning_effort"] == "low"
+
+        # A quick model outside the link's set is refused the same way.
+        with pytest.raises(ValueError, match="'local.c' is not a quick model here"):
+            await subs.quick(leader_id=lid, task="t", model="local.c")
+    finally:
+        blocker.set()
+        await leader.task
+    # The operator's next turn has no link: the installation's list again.
+    leader.share_id = ""
+    await manager._link_overrides(leader, {})
+    assert manager.subagent_allowance(leader.metadata, {}, session_id=lid).presets == ("local.a", "local.b", "local.c")
+    await manager.close()
+
+
+async def test_a_visitor_switches_the_effort_of_the_conversation_s_own_model(settings: Settings, db: Database) -> None:
+    provider = ScriptedProvider([{"text": "low"}])
+    asked: list[str | None] = []
+    manager = await _manager(settings, db, provider, asked)
+    sid = (await manager.create_session("shared")).session.id
+    rule = {"preset": DEFAULT_PRESET, "effort": "high", "account": "", "allowed": [{"preset": DEFAULT_PRESET, "accounts": [], "efforts": ["low", "medium", "high"]}]}
+    await _link(db, sid, "s1", {"roles": {"main": rule}})
+    assert await manager.set_link_pick(sid, "s1", rule, effort="low") == {"preset": DEFAULT_PRESET, "effort": "low", "account": ""}
+    with pytest.raises(ValueError):
+        await manager.set_link_pick(sid, "s1", rule, effort="xhigh")
+    state = await manager.get_state(sid)
+    assert state is not None
+    finished = asyncio.ensure_future(_wait_finished(manager))
+    with share_turns.visiting("s1"):
+        await manager.submit(sid, "hello", visitor={"share": "s1", "name": "guest"})
+    await finished
+    assert asked[-1] == DEFAULT_PRESET and state.link_choices["main"] == {"preset": DEFAULT_PRESET, "effort": "low", "account": ""}
+    applied = share_turns.applied({}, state.link_choices["main"], manager.config.presets)
+    assert applied["reasoning_effort"] == "low" and applied["thinking_enabled"] is True
+    await manager.close()
+
+
+async def test_describe_says_who_chooses_and_the_helpers_present_set(settings: Settings, db: Database) -> None:
+    manager = SessionManager(settings, _local_config(), db=db)
+    await manager.start()
+    manager.providers.available = lambda: ["local"]  # type: ignore[method-assign]
+    sid = (await manager.create_session("shared")).session.id
+    await manager.set_subagent_models(sid, "chosen", ["local.b", "local.c"])
+    roles = {role["id"]: role for role in await share_roles.describe(SimpleNamespace(manager=manager), sid)}  # type: ignore[arg-type]
+    assert roles["main"]["chooser"] == "visitor" and roles["main"]["pickable"] is True and roles["main"]["current"]["allowed"] == []
+    helpers = roles["subagents"]
+    assert helpers["chooser"] == "agent" and helpers["pickable"] is False
+    assert helpers["current"]["preset"] == "local.b"
+    assert helpers["current"]["allowed"] == [{"preset": "local.b", "accounts": [], "efforts": []}, {"preset": "local.c", "accounts": [], "efforts": []}]
+    quick = roles["quick"]
+    assert quick["chooser"] == "agent" and quick["current"]["preset"] == "local.c" and [entry["preset"] for entry in quick["current"]["allowed"]] == ["local.c", "local.a"]
+    await manager.close()

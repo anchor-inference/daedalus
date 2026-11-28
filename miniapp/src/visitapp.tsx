@@ -9,13 +9,13 @@ import { startEvents } from "./events";
 import { t, useLang } from "./i18n";
 import { applyAppearance } from "./appearance";
 import { ConfirmHost, ToastHost, toast as showToast } from "./ui/dialogs";
-import { VISIT_ENDED, VISIT_LOCKED, VISIT_SPENT, setVisitLimits, setVisitorName, visitorName, type VisitLimits } from "./visit";
+import { VISIT_ENDED, VISIT_LOCKED, VISIT_SPENT, setVisitLimits, setVisitPick, setVisitorName, visitorName, type VisitLimits, type VisitPick } from "./visit";
 import { Icon } from "./icons";
 import { Button } from "./ui/primitives";
 import "./visit.css";
 
 /** What the host says about the link the page was opened with. */
-export type VisitLink = { session_id: string; title: string; expires_at: string | null; limits?: VisitLimits };
+export type VisitLink = { session_id: string; title: string; expires_at: string | null; limits?: VisitLimits; pick?: VisitPick | null };
 
 type Ended = "ended" | "unknown";
 
@@ -55,7 +55,7 @@ export function VisitApp() {
   useEffect(() => {
     if (locked) return;
     api.get<VisitLink>("/api/share").then((got) => {
-      setVisitLimits(got.limits ?? null);
+      setVisitLimits(got.limits ?? null); setVisitPick(got.pick ?? null);
       const left = got.limits?.budget;
       if (left && ((left.usd && left.usd.spent >= left.usd.limit) || (left.weekly_pct && left.weekly_pct.spent >= left.weekly_pct.limit))) setSpent(true);
       setLink(got);
@@ -70,7 +70,7 @@ export function VisitApp() {
   // asked again then and every minute, which keeps the indicator honest while the agent works.
   useEffect(() => {
     if (!link || locked) return;
-    const again = () => api.get<VisitLink>("/api/share").then((got) => { setVisitLimits(got.limits ?? null); setLink(got); }).catch(() => undefined);
+    const again = () => api.get<VisitLink>("/api/share").then((got) => { setVisitLimits(got.limits ?? null); setVisitPick(got.pick ?? null); setLink(got); }).catch(() => undefined);
     const timer = window.setInterval(again, 60000);
     if (spent) void again();
     return () => window.clearInterval(timer);

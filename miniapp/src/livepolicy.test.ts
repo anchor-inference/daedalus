@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { setLang } from "./i18n";
-import { amount, billingsInUse, buildPolicy, fieldSection, formOf, freshForm, generatePassword, lockAll, summarize, toggleAllowed, toggleIn, type LiveOptions, type RolePreset } from "./livepolicy";
+import { amount, billingsInUse, buildPolicy, fieldSection, formOf, freshForm, generatePassword, lockAll, revalue, summarize, toggleAllowed, toggleIn, withOwn, type LiveOptions, type RolePreset } from "./livepolicy";
 import { allowedEfforts, roleLocked, type VisitLimits } from "./visit";
 
 const preset = (id: string, provider: string, billing: "subscription" | "metered", efforts: string[] = [], accounts: string[] = []): RolePreset => ({
   id, label: id, provider, provider_name: provider.toUpperCase(), model: id, billing, efforts, accounts: accounts.map((a) => ({ id: a, name: a })),
 });
-const PRESETS = [preset("opus", "claude", "subscription", ["low", "high"], ["work", "home"]), preset("sonnet", "claude", "subscription"), preset("flash", "gemini", "metered")];
+const PRESETS = [preset("opus", "claude", "subscription", ["low", "medium", "high", "xhigh"], ["work", "home"]), preset("sonnet", "claude", "subscription"), preset("flash", "gemini", "metered")];
 const OPTIONS: LiveOptions = {
   roles: [
-    { id: "main", label: "Conversation", pickable: true, current: { preset: "opus", effort: "high", account: "" }, presets: PRESETS },
-    { id: "vision", label: "Vision", pickable: true, current: { preset: "flash", effort: "", account: "" }, presets: PRESETS },
-    { id: "title", label: "Titles", pickable: false, current: { preset: "sonnet", effort: "", account: "" }, presets: PRESETS },
+    { id: "main", label: "Conversation", pickable: true, chooser: "visitor", current: { preset: "opus", effort: "high", account: "" }, presets: PRESETS },
+    { id: "vision", label: "Vision", pickable: true, chooser: "visitor", current: { preset: "flash", effort: "", account: "" }, presets: PRESETS },
+    { id: "title", label: "Titles", pickable: false, chooser: "none", current: { preset: "sonnet", effort: "", account: "" }, presets: PRESETS },
   ],
   place: "container",
   terminals: ["all", "container", "none"],
@@ -39,6 +39,68 @@ describe("a live link's policy", () => {
     expect(policy.roles?.main.allowed).toEqual([{ preset: "flash", accounts: [], efforts: [] }]);
     expect(policy.roles?.title.allowed).toEqual([]);
     expect(policy.roles?.vision.allowed).toEqual([]);
+  });
+
+  it("lets the value's own preset carry several efforts, and keeps the value's effort among them", () => {
+    setLang("en");
+    const form = freshForm(OPTIONS);
+    form.roles.main = withOwn({ ...form.roles.main, mode: "set" });
+    // Entering a set puts the value's preset in it at the value's own effort: still the same as "only this".
+    expect(form.roles.main.allowed).toEqual([{ preset: "opus", accounts: [], efforts: ["high"] }]);
+    expect(buildPolicy(form, OPTIONS).roles?.main.allowed).toEqual([]);
+    // The operator adds Low and Medium; pressing the value's own effort off is not possible, and a list that
+    // dropped it gets it back.
+    form.roles.main = withOwn({ ...form.roles.main, allowed: [{ preset: "opus", accounts: [], efforts: ["low", "medium"] }] });
+    const policy = buildPolicy(form, OPTIONS);
+    expect(policy.roles?.main).toEqual({ preset: "opus", effort: "high", account: "", allowed: [{ preset: "opus", accounts: [], efforts: ["high", "low", "medium"] }] });
+    const said = summarize(form, OPTIONS, true);
+    expect(said).toContain("Chats with opus only, at the effort or account the visitor picks from the set.");
+    expect(said).not.toContain("Chats with opus only.");
+    // Read back from the host, it is the same set and not "only this".
+    const again = formOf(policy, OPTIONS);
+    expect(again.roles.main.mode).toBe("set");
+    expect(again.roles.main.allowed).toHaveLength(1);
+    expect(buildPolicy(again, OPTIONS)).toEqual(policy);
+  });
+
+  it("reads the links made before the value could be in its set with their old meaning", () => {
+    const locked = formOf({ roles: { main: { preset: "opus", effort: "high", account: "", allowed: [] } } }, OPTIONS);
+    expect(locked.roles.main.mode).toBe("locked");
+    const older = { roles: { main: { preset: "opus", effort: "high", account: "", allowed: [{ preset: "flash", accounts: [], efforts: [] }] } } };
+    const opened = formOf(older, OPTIONS);
+    expect(opened.roles.main.allowed.map((entry) => entry.preset)).toEqual(["opus", "flash"]);
+    expect(buildPolicy(opened, OPTIONS).roles?.main.allowed).toEqual(older.roles.main.allowed);
+    expect(formOf({}, OPTIONS).roles.main.mode).toBe("locked");
+  });
+
+  it("moves the value without leaving its old effort allowed", () => {
+    const role = OPTIONS.roles[0];
+    const start = withOwn({ preset: "opus", effort: "high", account: "", mode: "set", allowed: [{ preset: "flash", accounts: [], efforts: [] }] });
+    const moved = revalue(start, { preset: "opus", effort: "low", account: "" }, role);
+    expect(moved.allowed).toEqual([{ preset: "opus", accounts: [], efforts: ["low"] }, { preset: "flash", accounts: [], efforts: [] }]);
+    const elsewhere = revalue(moved, { preset: "sonnet", effort: "", account: "" }, role);
+    expect(elsewhere.allowed.map((entry) => entry.preset)).toEqual(["sonnet", "flash"]);
+    // A value's preset the operator had widened stays in the set when the value moves away from it.
+    const tuned = withOwn({ ...start, allowed: [{ preset: "opus", accounts: [], efforts: ["low", "high"] }] });
+    expect(revalue(tuned, { preset: "sonnet", effort: "", account: "" }, role).allowed.map((entry) => entry.preset)).toEqual(["sonnet", "opus"]);
+  });
+
+  it("opens a role the agent chooses in with the session's present set and says the agent picks", () => {
+    setLang("en");
+    const options: LiveOptions = { ...OPTIONS, roles: [...OPTIONS.roles, {
+      id: "subagents", label: "Subagents", pickable: false, chooser: "agent", presets: PRESETS,
+      current: { preset: "sonnet", effort: "", account: "", allowed: [{ preset: "sonnet", accounts: [], efforts: [] }, { preset: "flash", accounts: [], efforts: [] }] },
+    }] };
+    const form = freshForm(options);
+    expect(form.roles.main.mode).toBe("locked");
+    expect(form.roles.subagents.mode).toBe("set");
+    const policy = buildPolicy(form, options);
+    // The value's preset takes no effort and has one account, so its entry adds nothing and is left out.
+    expect(policy.roles?.subagents).toEqual({ preset: "sonnet", effort: "", account: "", allowed: [{ preset: "flash", accounts: [], efforts: [] }] });
+    expect(summarize(form, options, true)).toContain("Subagents: the agent picks among 2 models.");
+    expect(summarize(form, options, true)).toContain("Every other part is fixed.");
+    expect([...billingsInUse(form, options)].sort()).toEqual(["metered", "subscription"]);
+    expect(buildPolicy(lockAll(form, options), options).roles?.subagents.allowed).toEqual([]);
   });
 
   it("reads typed limits with a comma and refuses what is not a positive number", () => {

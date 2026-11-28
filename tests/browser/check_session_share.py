@@ -139,7 +139,8 @@ class Host:
             providers={"fake": ProviderConfig(kind="openai_compat", base_url="http://127.0.0.1:1/v1",
                                               pricing={"fake-model": {"input": 0.1, "output": 0.1, "cache_hit": 0.1, "input_limit": 128000,
                                                                       "limit_source": "scripted provider contract"}})},
-            presets={"fake": ModelPresetConfig(provider="fake", model="fake-model", thinking=False, context_window=32000, max_output_tokens=2048)},
+            # A model that thinks, so the link can give the visitor efforts of the conversation's own model.
+            presets={"fake": ModelPresetConfig(provider="fake", model="fake-model", thinking=True, reasoning_effort="high", context_window=32000, max_output_tokens=2048)},
             model=ModelConfig(preset="fake"),
         )
         config.save(settings.config_path)
@@ -310,9 +311,16 @@ def main() -> None:
         expect(sheet.locator(".live-warning")).to_be_visible()
         expect(sheet.locator(".live-reach")).to_have_attribute("data-reach", "machine")
         # The dialog's button opens the link's own window; its decision makes the link (no password, every
-        # role at the session's value), and the window then shows the link beside its settings.
+        # role at the session's value but the conversation's, whose own model is given Low beside its High),
+        # and the window then shows the link beside its settings.
         sheet.get_by_role("button", name=word("Create live link", "Создать живую ссылку")).click()
         window = own.locator("[data-live-window]")
+        main_role = window.locator(".live-role[data-role='main']")
+        main_role.get_by_role("radio", name=word("From a set", "Из набора")).click(timeout=15000)
+        own_row = main_role.locator(".live-allowed-row[data-preset='fake']")
+        expect(own_row.locator(".live-chipbtn.own")).to_have_text(word("High", "Высокое"))
+        own_row.locator(".live-chipbtn", has_text=word("Low", "Низкое")).click()
+        shot(own, "window-efforts")
         window.locator(".live-save").click(timeout=15000)
         expect(window.locator(".live-win-row.on")).to_have_count(1, timeout=10000)
         own.keyboard.press("Escape")
@@ -323,6 +331,8 @@ def main() -> None:
         shot(own, "dialog")
         own.keyboard.press("Escape")
         share_token = link.split("/v/")[1].rstrip("/")
+        kept = api("GET", f"/api/sessions/{mine}/live-shares")["links"][0]["policy"]["roles"]["main"]
+        assert kept == {"preset": "fake", "effort": "high", "account": "", "allowed": [{"preset": "fake", "accounts": [], "efforts": ["high", "low"]}]}, kept
 
         # 2. A fresh context, with nothing of the operator's, opens the link.
         guest = browser.new_context(viewport={"width": 1440, "height": 900})
@@ -362,6 +372,42 @@ def main() -> None:
         expect(visit.locator(".answer").last).to_contain_text("coffee two.", timeout=20000)
         mark = visit.locator(".msg-visitor").last
         expect(mark).to_have_text(word("Guest · Ann", "Гость · Ann"))
+        assert host.provider.requests[-1].extra.get("reasoning_effort") == "high", host.provider.requests[-1].extra
+
+        # 3b. The visitor's effort control offers exactly what the link gives the conversation's own model,
+        # the pick is kept, shown, and the next turn runs on it; the operator's own effort is not touched.
+        # The first turn ends before the second is sent: the answer's last words arrive before the run has
+        # finished, and a message sent into a run that is ending joins that run instead of starting its own.
+        for _ in range(300):
+            if api("GET", f"/api/sessions/{mine}")["status"] == "idle":
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("the visitor's first turn did not end")
+        visit.locator(".composer button.model-select").click()
+        segment = visit.locator(".model-effort-seg")
+        expect(segment).to_be_visible(timeout=10000)
+        offered = [text.strip() for text in segment.locator("[role=radio]").all_inner_texts()]
+        assert offered == [word("Low", "Низкое"), word("High", "Высокое")], offered
+        picked: list[Any] = []
+        visit.on("response", lambda r: picked.append(r) if r.url.endswith(f"/api/sessions/{mine}/model") else None)
+        segment.get_by_role("radio", name=word("Low", "Низкое")).click()
+        deadline = time.monotonic() + 10
+        while not picked and time.monotonic() < deadline:
+            visit.wait_for_timeout(50)
+        assert picked and picked[0].status == 200, [r.status for r in picked]
+        assert picked[0].json()["share_pick"] == {"preset": "fake", "effort": "low", "account": ""}, picked[0].json()
+        visit.keyboard.press("Escape")
+        expect(visit.locator(".composer .model-select .model-effort")).to_have_text(word("Low", "Низкое"), timeout=10000)
+        shot(visit, "visitor-effort")
+        asked_before = len(host.provider.requests)
+        host.provider.started.clear()
+        visit.locator(".composer .composer-field").fill(word("And the prices?", "А цены?"))
+        visit.locator(".composer .roundbtn.primary").click()
+        assert host.provider.started.wait(30), "the visitor's second turn never reached the model"
+        expect(visit.locator(".answer").last).to_contain_text("coffee two.", timeout=20000)
+        assert len(host.provider.requests) > asked_before and host.provider.requests[-1].extra.get("reasoning_effort") == "low", host.provider.requests[-1].extra
+        assert api("GET", f"/api/sessions/{mine}").get("reasoning_effort") in (None, "", "high"), "the visitor's pick reached the operator's model"
 
         # 4. The right panel: the file the agent wrote, opened from the Files tab.
         visit.get_by_role("button", name=word("Session actions", "Действия с сессией")).click()
@@ -392,6 +438,10 @@ def main() -> None:
                              ("GET", f"/api/sessions/{mine}/live-shares"), ("POST", f"/api/sessions/{mine}/share")):
             answer = request.fetch(f"{v}{path}", method=method, data={"text": "hi"})
             assert answer.status == 404, (method, path, answer.status)
+        # An effort the link does not give is refused by the door, whichever way it is asked.
+        for body in ({"thinking": True, "reasoning_effort": "xhigh"}, {"thinking": False}, {"thinking": True, "reasoning_effort": "medium"}):
+            answer = request.post(f"{v}/api/sessions/{mine}/model", data=body)
+            assert answer.status == 403 and answer.json()["code"] == "not_allowed", (body, answer.status, answer.text())
         settings = request.get(f"{v}/api/settings").json()
         assert "base_url" not in str(settings) and "127.0.0.1:1" not in str(settings), settings
         # And the operator's own port does not serve the link at all.

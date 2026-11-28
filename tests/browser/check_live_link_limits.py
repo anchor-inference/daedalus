@@ -41,9 +41,11 @@ TOKEN = "k" * 43
 PASSWORD = "plum-river-42"
 
 WORDS = {
-    "en": {"actions": "Session actions", "share": "Share…", "create": "Create live link", "set": "From a set", "high": "High", "save": "Save", "change": "Change",
+    "en": {"actions": "Session actions", "share": "Share…", "create": "Create live link", "set": "From a set", "high": "High", "low": "Low", "medium": "Medium", "save": "Save", "change": "Change",
+           "agent": "The agent may start subagents on", "set4": "From a set (4)",
            "wrong": "That password is not right.", "spent": "The limit the owner set for this link is reached."},
-    "ru": {"actions": "Действия с сессией", "share": "Поделиться…", "create": "Создать живую ссылку", "set": "Из набора", "high": "Высокое", "save": "Сохранить", "change": "Сменить",
+    "ru": {"actions": "Действия с сессией", "share": "Поделиться…", "create": "Создать живую ссылку", "set": "Из набора", "high": "Высокое", "low": "Низкое", "medium": "Среднее", "save": "Сохранить", "change": "Сменить",
+           "agent": "Агент может запускать субагентов на", "set4": "Из набора (4)",
            "wrong": "Пароль неверный.", "spent": "Лимит, который владелец задал для этой ссылки, исчерпан."},
 }
 
@@ -151,11 +153,20 @@ def check_layout(page: Page, width: int, problems: list[str]) -> None:
 
 
 def expected_create(words: dict[str, str]) -> dict:
-    """The POST the window must build for the link the check fills in, in the shape the host's routes take."""
+    """The POST the window must build for the link the check fills in, in the shape the host's routes take.
+
+    The conversation stays on its own model with Low and Medium added to its High (the value's own effort,
+    which stays in) and all of Codex beside it. The subagents keep the session's present list but for
+    DeepSeek, with GPT-6 Codex narrowed to High; the quick agent keeps its list, where the value's own
+    preset adds nothing to the value and so is not written."""
     options = live_options()
-    roles = {role["id"]: {**role["current"], "allowed": []} for role in options["roles"]}
+    roles = {role["id"]: {key: role["current"][key] for key in ("preset", "effort", "account")} | {"allowed": []} for role in options["roles"]}
     codex = [p["id"] for p in options["roles"][0]["presets"] if p["provider"] == "codex"]
-    roles["main"]["allowed"] = [{"preset": pid, "accounts": [], "efforts": ["high"] if pid == "gpt-6-codex" else []} for pid in codex]
+    roles["main"]["allowed"] = [{"preset": "claude-opus-5", "accounts": ["acc-100"], "efforts": ["high", "low", "medium"]}] + [
+        {"preset": pid, "accounts": [], "efforts": ["high"] if pid == "gpt-6-codex" else []} for pid in codex]
+    roles["subagents"]["allowed"] = [{"preset": "claude-sonnet-5", "accounts": ["acc-100"], "efforts": []}, {"preset": "claude-opus-5", "accounts": [], "efforts": []},
+                                     {"preset": "gpt-6-codex", "accounts": [], "efforts": ["high"]}]
+    roles["quick"]["allowed"] = [{"preset": "gem-3-flash", "accounts": [], "efforts": []}]
     return {"expires_hours": 24, "label": "Анна — меню", "password": PASSWORD, "policy": {"roles": roles, "budget_usd": 5, "budget_weekly_pct": 3, "terminals": "none"}}
 
 
@@ -182,6 +193,26 @@ def operator(browser, lang: str, width: int, height: int, scheme: str, problems:
     main.locator(".live-allowed-provall input").evaluate("el => el.scrollIntoView({block: 'center'})")
     main.locator(".live-allowed-provall input").check()
     press(main.locator(".live-allowed-row[data-preset='gpt-6-codex'] .live-chipbtn", has_text=words["high"]))
+    # The conversation's own model is a member of the set like any other: its High is the value's and stays
+    # pressed, and Low and Medium join it.
+    press(main.locator(".live-allowed-prov[data-prov='claude']"))
+    own = main.locator(".live-allowed-row[data-preset='claude-opus-5']")
+    expect(own.locator(".live-allowed-main input")).to_be_disabled()
+    expect(own.locator(".live-chipbtn.own", has_text=words["high"])).to_be_disabled()
+    expect(own.locator(".live-chipbtn.own", has_text=words["high"])).to_have_attribute("aria-pressed", "true")
+    press(own.locator(".live-chipbtn", has_text=words["low"]))
+    press(own.locator(".live-chipbtn", has_text=words["medium"]))
+    expect(main.get_by_role("radio", name=words["set4"])).to_be_checked()
+    # The subagents' set is the agent's to choose from, and says so; it opens with the session's list.
+    helpers = window.locator(".live-role[data-role='subagents']")
+    expect(helpers.locator(".live-role-choice-label")).to_have_text(words["agent"])
+    expect(helpers.locator(".live-allowed-row[data-preset='claude-sonnet-5'] .live-allowed-main input")).to_be_checked()
+    press(helpers.locator(".live-allowed-prov[data-prov='openrouter']"))
+    press(helpers.locator(".live-allowed-row[data-preset='or-deepseek-v4'] .live-allowed-main input"))
+    press(helpers.locator(".live-allowed-prov[data-prov='codex']"))
+    press(helpers.locator(".live-allowed-row[data-preset='gpt-6-codex'] .live-chipbtn", has_text=words["high"]))
+    if window.locator(".live-role[data-role='vision'] .live-allowed").count():
+        problems.append("the role nobody chooses in offers a set")
     window.locator("#live-limit-usd").fill("5")
     window.locator("#live-limit-pct").fill("3")
     window.locator("[data-terminals='none'] input").evaluate("el => el.scrollIntoView({block: 'center'})")
@@ -193,6 +224,9 @@ def operator(browser, lang: str, width: int, height: int, scheme: str, problems:
     shot(page, f"window-filled-{width}-{scheme}-{lang}")
     shot(page, f"window-filled-models-{width}-{scheme}-{lang}", at="models")
     shot(page, f"window-filled-limits-{width}-{scheme}-{lang}", at="limits")
+    if SHOTS:
+        page.locator(".live-role[data-role='subagents']").evaluate("el => el.scrollIntoView({block: 'start'})")
+        shot(page, f"window-filled-helpers-{width}-{scheme}-{lang}")
     window.locator(".live-save").click()
     deadline = time.monotonic() + 5
     while not api_stub.LIVE.writes and time.monotonic() < deadline:

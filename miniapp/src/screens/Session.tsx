@@ -79,7 +79,7 @@ import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
 import { LiveLinkChip } from "../livelink";
-import { inShare, visitLimits } from "../visit";
+import { inShare, setVisitPick, visitLimits, visitPick, type VisitPick } from "../visit";
 import { AgentsTab, TalkApprovals, agentsWaiting, useAgentTalks, useAgentsAutoOpen } from "../agenttalk";
 import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
@@ -1536,7 +1536,10 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
 
   async function chooseEffort(effort: string) {
     try {
-      await api.post(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
+      const answer = await api.post<{ share_pick?: VisitPick }>(`/api/sessions/${id}/model`, effort === "off" ? { thinking: false } : { thinking: true, reasoning_effort: effort });
+      // A visitor's pick is kept beside their link, not on the session, so the reading below still says
+      // the operator's effort: the control shows the pick the host answered with instead.
+      if (answer?.share_pick) setVisitPick(answer.share_pick);
       load();
     } catch (e) {
       toast(errorText(e));
@@ -1895,7 +1898,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   const waitingLine = idleWaiting ? waitingWords(jobsPending, detail?.subagents_running ?? 0) : "";
   // The folder the chat works in, while it is being carried between the container and the host.
   const folderMove = useFolderMove(detail?.folder_id ?? detail?.project?.folders?.[0]?.id);
-  const effortText = detail ? effortWord(detail.reasoning_effort, detail.thinking !== false) : "";
+  const picked = visit ? visitPick() : null;
+  const effortText = detail ? (picked?.effort ? effortWord(picked.effort === "none" ? undefined : picked.effort, picked.effort !== "none") : effortWord(detail.reasoning_effort, detail.thinking !== false)) : "";
   // The panel's Overview: the chat's state in one line, what it runs on, and a row a tool with what is
   // behind it; the "+" menu says the same figures beside the tools that are not open.
   const changedFiles = chatChanges.data?.repository ? chatChanges.data.files : [];
@@ -2234,8 +2238,8 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             model={detail?.model ?? ""}
             fallback={detail?.fallback ?? null}
             onChooseModel={chooseModel}
-            thinking={detail?.thinking}
-            reasoningEffort={detail?.reasoning_effort}
+            thinking={picked?.effort ? picked.effort !== "none" : detail?.thinking}
+            reasoningEffort={picked?.effort && picked.effort !== "none" ? picked.effort : detail?.reasoning_effort}
             onChooseEffort={chooseEffort}
             account={detail?.account_upstream ? { upstream: detail.account_upstream, chosen: detail.account ?? "", fallback: detail.account_default ?? "", onChoose: chooseAccount } : undefined}
             suggestion={suggestion}
