@@ -27,6 +27,15 @@ without a header a browser cannot set. A path is also what a Referer leaks, so t
 browser to send none. The cookie and any credential header a visitor's browser sends are dropped: the
 handlers must see the link, not whatever else the browser holds.
 
+A link with a password opens its page and the page's files to anyone, and nothing else until the visitor
+typed it: every route and socket answers ``401 locked`` (sockets close with 4401) until the browser holds the
+link's pass, a cookie this door sets on ``POST /api/share/unlock``, scoped to the link's own path, and reads
+itself before it drops the cookies like any other. What the link's policy narrows is narrowed here too: the
+terminals it shows (``all``, the container's alone, or ``none``, answered as if the session had none), and a
+spent budget, which refuses what would start a turn with ``402 budget`` before the handler runs. The model
+picks a policy allows are judged by the handlers that take them, which read the policy of the link named on
+the request (``share_policy``).
+
 Only the services door serves this. On the app's own port ``/v/`` answers 404: the app's origin holds the
 operator's cookie, and a visitor's page there would be the one thing the separate origin is for.
 """
@@ -47,7 +56,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import FileResponse
 
-from daedalus.extensions import api_services_door
+from daedalus.extensions import api_services_door, share_policy
 from daedalus.extensions.api_panel import picker_settings
 from daedalus.extensions.session_share import (
     EXTENSION_KEY,
@@ -56,8 +65,11 @@ from daedalus.extensions.session_share import (
     SessionShares,
     clean_name,
     live,
+    pass_for,
+    pass_valid,
     seconds_left,
 )
+from daedalus.host import share_roles, share_spend, share_tools
 
 if TYPE_CHECKING:
     from daedalus.app import Application
@@ -74,6 +86,9 @@ DROPPED = frozenset({b"cookie", b"authorization", b"x-daedalus-token"})
 UPLOAD_MAX = 256 << 20
 """The most one request may send: a message's files, a voice note. A link is a credential in a stranger's
 hands, and a leaked one must not be a way to fill this host's disk; anything larger goes in the app."""
+PASS_COOKIE = "share_pass"
+UNLOCK = "/api/share/unlock"
+UNLOCK_BODY_MAX = 4096
 STATIC = re.compile(r"/v/(?P<dir>assets|icons)/(?P<name>[A-Za-z0-9][A-Za-z0-9._-]{0,200})")
 
 _SID = r"(?P<sid>[A-Za-z0-9_-]{1,64})"
@@ -116,6 +131,11 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", _S + "/runtime-state", SESSION),
         ("GET", _S + "/browser-approvals", SESSION),
         ("GET", _S + "/services", SESSION),
+        # The conversation's own preview servers: read their output, stop them, and give one an address
+        # others can open, which is what a person shown a thing being built asks for next.
+        ("GET", _S + f"/services/{_PART}/logs", SESSION),
+        ("POST", _S + f"/services/{_PART}/stop", SESSION),
+        ("POST", _S + f"/services/{_PART}/share", SESSION),
         ("GET", _S + "/agent-talks", SESSION),
         ("GET", _S + "/subagent-models", SESSION),
         ("GET", _S + "/mcp", SESSION),
@@ -125,6 +145,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", _S + r"/policy/similar/[^/]{1,512}", SESSION),
         ("GET", _S + r"/media/[0-9a-f-]{36}/[0-9a-f-]{36}/content", SESSION),
         ("GET", _S + r"/media/[0-9a-f-]{36}/download", SESSION),
+        ("GET", _S + "/attachments", SESSION),
         ("GET", _S + "/attachments/download", SESSION),
         ("GET", _S + f"/sent/{_PART}/download", SESSION),
         ("GET", _S + f"/widgets/{_ID}/storage", SESSION),
@@ -226,6 +247,10 @@ NARROWED: dict[str, Callable[[str], dict[str, str]]] = {
 """The query this door gives a whole-app listing: the session alone. What the visitor asked is kept only
 where it cannot widen the answer (``after``, ``types``, ``client``, ``kind``, ``last``, ``output``)."""
 OWN_PATHS = {"/api/share": "/api/share/link", "/api/settings": "/api/share/settings", "/api/auth/me": "/api/share/me", "/api/commands": "/api/share/commands"}
+SPENDING = re.compile(_S + r"/(messages|retry|answer|asks/answer|steer/" + _PART + ")")
+"""The routes that start or feed a turn of the agent: refused once the link's budget is spent, since a
+turn is what spends it. Stopping, reading and approving are not, so a visitor can still end what runs."""
+NO_TERMINALS = {"envs": [], "terminals": [], "capacity": {"running": 0, "cap": 0, "queued": 0}}
 KEPT_QUERY = frozenset({"after", "types", "client", "kind", "limit", "tail", "before"})
 
 
@@ -260,6 +285,31 @@ async def answer(send: Callable[[dict[str, Any]], Awaitable[None]], status: int,
         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), (b"cache-control", b"no-store")],
     })
     await send({"type": "http.response.body", "body": body})
+
+
+async def answer_json(send: Callable[[dict[str, Any]], Awaitable[None]], status: int, payload: Any, extra: list[tuple[bytes, bytes]] | None = None) -> None:
+    body = json.dumps(payload).encode()
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), (b"cache-control", b"no-store"), *(extra or [])],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+def cookies(scope: dict[str, Any], name: str) -> list[str]:
+    """Every value the request carries for one cookie. All of them, not the first: cookies ignore the
+    port, so a preview server on the same host can set one of the same name, and the browser would send
+    it beside the link's own; a planted one is then only one more value that fails the check."""
+    found = []
+    for key, value in scope.get("headers") or []:
+        if key != b"cookie":
+            continue
+        for part in value.decode("latin-1").split(";"):
+            label, _, content = part.strip().partition("=")
+            if label == name:
+                found.append(content)
+    return found[:8]
 
 
 async def refuse_socket(receive: Any, send: Any, code: int = 4404) -> None:
@@ -306,8 +356,10 @@ class ShareDoor:
     """ASGI middleware in front of the app: every ``/v/`` request passes here first, and stops here
     unless it is one of :data:`ROUTES` for the link's own session."""
 
-    def __init__(self, asgi: Any, *, shares: Callable[[], SessionShares | None], owner_of: Callable[[str, str], Awaitable[str | None]], dist: Path) -> None:
+    def __init__(self, asgi: Any, *, shares: Callable[[], SessionShares | None], owner_of: Callable[[str, str], Awaitable[str | None]], dist: Path,
+                 app: Any = None) -> None:
         self.asgi = asgi
+        self.app = app
         self.shares = shares
         self.owner_of = owner_of
         self.dist = dist
@@ -348,6 +400,16 @@ class ShareDoor:
             await self.page(scope, receive, send)
             return
         method = "WS" if socket else str(scope.get("method") or "")
+        if row.get("password_hash"):
+            if not socket and method == "POST" and rest == UNLOCK:
+                await self.unlock(shares, row, token, scope, receive, send)
+                return
+            if not any(pass_valid(row, value) for value in cookies(scope, PASS_COOKIE)):
+                await (refuse_socket(receive, send, 4401) if socket else answer(send, 401, "this link asks for its password", "locked"))
+                return
+        elif not socket and method == "POST" and rest == UNLOCK:
+            await answer(send, 200, "this link has no password", "open")
+            return
         matched = route_of(method, rest)
         if matched is None:
             logger.info("live link refused %s %s", method, rest)
@@ -355,8 +417,16 @@ class ShareDoor:
             return
         match, rule = matched
         sid = str(row["session_id"])
-        if not await self.allowed(rule, match, sid):
+        policy = share_policy.parse(row.get("policy"))
+        terminals = share_policy.terminals(policy)
+        if not await self.allowed(rule, match, sid, terminals):
             await (refuse_socket(receive, send) if socket else answer(send, 404, "not in this conversation"))
+            return
+        if rule == NARROW and rest == "/api/terminals" and terminals == "none":
+            await answer_json(send, 200, NO_TERMINALS)
+            return
+        if not socket and method == "POST" and SPENDING.fullmatch(rest) and (spent := await share_spend.exhausted(cast("Application", self.app), str(row["id"]))):
+            await answer(send, 402, f"this link's limit is spent ({spent})", "budget")
             return
         visitor = header(scope, VISITOR_HEADER)
         visitor = visitor if VISITOR_RE.fullmatch(visitor) else ""
@@ -372,7 +442,10 @@ class ShareDoor:
         inner["raw_path"] = target.encode()
         if rule == NARROW:
             asked = [(k, v) for k, v in parse_qsl(scope.get("query_string", b"").decode("latin-1")) if k in KEPT_QUERY]
-            inner["query_string"] = urlencode([*asked, *NARROWED[rest](sid).items()]).encode()
+            narrowed = NARROWED[rest](sid)
+            if rest == "/api/terminals" and terminals == "container":
+                narrowed = {**narrowed, "env": "container"}
+            inner["query_string"] = urlencode([*asked, *narrowed.items()]).encode()
         if not socket and str(scope.get("method") or "") in ("POST", "PUT", "PATCH"):
             declared = header(scope, b"content-length")
             if declared.isdigit() and int(declared) > UPLOAD_MAX:
@@ -381,11 +454,17 @@ class ShareDoor:
             receive = capped(receive, UPLOAD_MAX)
         await self.held(shares, row, inner, receive, send)
 
-    async def allowed(self, rule: str, match: re.Match[str], sid: str) -> bool:
+    async def allowed(self, rule: str, match: re.Match[str], sid: str, terminals: str = "all") -> bool:
         groups = match.groupdict()
         if rule == SESSION:
             return groups.get("sid") == sid
         if rule == TERMINAL:
+            # ``container`` keeps the host's terminals out even when the session owns one: the operator's
+            # own machine is what that setting withholds.
+            if terminals == "none":
+                return False
+            if terminals == "container" and await self.owner_of("terminal_env", groups["tid"]) != "container":
+                return False
             return await self.owner_of("terminal", groups["tid"]) == sid
         if rule == BROWSER:
             return await self.owner_of("browser", groups["gid"]) == sid
@@ -432,12 +511,23 @@ class ShareDoor:
             work.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await work
+            # Cut for a change rather than an end (a new password, a new policy): a socket is told which,
+            # and a request not answered yet hears what the next one would, so the page asks for the
+            # password instead of saying the link ended.
+            now = await shares.by_id(share_id)
+            ended = now is None or not live(now)
+            locked = not ended and bool(now and now.get("password_hash"))
             with suppress(Exception):
                 if socket:
                     if not state["closed"]:
-                        await send({"type": "websocket.close", "code": 4410})
+                        await send({"type": "websocket.close", "code": 4410 if ended else 4401 if locked else 1012})
                 elif not state["started"]:
-                    await answer(send, 410, "this link was revoked or has expired", "ended")
+                    if ended:
+                        await answer(send, 410, "this link was revoked or has expired", "ended")
+                    elif locked:
+                        await answer(send, 401, "this link asks for its password", "locked")
+                    else:
+                        await answer(send, 503, "the link's settings changed; ask again", "changed")
                 elif not state["ended"]:
                     await send({"type": "http.response.body", "body": b"", "more_body": False})
         finally:
@@ -445,6 +535,43 @@ class ShareDoor:
                 if not pending.done():
                     pending.cancel()
             shares.release(share_id, cut)
+
+    async def unlock(self, shares: SessionShares, row: dict[str, Any], token: str, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        """``{"password"}`` → the pass, as a cookie only this link's path is sent, or 403 ``wrong`` or 429
+        ``slow``. Read here rather than by a handler, because the inner app never sees a visitor's cookies."""
+        body = b""
+        while True:
+            message = await receive()
+            if message.get("type") != "http.request":
+                return
+            body += message.get("body") or b""
+            if len(body) > UNLOCK_BODY_MAX:
+                await answer(send, 413, "a password is shorter than that")
+                return
+            if not message.get("more_body"):
+                break
+        try:
+            password = json.loads(body or b"{}").get("password")
+        except (ValueError, AttributeError):
+            password = None
+        if not isinstance(password, str):
+            await answer(send, 400, "password: a string")
+            return
+        verdict, wait = await shares.unlock(str(row["id"]), password)
+        if verdict == "slow":
+            await answer_json(send, 429, {"detail": "too many wrong passwords; wait", "code": "slow", "retry_after": max(1, round(wait + 0.5))})
+            return
+        if verdict != "ok":
+            await answer(send, 403, "that is not the link's password", "wrong")
+            return
+        fresh = await shares.by_id(str(row["id"]))
+        if fresh is None or not live(fresh) or not fresh.get("password_hash"):
+            await answer(send, 410, "this link was revoked or has expired", "ended")
+            return
+        secure = "; Secure" if shares.base.startswith("https:") or scope.get("scheme") in ("https", "wss") else ""
+        # No Max-Age: the pass lasts as long as the browser's session, and the link's own end ends it anyway.
+        cookie_value = f"{PASS_COOKIE}={pass_for(fresh)}; Path=/v/{token}/; HttpOnly; SameSite=Strict{secure}"
+        await answer_json(send, 200, {"ok": True}, [(b"set-cookie", cookie_value.encode())])
 
     async def page(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         index = self.dist / "index.html"
@@ -482,6 +609,47 @@ class ShareBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expires_hours: float | None = Field(default=None, gt=0, le=24 * 90)
     """Hours until the link stops by itself; none for a link that lasts until it is revoked."""
+    label: str = Field(default="", max_length=400)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+    policy: dict[str, Any] | None = None
+
+
+class SharePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str | None = Field(default=None, max_length=400)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+    clear_password: bool = False
+    policy: dict[str, Any] | None = None
+    expires_hours: float | None = Field(default=None, gt=0, le=24 * 90)
+    """Hours from now; the link's end is moved, never removed, since a link made to end should not
+    quietly become one that does not."""
+
+
+
+
+async def pick_refused(app: Application, who: dict[str, Any], body: dict[str, Any]) -> str:
+    """Why a visitor may not make this pick of the conversation's model (``POST …/model``); "" when they
+    may. The operator's own picks never come here.
+
+    A field the body leaves out keeps the session's value, so it is not judged: changing the preset alone
+    asks only that the preset be one the link offers. A raw provider and model, or ``clear``, would step
+    around the presets altogether and are refused whenever the role is limited."""
+    row = await app.db.fetchone("SELECT policy FROM session_shares WHERE id = ?", (str(who.get("share") or ""),))
+    policy = share_policy.parse(row["policy"] if row is not None else None)
+    entry = share_policy.role(policy, "main")
+    if entry is None and not policy.get("broken"):
+        return ""
+    if body.get("clear") or body.get("provider") or body.get("model"):
+        return "this link lets its visitor choose only among the presets it offers"
+    current = next((role.get("current") or {} for role in await share_roles.describe(app, str(who["session_id"])) if role.get("id") == "main"), {})
+    preset = str(body.get("preset") or current.get("preset") or (entry or {}).get("preset") or "")
+    effort = "none" if body.get("thinking") is False else body.get("reasoning_effort")
+    account = body.get("account")
+    if (body.get("preset") or effort is not None or account is not None) and not share_policy.allows(
+        policy, "main", preset, None if effort is None else str(effort), None if account is None else str(account)
+    ):
+        return "this link does not offer that model, effort or account"
+    return ""
 
 
 def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
@@ -497,6 +665,9 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         if kind == "terminal":
             row = await app.db.fetchone("SELECT owner_id FROM terminals WHERE id = ? AND owner_kind = 'session'", (thing,))
             return str(row["owner_id"]) if row is not None and row["owner_id"] else None
+        if kind == "terminal_env":
+            row = await app.db.fetchone("SELECT env FROM terminals WHERE id = ?", (thing,))
+            return str(row["env"]) if row is not None else None
         if kind == "browser":
             row = await app.db.fetchone("SELECT session_id FROM browser_groups WHERE id = ?", (thing,))
             return str(row["session_id"]) if row is not None and row["session_id"] else None
@@ -515,7 +686,29 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
 
     dist = app.settings.bot_repo_dir / "miniapp" / "dist"
 
-    api.add_middleware(ShareDoor, shares=shares, owner_of=owner_of, dist=dist)
+    api.add_middleware(ShareDoor, shares=shares, owner_of=owner_of, dist=dist, app=app)
+
+    async def place_of(session_id: str) -> str:
+        """``container`` for a session whose commands run in this installation's container; ``host`` for
+        one on the operator's machine, a native installation, or a remote terminal's, none of which has a
+        container of the session's own to narrow the terminals to."""
+        state = await manager.get_state(session_id)
+        if state is None:
+            raise HTTPException(404, "no such session")
+        return "container" if manager.env_of(session_id, state.metadata, state.project) == "container" else "host"
+
+    async def policy_of(session_id: str, raw: dict[str, Any] | None) -> dict[str, Any] | None:
+        if raw is None:
+            return None
+        place = await place_of(session_id)
+        try:
+            return share_policy.validate(raw, await share_roles.describe(app, session_id), place)
+        except share_policy.PolicyError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    async def link_policy(who: dict[str, Any]) -> dict[str, Any]:
+        row = await app.db.fetchone("SELECT policy FROM session_shares WHERE id = ?", (who["share"],))
+        return share_policy.parse(row["policy"] if row is not None else None)
 
     def visitor(request: Request) -> dict[str, Any]:
         found = request.scope.get(SCOPE_KEY)
@@ -526,18 +719,30 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
     @api.get("/api/share/link")
     async def share_link(who: dict[str, Any] = Depends(visitor)) -> dict[str, Any]:
         """What the visitor's page opens on: the session, and when the link stops by itself."""
-        row = await app.db.fetchone("SELECT expires_at FROM session_shares WHERE id = ?", (who["share"],))
+        row = await app.db.fetchone("SELECT expires_at, policy, spent_usd, spent_weekly_pct FROM session_shares WHERE id = ?", (who["share"],))
         state = await manager.get_state(str(who["session_id"]))
+        policy = share_policy.parse(row["policy"] if row is not None else None)
         return {
             "session_id": who["session_id"],
             "title": state.session.title if state is not None else "",
             "expires_at": row["expires_at"] if row is not None else None,
+            "limits": share_policy.limits(policy, row["spent_usd"] if row is not None else 0, row["spent_weekly_pct"] if row is not None else 0),
         }
 
     @api.get("/api/share/settings")
-    async def share_settings(_: dict[str, Any] = Depends(visitor)) -> dict[str, Any]:
-        """The model picker's list, as the side panel gets it: no address, no key."""
-        return picker_settings(app)
+    async def share_settings(who: dict[str, Any] = Depends(visitor)) -> dict[str, Any]:
+        """The model picker's list, as the side panel gets it: no address, no key, and only the presets
+        the link lets the visitor use for the conversation's own model."""
+        picked = picker_settings(app)
+        allowed = share_policy.presets_allowed(await link_policy(who), "main")
+        if allowed is not None:
+            picked["presets"] = {pid: preset for pid, preset in picked["presets"].items() if pid in allowed}
+            used = {str((preset or {}).get("provider") or "") for preset in picked["presets"].values()}
+            picked["providers"] = {pid: conf for pid, conf in picked["providers"].items() if pid in used}
+            if picked["model"].get("preset") not in allowed:
+                main = share_policy.role(await link_policy(who), "main") or {}
+                picked["model"] = {"preset": str(main.get("preset") or "")}
+        return picked
 
     @api.get("/api/share/commands")
     async def share_commands(_: dict[str, Any] = Depends(visitor)) -> list[dict[str, Any]]:
@@ -567,10 +772,46 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         found = shares()
         if found is None:
             raise HTTPException(503, "live links are not installed")
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        policy = await policy_of(session_id, body.policy)
         try:
-            return await found.create(session_id, expires_hours=body.expires_hours)
+            made = await found.create(session_id, expires_hours=body.expires_hours, label=body.label, password=body.password, policy=policy)
         except KeyError as exc:
             raise HTTPException(404, "no such session") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        # A turn already under way was given its tools before the link existed; a visitor's steer into
+        # it must not find the ones a shared conversation does not have.
+        share_tools.mark_shared(manager, session_id)
+        return made
+
+    @api.get("/api/sessions/{session_id}/live-shares/options")
+    async def live_share_options(session_id: str, _: dict[str, Any] = Depends(operator)) -> dict[str, Any]:
+        """What the share dialog offers for this session: its model roles, where it runs, and the
+        terminal settings that mean something there."""
+        place = await place_of(session_id)
+        return {
+            "roles": await share_roles.describe(app, session_id),
+            "place": place,
+            "terminals": share_policy.terminal_choices(place),
+            "withheld": share_tools.withheld(app, session_id),
+        }
+
+    @api.patch("/api/sessions/{session_id}/live-shares/{share_id}")
+    async def live_share_change(session_id: str, share_id: str, body: SharePatch, _: dict[str, Any] = Depends(operator)) -> dict[str, Any]:
+        """Change a live link's name, password, policy or end; answers the link as the list shows it."""
+        found = shares()
+        if found is None:
+            raise HTTPException(503, "live links are not installed")
+        if await manager.get_state(session_id) is None:
+            raise HTTPException(404, "no such session")
+        policy = await policy_of(session_id, body.policy)
+        try:
+            return await found.update(session_id, share_id, label=body.label, password=body.password, clear_password=body.clear_password,
+                                      policy=policy, expires_hours=body.expires_hours)
+        except KeyError as exc:
+            raise HTTPException(404, "no such link") from exc
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -584,4 +825,4 @@ def register(api: FastAPI, app: Application, auth: Callable[..., Any]) -> None:
         return await found.for_session(session_id)
 
 
-__all__ = ["ROUTES", "SCOPE_KEY", "ShareDoor", "register", "route_of", "shell", "split"]
+__all__ = ["ROUTES", "SCOPE_KEY", "ShareDoor", "pick_refused", "register", "route_of", "shell", "split"]

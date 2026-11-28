@@ -79,3 +79,27 @@ async def test_a_file_at_the_vision_effort_gets_the_board_and_the_approvals(tmp_
         assert await _schema(again) == schema
     finally:
         await again.close()
+
+
+async def test_a_live_link_made_before_its_limits_keeps_working_with_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    limits = _step("_share_limits")
+    path = tmp_path / "state.sqlite"
+    with monkeypatch.context() as patch:
+        patch.setattr(database_module, "MIGRATIONS", MIGRATIONS[:limits])
+        db = Database(path, local_env="container")
+        await db.open()
+        try:
+            # Rows of the link alone: the session it names is not what this migration is about.
+            await db.execute("PRAGMA foreign_keys = OFF")
+            await db.execute("INSERT INTO session_shares(id, session_id, token, created_at) VALUES ('shr_1', 's1', 'tok', 't')")
+        finally:
+            await db.close()
+    for _ in range(2):  # the second start finds the columns there and adds nothing
+        db = Database(path, local_env="container")
+        await db.open()
+        try:
+            row = await db.fetchone("SELECT label, password_hash, policy, spent_usd, spent_weekly_pct FROM session_shares WHERE id = 'shr_1'")
+            assert tuple(row) == ("", None, "{}", 0.0, 0.0)
+            assert [r[0] for r in await db.fetchall("PRAGMA integrity_check")] == ["ok"]
+        finally:
+            await db.close()

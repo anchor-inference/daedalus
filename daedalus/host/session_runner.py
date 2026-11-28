@@ -103,6 +103,9 @@ from daedalus.host import (
     prompt_coach,
     prompts,
     quick_agent,
+    share_spend,
+    share_tools,
+    share_turns,
     standing,
     subagent_models,
     summaries,
@@ -452,6 +455,12 @@ class SessionState:
     """What the current run may do when a guest's message started it. Set with ``run_origin``, from the
     message that opens the run, and kept through a continued turn, so an answer to an approval card does
     not widen it."""
+    share_id: str = ""
+    """The live link whose visitor's turn this run is, "" for any other run (:mod:`daedalus.host.share_turns`).
+    Set when a run starts and read only while it runs: the operator's next run in the session clears it."""
+    link_choices: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Role → what the link's policy runs it on, read when the run's engine is built. Held on the state
+    because the account and vision lookups happen inside a call and cannot wait on the database."""
     review_holds_send: bool = False
     """The review of the ``AgentTalk`` send about to run did not pass: that message waits for the operator."""
     last_error_kind: str = ""
@@ -874,7 +883,8 @@ class SessionManager:
         self.sessions = SqliteSessionStore(db, view=TranscriptViewBuilder(), media=self.media)
         self.runs = SqliteRunStore(db)
         self.events = SqliteEventStream(db)
-        self.usage = SqliteUsageSink(db)
+        # Every call a visitor's turn makes is counted against its link here, where every call is recorded.
+        self.usage = share_spend.LinkUsageSink(SqliteUsageSink(db), self)
         self.live = LiveControlStore(db)
         # The installation's own folders are not projects, and neither is the whole home folder:
         # a project folder is reachable to every agent in it and is an open root to the policy.
@@ -968,6 +978,7 @@ class SessionManager:
         self.providers.on_model_refusal = self.model_health.refused
         if self.providers.accounts is not None:
             self.providers.accounts.on_switch = self._account_switched
+            self.providers.accounts.forced = self.link_account
         # In Docker a stdio server starts inside this container, which is not the machine a session
         # working in a host folder runs its Exec on: what the agent checks there (adb, a paired phone,
         # an installed CLI) is not what the server sees. Every error and the app say where it ran.
@@ -1472,6 +1483,10 @@ class SessionManager:
         the preset does, which is the operator's intent, and nothing has to sweep the sessions when
         a model is deleted. A subagent with no choice of its own looks with its leader's: it reads the
         pictures of the conversation the operator chose that model for."""
+        if (held := self._link_vision(session_id)) is not None and held["preset"] in self.config.presets:
+            preset = self.config.presets[held["preset"]]
+            if preset.images:
+                return held["preset"], preset
         seen: set[str] = set()
         while session_id and session_id not in seen:
             seen.add(session_id)
@@ -1488,6 +1503,8 @@ class SessionManager:
 
         Apart from the preset, so a session may ask the global model to think harder on its pictures
         without choosing a model of its own."""
+        if (held := self._link_vision(session_id)) is not None and held["effort"]:
+            return held["effort"]
         seen: set[str] = set()
         while session_id and session_id not in seen:
             seen.add(session_id)
@@ -3995,6 +4012,9 @@ class SessionManager:
         handed and no longer holds is being placed right now, and that answers ``False``.
         """
         state = self._states.get(session_id)
+        if state is not None and state.running and not state.share_id and (steering := share_turns.starting_share(None)):
+            # A visitor pressing a waiting message into the operator's run: as with their own words above.
+            state.share_id = steering
         if state is None or not state.running:
             # Nothing to steer: a follow-up left behind by a finished run opens the next one anyway.
             return False
@@ -4269,6 +4289,11 @@ class SessionManager:
         state = await self.get_state(session_id)
         if state is None:
             raise KeyError(session_id)
+        if visitor and visitor.get("share") and state.running and not state.share_id:
+            # A visitor's words placed in a run the operator started steer the rest of it, so the rest is
+            # theirs: counted against the link and stopped at its limit. Without this a visitor who waits
+            # for the operator to start a turn would work past every limit the link sets.
+            state.share_id = str(visitor["share"])
         # The operator's words as they wrote them. When the agent works in another language it is sent a
         # translation, and this is what the receipt compares a retry against (a second translation of the
         # same words need not be the same text), what names the chat, and what the app shows.
@@ -5391,7 +5416,7 @@ class SessionManager:
     async def _build_engine(
         self, state: SessionState, run_id: str, *, message: Message | None = None,
     ) -> QueryEngine:
-        overrides = self.task_overrides(state, await self.live.load(state.session.id))
+        overrides = await self._link_overrides(state, self.task_overrides(state, await self.live.load(state.session.id)))
         target = None
         async with self.db.transaction() as conn:
             if message is not None and message.metadata.get("daedalus.provider_resume"):
@@ -5563,6 +5588,9 @@ class SessionManager:
             turn = guest_turns.restricted(state.guest_turn)
             if turn is not None and "history" in options:
                 options["history"] = agent_talk.for_reply(options["history"], state.run_id or "", turn.runs) if turn.kind == "reply" else guest_turns.for_guest(options["history"], state.run_id or "")
+            elif "history" in options and share_tools.held(self, state.session.id, state.metadata) and (snapshot := memory_render.Snapshot.read(state.metadata)) is not None:
+                # The memory block an earlier turn carried is still in the history; a link's holder reads it there.
+                options["history"] = share_tools.without_carried_memory(options["history"], snapshot.carriers, self.sessions.transcript_key)
             return build(*args, **options)
 
         engine.context_manager.build_context = build_context  # type: ignore[method-assign]
@@ -5897,6 +5925,11 @@ class SessionManager:
         state.run_outcome = None
         state.run_cause = None
         state.last_compaction = None
+        if not continue_turn:
+            state.share_id = self._share_of_run(state, message)
+        elif (answering := share_turns.starting_share(None)) and not state.share_id:
+            # A visitor's answer takes the rest of the turn on as theirs: what follows was their choice.
+            state.share_id = answering
         if message is not None:
             state.run_origin = str(message.metadata.get("daedalus.origin") or "operator")
             state.guest_turn = guest_turns.GuestTurn.from_metadata(message.metadata.get(guest_turns.METADATA_KEY))
@@ -5913,6 +5946,10 @@ class SessionManager:
                 state.metadata[guest_turns.WROTE_KEY] = True
                 state.session.metadata[guest_turns.WROTE_KEY] = True
                 await self.sessions.update_metadata(state.session.id, state.session.metadata)
+        if not continue_turn:
+            # Before the context and the engine, both of which follow it: the turn boundary is where a
+            # live link takes the tools away or gives them back (daedalus.host.share_tools).
+            await share_tools.refresh(self, state)
         if message is not None and not continue_turn:
             message = await self._with_turn_context(state, message)
         if state.engine is None or not continue_turn:
@@ -6068,6 +6105,8 @@ class SessionManager:
             volatile.append("\n" + memory.text)
         if privacy.is_private(state):
             volatile.append("\n- " + privacy.TURN_NOTE)
+        if share_tools.held(self, state.session.id, state.metadata):
+            volatile.append("\n- " + share_tools.turn_note())
         switched_off = await self._take_mcp_switched_off(state)
         if switched_off:
             volatile.append("\n" + switched_off)
@@ -6180,6 +6219,9 @@ class SessionManager:
             # in the history (taking it out would rewrite the cached head); nothing new is added.
             return False
         if privacy.is_private(state) or self.is_staff(state) or any(state.metadata.get(key) for key in NOT_OPERATOR_FACING):
+            return False
+        if share_tools.held(self, state.session.id, state.metadata):
+            # Whoever holds a live link reads this conversation; the operator's memory is not theirs.
             return False
         # A guest the operator trusts is given what the operator's own turn has, memory included.
         return state.run_origin == "operator" or (state.guest_turn is not None and state.guest_turn.trusted)
@@ -7488,6 +7530,8 @@ class SessionManager:
             # Off the surface rather than refusing when called: with no quick model chosen the tool can
             # only fail, and its definition and the prompt's paragraph about it would cost every request.
             blocked.add("QuickAgent")
+        if share_tools.held(self, state.session.id, state.metadata):
+            blocked |= share_tools.withheld_names(known)
         return blocked
 
     async def _load_capability_ancestors(self, state: SessionState) -> None:
@@ -7515,6 +7559,8 @@ class SessionManager:
             # Its own registry is its whole allowlist; the operator may still switch a tool off.
             own = {t.name for t in self.dispatcher_tools.list_all()}
             off = {str(n) for n in (state.metadata.get("tools_off") or ()) if str(n) in own}
+            if share_tools.held(self, state.session.id, state.metadata):
+                off |= share_tools.withheld_names(own)
             return guest_turns.narrowed(ToolVisibilityPolicy(blocked=off), state.guest_turn, own)
         policy = ToolVisibilityPolicy(blocked=self.blocked_tools_for(state))
         return guest_turns.narrowed(policy, state.guest_turn, (t.name for t in self.tools.list_all()))
@@ -8146,6 +8192,8 @@ class SessionManager:
 
         def decide(tool: str, arguments: dict[str, Any]) -> Decision:
             state = self._states.get(session_id)
+            if state is not None and tool not in share_tools.STAYS and share_tools.held(self, session_id, state.metadata):
+                return Decision("deny", "not available while this conversation is shared by a link", share_tools.RULE, told=share_tools.refusal(tool))
             if state is not None and not policy_admits(self.tool_policy_for(state), tool):
                 return Decision("deny", "the tool is outside this session's effective capability set", "session.capabilities")
             turn = guest_turns.restricted(state.guest_turn) if state is not None else None
@@ -8893,6 +8941,86 @@ class SessionManager:
         await self.sessions.update_metadata(session_id, state.session.metadata)
         return cap
 
+    def link_of(self, session_id: str | None) -> str:
+        """The live link whose visitor's turn the session is running now, "" when it runs none."""
+        state = self._states.get(session_id or "")
+        return state.share_id if state is not None and state.running and state.share_id else ""
+
+    def _share_of_run(self, state: SessionState, message: Message | None) -> str:
+        """The link a run starting now belongs to: the visitor's words or request, else a helper's leader's
+        visitor turn that is running now (a helper the leader starts later, in the operator's turn, is not)."""
+        share = share_turns.starting_share(message.metadata if message is not None else None)
+        if share:
+            return share
+        return self.link_of(str(state.metadata.get("subagent_of") or ""))
+
+    async def _link_overrides(self, state: SessionState, overrides: dict[str, Any]) -> dict[str, Any]:
+        """The run's overrides with its link's policy applied, or unchanged outside a visitor's turn."""
+        if not state.share_id:
+            state.link_choices = {}
+            return overrides
+        policy = await share_turns.policy_of(self.db, state.share_id)
+        role = share_turns.role_of(state.metadata)
+        leader = self._states.get(str(state.metadata.get("subagent_of") or ""))
+        picks_from = state.metadata if leader is None else leader.metadata
+        choices: dict[str, dict[str, str]] = {}
+        for name in ("main", "subagents", "quick", "vision"):
+            rule = share_turns.rule_of(policy, name)
+            if rule is not None:
+                # Only the conversation has a control on the visitor's screen, so only its pick is read.
+                choices[name] = share_turns.choice(rule, share_turns.pick_of(picks_from, state.share_id) if name == "main" else None)
+        state.link_choices = choices
+        chosen = choices.get(role)
+        return share_turns.applied(overrides, chosen, self.config.presets) if chosen is not None else overrides
+
+    def link_account(self, session_id: str | None, upstream: str) -> str:
+        """The account a live link holds this session's call on ``upstream`` to, "" for none."""
+        state = self._states.get(session_id or "")
+        if state is None or not self.link_of(session_id):
+            return ""
+        chosen = state.link_choices.get(share_turns.role_of(state.metadata))
+        account = chosen["account"] if chosen is not None else ""
+        if not account or chosen is None:
+            return ""
+        preset = self.config.presets.get(chosen["preset"])
+        conf = self.config.providers.get(preset.provider) if preset is not None else None
+        # Held only on the preset's own upstream: a fallback on another subscription keeps that one's order.
+        return account if conf is not None and keyproxy_upstream(conf.base_url) == upstream else ""
+
+    def _link_vision(self, session_id: str | None) -> dict[str, str] | None:
+        state = self._states.get(session_id or "")
+        if state is None or not self.link_of(session_id):
+            return None
+        return state.link_choices.get("vision")
+
+    async def set_link_pick(self, session_id: str, share_id: str, rule: dict[str, Any], *, preset: str | None = None,
+                            effort: str | None = None, account: str | None = None, clear: bool = False) -> dict[str, str]:
+        """Keep a visitor's model pick beside their link, for their turns only; the session's model stays the operator's.
+
+        A pick names only what changed (the effort alone, say); the rest is the link's earlier pick, else the
+        policy's value. ``clear`` goes back to the policy's value. A pick the policy does not allow is a
+        ``ValueError``: kept, it would silently run on the value instead."""
+        state = await self.get_state(session_id)
+        if state is None:
+            raise KeyError(session_id)
+        picks = dict(state.session.metadata.get(share_turns.PICKS_KEY) or {})
+        base = share_turns.choice(rule, None if clear else picks.get(share_id))
+        pick = {
+            "preset": base["preset"] if preset is None else preset,
+            "effort": base["effort"] if effort is None else effort,
+            "account": base["account"] if account is None else account,
+        }
+        if clear:
+            picks.pop(share_id, None)
+        elif not share_turns.allows(rule, pick["preset"], pick["effort"], pick["account"]):
+            raise ValueError("this link does not allow that model, effort or account")
+        else:
+            picks[share_id] = pick
+        state.metadata[share_turns.PICKS_KEY] = picks
+        state.session.metadata[share_turns.PICKS_KEY] = picks
+        await self.sessions.update_metadata(session_id, dict(state.session.metadata))
+        return share_turns.choice(rule, picks.get(share_id))
+
     async def cap_breach(self, state: SessionState, provider_id: str | None,
                          model: str | None = None) -> tuple[str, str] | None:
         """``(kind, note)`` when the session, its provider or everything together has spent its cap.
@@ -8950,6 +9078,8 @@ class SessionManager:
             minutes = (time.monotonic() - state.run_active_since) / 60
             if minutes >= limits.max_run_minutes:
                 kind, note = "run_minutes", f"⏱ time cap reached: {minutes:.0f} min of active work in this run of {limits.max_run_minutes} (limits.max_run_minutes); stopping this run. Send a message to continue in a new run."
+        if note is None and state.share_id and (spent_limit := await share_spend.exhausted(self, state.share_id)) is not None:
+            kind, note = "share_budget", share_spend.STOPPED[spent_limit]
         if note is not None:
             pass
         elif (run_cap > 0 or role_cap is not None) and spent >= run_cap:

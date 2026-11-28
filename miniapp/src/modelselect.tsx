@@ -30,6 +30,7 @@ import { useEdgeFade, useMoreBelow } from "./edgefade";
 import { effortWord } from "./effortselect";
 import { SubscriptionAccount, accountName, statusOf, useSubscriptionAccounts } from "./accounts";
 import { navigate, pathFor } from "./router";
+import { allowedEfforts, inShare, roleLocked } from "./visit";
 
 export type ModelChoice = { clear: true } | { preset: string } | { model: string };
 
@@ -145,6 +146,17 @@ export function ModelSelect({ model, fallback, open, onOpenChange, onChoose, eff
   // letter cap or by the room its row leaves it.
   const title = fallback ? `${t("session.model.fallback.turn", { to: fallback.to, from: fallback.from })} — ${reason}` : model ? `${model} — ${t("composer.model.title")}` : t("composer.model.title");
   const ownOpen = open && !anchor;
+  // On a live link whose owner locked the conversation's model there is nothing to choose: the chip
+  // shows the value and opens no menu, rather than a menu every pick in which the host refuses.
+  if (inShare() && roleLocked("main")) {
+    return (
+      <span className="model-select locked" title={t("composer.model.locked")} aria-label={`${t("session.model.for")}: ${model}`} data-locked="">
+        <span className="model-label truncate">{label}</span>
+        {onChooseEffort && <span className="model-effort">{effortWord(effort, thinking)}</span>}
+        <Icon name="lock" size={12} />
+      </span>
+    );
+  }
   return (
     <>
       <button ref={trigger} type="button" className={`model-select ${fallback ? "attn" : ""} ${ownOpen ? "on" : ""}`} onClick={() => onOpenChange(!ownOpen)} title={title} aria-label={t("session.model.for")} aria-haspopup="dialog" aria-expanded={ownOpen}>
@@ -421,7 +433,9 @@ function ModelPicker({ cat, failed, model, fallback, onPick, onStar, onClose, ef
     }
   }
 
-  const efforts = onChooseEffort ? <EffortRow presetThinks={currentEntry ? currentEntry[1].thinking !== false : true} effort={effort} thinking={thinking} onChoose={onChooseEffort} account={account} /> : null;
+  // A live link's owner may narrow the efforts of a preset; the row then offers only those.
+  const visitEfforts = inShare() && currentEntry ? allowedEfforts("main", currentEntry[0]) : null;
+  const efforts = onChooseEffort ? <EffortRow presetThinks={currentEntry ? currentEntry[1].thinking !== false : true} effort={effort} thinking={thinking} onChoose={onChooseEffort} account={account} only={visitEfforts} /> : null;
   const settingsKey = MAC ? "⌘ ," : "Ctrl ,";
   return (
     <div ref={box} className="model-picker-body" onKeyDown={onKeyDown}>
@@ -521,9 +535,9 @@ function focusStop(el: HTMLElement | undefined) {
  * reasons (it can then be told not to). A model that does not reason has nothing to set, and the row
  * says so in its place rather than offering choices it would ignore.
  */
-function EffortRow({ presetThinks, effort, thinking, onChoose, account }: { presetThinks: boolean; effort?: string; thinking?: boolean; onChoose: (value: string) => void; account?: AccountChoice }) {
+function EffortRow({ presetThinks, effort, thinking, onChoose, account, only = null }: { presetThinks: boolean; effort?: string; thinking?: boolean; onChoose: (value: string) => void; account?: AccountChoice; only?: string[] | null }) {
   const value = thinking ? REASONING_EFFORTS[effortIndex(effort)] : "off";
-  const options = [...(presetThinks ? ["off"] : []), ...REASONING_EFFORTS].map((id) => ({ id, label: t(id === "off" ? "add.effort.off" : `add.effort.${id}`) }));
+  const options = [...(presetThinks ? ["off"] : []), ...REASONING_EFFORTS].filter((id) => !only || only.includes(id) || id === value).map((id) => ({ id, label: t(id === "off" ? "add.effort.off" : `add.effort.${id}`) }));
   return (
     <div className="model-picker-effort">
       <div className="model-picker-label">

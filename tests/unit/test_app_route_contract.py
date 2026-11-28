@@ -30,7 +30,7 @@ from typing import Any
 from daedalus.config import RuntimeConfig, Settings
 from daedalus.extensions.api import build_app
 from daedalus.extensions.api_panel import FORWARDED, OWN
-from daedalus.extensions.api_session_share import OWN_PATHS
+from daedalus.extensions.api_session_share import OWN_PATHS, UNLOCK
 from daedalus.host.session_runner import SessionManager
 from daedalus.stores.database import Database
 
@@ -383,8 +383,11 @@ async def test_every_request_the_app_sends_is_a_route_the_host_serves(settings: 
     assert not served(routes, Call("probe", "DELETE", (f"/api/recurring/{HOLE}id{HOLE}/run",)))
     assert not served(routes, Call("probe", "POST", (f"/api/schedules/{HOLE}id{HOLE}/run",)))
     assert served(routes, Call("probe", None, ("/api/schedules",)))
+    # A link's password is taken by its door itself, before any route: a locked link reaches no handler.
+    at_the_door = {("POST", UNLOCK)}
     missing = sorted({f"{c.where}  {c.method or 'ANY'} {' | '.join(c.paths).replace(HOLE, '{}')}"
-                      for c in app_calls() if not served(routes, _through_link_door(c))})
+                      for c in app_calls()
+                      if not served(routes, _through_link_door(c)) and not (c.where.startswith("visit") and all((c.method, path) in at_the_door for path in c.paths))})
     assert not missing, "the app calls routes the host does not serve:\n" + "\n".join(missing)
 
 

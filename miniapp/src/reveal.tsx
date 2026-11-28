@@ -11,6 +11,7 @@
 
 import { api } from "./api";
 import { useQuery } from "./store";
+import { ownerOnly } from "./visit";
 import type { Capabilities } from "./capabilities";
 import { t } from "./i18n";
 import { toast } from "./ui/dialogs";
@@ -59,7 +60,7 @@ export async function reveal(target: RevealTarget): Promise<boolean> {
 
 /** The capability and the label, for a component that offers the action; null when it must not. */
 export function useReveal(): { label: string; reveal: (target: RevealTarget) => Promise<boolean> } | null {
-  const { data } = useQuery<Capabilities>("/api/capabilities", { staleMs: 20000 });
+  const { data } = useQuery<Capabilities>(ownerOnly("/api/capabilities"), { staleMs: 20000 });
   const capability = revealAvailable(data);
   return capability ? { label: revealLabel(capability.platform), reveal } : null;
 }

@@ -7,7 +7,7 @@ import io
 import mimetypes
 from typing import Any
 
-from protocore.contracts.llm import LLMRequest, LLMResponse
+from protocore.contracts.llm import LLMObservabilityContext, LLMRequest, LLMResponse
 from protocore.contracts.tools import ToolContext
 from protocore.contracts.types import (
     IMAGE_REFS_METADATA_KEY,
@@ -177,7 +177,7 @@ async def look(
     pictures.
     """
     try:
-        return await _ask(vision, manager, data, mime, task, detail=detail, instruction=instruction)
+        return await _ask(vision, manager, data, mime, task, detail=detail, instruction=instruction, session_id=session_id)
     except VisionUnavailable as exc:
         if not exc.model_fault:
             raise
@@ -194,7 +194,7 @@ async def look(
         await _notice(manager, session_id, "failed", message, setting=where)
         raise VisionUnavailable(message, setting=where) from primary
     try:
-        text, model = await _ask(route, manager, data, mime, task, detail=detail, instruction=instruction)
+        text, model = await _ask(route, manager, data, mime, task, detail=detail, instruction=instruction, session_id=session_id)
     except VisionUnavailable as exc:
         message = f"{primary}; the session's model {route[1]} could not look either: {exc}"
         await _notice(manager, session_id, "failed", message, setting=primary.setting)
@@ -222,7 +222,7 @@ def image_mime(data: bytes, claimed: str) -> str:
     return sniffed_mime(data, claimed)
 
 
-async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str) -> tuple[str, str]:
+async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, detail: str, instruction: str, session_id: str | None = None) -> tuple[str, str]:
     """One vision route asked, and asked again once if thinking ate the answer.
 
     :class:`VisionUnavailable` says why it gave no answer.
@@ -267,12 +267,12 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
         ),
     ]
     budget = max_out
-    response = await _complete(provider, model, messages, budget, effort)
+    response = await _complete(provider, model, messages, budget, effort, session_id)
     answer = _answer(response)
     retried = 0
     if not answer and response.stop_reason == StopReason.max_tokens and budget < RETRY_CEILING:
         retried = min(RETRY_CEILING, budget * 2)
-        response = await _complete(provider, model, messages, retried, effort)
+        response = await _complete(provider, model, messages, retried, effort, session_id)
         answer = _answer(response)
     if not answer:
         # An empty answer handed back as a description let the agent go on as if it had looked.
@@ -284,8 +284,12 @@ async def _ask(vision: Any, manager: Any, data: bytes, mime: str, task: str, *, 
     return answer, str(model)
 
 
-async def _complete(provider: Any, model: str, messages: list[Message], budget: int, effort: str = "") -> LLMResponse:
-    request = LLMRequest(model=model, messages=messages, max_tokens=task_effort.helper_tokens(budget, effort), temperature=0.1, extra=task_effort.helper_extra(effort))
+async def _complete(provider: Any, model: str, messages: list[Message], budget: int, effort: str = "", session_id: str | None = None) -> LLMResponse:
+    # The session rides on the call so its usage row names it: a live link counts a visitor's pictures
+    # against its limit by that, and the account a link holds the session to is chosen by it.
+    observability = LLMObservabilityContext(session_id=session_id, call_purpose="vision", call_category="vision") if session_id else None
+    request = LLMRequest(model=model, messages=messages, max_tokens=task_effort.helper_tokens(budget, effort), temperature=0.1,
+                         extra=task_effort.helper_extra(effort), observability=observability)
     try:
         return await provider.complete_text(request)
     except Exception as exc:  # noqa: BLE001

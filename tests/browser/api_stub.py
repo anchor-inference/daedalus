@@ -1945,26 +1945,149 @@ def link_export(method: str, parts: list[str]) -> tuple[int, str, str | bytes] |
     return 405, "application/json", json.dumps({"detail": "method not allowed"})
 
 
+# The operator's providers as a live link's window lists them: fourteen, two of them subscriptions with
+# several accounts, dozens of presets with long names. Four tidy rows would hide every layout fault the
+# real list shows (a provider column too narrow, a set that does not scroll, a Russian label cut off).
+LIVE_PROVIDERS: list[tuple[str, str, str, list[tuple[str, str]], list[tuple[str, str, list[str]]]]] = [
+    ("claude", "Claude (подписка Max)", "subscription", [("acc-work", "Рабочий аккаунт"), ("acc-home", "Домашний аккаунт"), ("acc-team", "Командный Max 20x")],
+     [("claude-opus-5", "Claude Opus 5 — основной для сложных задач", ["low", "medium", "high", "xhigh"]), ("claude-sonnet-5", "Claude Sonnet 5", ["low", "medium", "high"]),
+      ("claude-haiku-5", "Claude Haiku 5 — быстрые ответы", []), ("claude-opus-5-1m", "Claude Opus 5 с окном 1M токенов", ["medium", "high", "xhigh"])]),
+    ("codex", "ChatGPT Pro (Codex)", "subscription", [("cx-main", "Личный Pro"), ("cx-spare", "Запасной Plus")],
+     [("gpt-6-codex", "GPT-6 Codex", ["low", "medium", "high", "xhigh"]), ("gpt-6", "GPT-6", ["low", "medium", "high"]), ("gpt-6-mini", "GPT-6 mini", ["low", "medium"])]),
+    ("openrouter", "OpenRouter", "metered", [], [("or-deepseek-v4", "DeepSeek V4 через OpenRouter", ["low", "high"]), ("or-qwen-4-max", "Qwen 4 Max", []), ("or-llama-5-405b", "Llama 5 405B Instruct", []),
+      ("or-mistral-large-3", "Mistral Large 3", []), ("or-kimi-k3", "Kimi K3 Thinking", ["medium", "high"]), ("or-glm-5", "GLM-5", [])]),
+    ("anthropic-api", "Anthropic API (по ключу)", "metered", [], [("api-opus-5", "Claude Opus 5 по API", ["low", "medium", "high"]), ("api-sonnet-5", "Claude Sonnet 5 по API", ["low", "high"])]),
+    ("openai", "OpenAI API", "metered", [], [("oa-gpt-6", "GPT-6 по API", ["low", "medium", "high"]), ("oa-gpt-6-mini", "GPT-6 mini по API", []), ("oa-o5", "o5 для рассуждений", ["medium", "high", "xhigh"])]),
+    ("gemini", "Google Gemini", "metered", [], [("gem-3-pro", "Gemini 3 Pro", ["low", "high"]), ("gem-3-flash", "Gemini 3 Flash — дешёвый и быстрый", []), ("gem-3-flash-lite", "Gemini 3 Flash Lite", [])]),
+    ("deepseek", "DeepSeek", "metered", [], [("ds-v4", "DeepSeek V4", ["low", "high"]), ("ds-v4-flash", "DeepSeek V4 Flash", [])]),
+    ("xai", "xAI Grok", "metered", [], [("grok-5", "Grok 5", ["low", "high"]), ("grok-5-fast", "Grok 5 Fast", [])]),
+    ("mistral", "Mistral", "metered", [], [("mi-large-3", "Mistral Large 3", []), ("mi-codestral-3", "Codestral 3", [])]),
+    ("groq", "Groq", "metered", [], [("gq-llama-5-70b", "Llama 5 70B на Groq", []), ("gq-qwen-4-32b", "Qwen 4 32B на Groq", [])]),
+    ("together", "Together AI", "metered", [], [("tg-qwen-4-coder", "Qwen 4 Coder 480B", []), ("tg-deepseek-v4", "DeepSeek V4 на Together", [])]),
+    ("yandex", "YandexGPT", "metered", [], [("ya-gpt-6-pro", "YandexGPT 6 Pro", []), ("ya-gpt-6-lite", "YandexGPT 6 Lite — для перевода", [])]),
+    ("ollama", "Ollama на этой машине", "metered", [], [("ol-qwen-4-14b", "Qwen 4 14B локально", []), ("ol-gemma-4-12b", "Gemma 4 12B локально", [])]),
+    ("lmstudio", "LM Studio в локальной сети", "metered", [], [("lm-llama-5-8b", "Llama 5 8B", []), ("lm-phi-6", "Phi 6", [])]),
+]
+# Only the conversation's own model has a control on the visitor's screen; every other role is a value the
+# link sets and the visitor cannot change, as ``share_roles.describe`` reports them.
+LIVE_ROLES: list[tuple[str, str, bool, tuple[str, str, str]]] = [
+    ("main", "Conversation", True, ("claude-opus-5", "high", "")),
+    ("subagents", "Subagents", False, ("claude-sonnet-5", "medium", "")),
+    ("vision", "Image reading", False, ("gem-3-flash", "", "")),
+    ("translation", "Translation", False, ("ya-gpt-6-lite", "", "")),
+    ("quick", "Quick agent", False, ("claude-haiku-5", "", "")),
+    ("coach", "Prompt coach", False, ("gpt-6-mini", "low", "")),
+    ("review", "Action review", False, ("claude-sonnet-5", "low", "")),
+    ("injection", "Injection guard", False, ("gem-3-flash-lite", "", "")),
+    ("title", "Titles", False, ("claude-haiku-5", "", "")),
+    ("compaction", "Compaction", False, ("claude-sonnet-5", "", "")),
+]
+LIVE_WITHHELD: list[tuple[str, str, str]] = [
+    ("selfdev", "Self-development", "Changing Daedalus's own code reaches beyond this chat."),
+    ("chats", "Other conversations", "Reading or writing the owner's other chats."),
+    ("agents", "Other agents", "Messages to linked agents and team members."),
+    ("memory", "Shared memory", "What the agent remembers across all conversations."),
+    ("secrets", "Secrets", "Passwords and keys kept for the agent."),
+    ("accounts", "Connected accounts", "Mail, calendars and other services signed in as the owner."),
+    ("as_owner", "Messages as the owner", "Telegram and notifications in the owner's name."),
+    ("schedules", "Schedules", "Jobs that would outlive the link."),
+    ("computer", "Computer use", "The owner's screen, mouse and keyboard."),
+    ("chrome", "The owner's Chrome profile", "The browser with the owner's sign-ins."),
+    ("publish", "Publishing", "Pages and services on the public address."),
+    ("settings", "Settings", "The installation's settings, models and providers."),
+]
+
+
+def live_presets() -> list[dict]:
+    """Every preset of :data:`LIVE_PROVIDERS` in the shape ``share_roles.describe`` gives one."""
+    return [{"id": pid, "label": label, "provider": provider, "provider_name": name, "model": pid.split("-", 1)[-1] if provider not in ("claude", "codex") else pid,
+             "billing": billing, "efforts": efforts, "accounts": [{"id": aid, "name": an} for aid, an in accounts]}
+            for provider, name, billing, accounts, presets in LIVE_PROVIDERS for pid, label, efforts in presets]
+
+
+def live_options(place: str = "container") -> dict:
+    """``GET …/live-shares/options``: every role with its current value and every preset it may use."""
+    presets = live_presets()
+    roles = [{"id": rid, "label": label, "pickable": pickable, "current": {"preset": preset, "effort": effort, "account": account}, "presets": presets}
+             for rid, label, pickable, (preset, effort, account) in LIVE_ROLES]
+    terminals = ["all", "container", "none"] if place == "container" else ["all", "none"]
+    return {"roles": roles, "place": place, "terminals": terminals, "withheld": [{"id": wid, "label": label, "why": why} for wid, label, why in LIVE_WITHHELD]}
+
+
 class LiveLinks:
-    """A session's live links as the host keeps them: none until one is made, and a revoked one stays listed."""
+    """A session's live links as the host keeps them: none until one is made, and a revoked one stays listed.
+
+    It speaks the limits as well: a label, a password (kept here as typed, never shown back), a policy and
+    what was spent. ``writes`` keeps every POST and PATCH body as sent, for a check to compare with what the
+    window should have built; a refusal names the field it is about, as the host's does."""
 
     BASE = "https://services.example.org"
+    ROLE_IDS = {rid for rid, _label, _pickable, _current in LIVE_ROLES}
 
     def __init__(self) -> None:
         self.links: dict[str, list[dict]] = {}
+        self.passwords: dict[str, str] = {}
+        self.writes: list[tuple[str, str, dict]] = []
+        self.place = "container"
 
     def view(self, sid: str) -> dict:
         return {"links": self.links.get(sid, []), "reach": "outside", "base": self.BASE}
 
+    def refused(self, body: dict) -> tuple[str, str] | None:
+        """The first field of a write the host would refuse, with its reason."""
+        password = body.get("password")
+        if password is not None and len(str(password)) < 6:
+            return "password", "A password needs at least 6 characters."
+        policy = body.get("policy") or {}
+        for rid in (policy.get("roles") or {}):
+            if rid not in self.ROLE_IDS:
+                return f"policy.roles.{rid}", "No such role."
+        for name in ("budget_usd", "budget_weekly_pct"):
+            value = policy.get(name)
+            if value is not None and (not isinstance(value, (int, float)) or value <= 0):
+                return f"policy.{name}", "A limit is a positive number."
+        if policy.get("terminals", "all") not in ("all", "container", "none"):
+            return "policy.terminals", "Not one of all, container, none."
+        return None
+
     def answer(self, method: str, sid: str, link_id: str, body: object) -> tuple[int, str, str]:
         rows = self.links.setdefault(sid, [])
+        sent = body if isinstance(body, dict) else {}
+        if method == "GET" and link_id == "options":
+            return 200, "application/json", json.dumps(live_options(self.place))
+        if method in ("POST", "PATCH"):
+            self.writes.append((method, link_id, sent))
+            wrong = self.refused(sent)
+            if wrong:
+                return 400, "application/json", json.dumps({"detail": f"{wrong[0]}: {wrong[1]}"})
         if method == "POST" and not link_id:
-            hours = (body or {}).get("expires_hours") if isinstance(body, dict) else None
+            hours = sent.get("expires_hours")
             at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
             until = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + hours * 3600)) if hours else None
             row = {"id": f"shr_{len(rows) + 1:016x}", "url": f"{self.BASE}/v/{'k' * 43}/", "created_at": at, "expires_at": until, "revoked_at": None,
-                   "active": True, "last_seen_at": None, "connections": 0, "visitors": []}
+                   "active": True, "last_seen_at": None, "connections": 0, "visitors": [], "label": str(sent.get("label") or ""),
+                   "has_password": bool(sent.get("password")), "policy": sent.get("policy") or {}, "spent": {"usd": 0, "weekly_pct": 0}}
+            if sent.get("password"):
+                self.passwords[row["id"]] = str(sent["password"])
             rows.insert(0, row)
+            return 200, "application/json", json.dumps(row)
+        if method == "PATCH" and link_id:
+            row = next((item for item in rows if item["id"] == link_id), None)
+            if row is None:
+                return 404, "application/json", json.dumps({"detail": "no such link"})
+            if "label" in sent:
+                row["label"] = str(sent["label"] or "")
+            if "policy" in sent:
+                row["policy"] = sent["policy"] or {}
+            if sent.get("password"):
+                self.passwords[link_id] = str(sent["password"])
+                row["has_password"] = True
+            if sent.get("clear_password"):
+                self.passwords.pop(link_id, None)
+                row["has_password"] = False
+            if "expires_hours" in sent:
+                hours = sent["expires_hours"]
+                row["expires_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + hours * 3600)) if hours else None
             return 200, "application/json", json.dumps(row)
         if method == "DELETE" and link_id:
             row = next((item for item in rows if item["id"] == link_id), None)
@@ -1975,6 +2098,51 @@ class LiveLinks:
         if method == "GET" and not link_id:
             return 200, "application/json", json.dumps(self.view(sid))
         return 404, "application/json", json.dumps({"detail": "Not Found"})
+
+
+class VisitDoor:
+    """The door a live link's page talks to, ``/v/<token>/api/share…``: the link's own reading with its
+    limits, and the password gate. Locked until the right password is posted; after ``tries`` wrong ones
+    the door asks the page to wait ``retry_after`` seconds, as the host's per-link limit does. A send
+    after ``spend()`` is refused with 402, the way a spent budget is."""
+
+    def __init__(self, session_id: str, title: str, password: str = "", limits: dict | None = None, tries: int = 3, retry_after: int = 3) -> None:
+        self.session_id = session_id
+        self.title = title
+        self.password = password
+        self.open = not password
+        self.limits = limits
+        self.tries = tries
+        self.retry_after = retry_after
+        self.wrong = 0
+        self.slow_until = 0.0
+        self.spent = False
+
+    def locked(self) -> tuple[int, dict]:
+        return 401, {"detail": "This link asks for a password.", "code": "locked"}
+
+    def answer(self, method: str, path: str, body: object) -> tuple[int, dict] | None:
+        """``(status, body)`` for a door route, a lock for any other while locked, else ``None``."""
+        if path == "/api/share/unlock" and method == "POST":
+            if time.time() < self.slow_until:
+                return 429, {"detail": "Too many tries.", "code": "slow", "retry_after": max(1, int(self.slow_until - time.time() + 0.99))}
+            if isinstance(body, dict) and body.get("password") == self.password:
+                self.open = True
+                self.wrong = 0
+                return 200, {"ok": True}
+            self.wrong += 1
+            if self.wrong >= self.tries:
+                self.wrong = 0
+                self.slow_until = time.time() + self.retry_after
+                return 429, {"detail": "Too many tries.", "code": "slow", "retry_after": self.retry_after}
+            return 403, {"detail": "Wrong password.", "code": "wrong"}
+        if not self.open:
+            return self.locked()
+        if path == "/api/share" and method == "GET":
+            return 200, {"session_id": self.session_id, "title": self.title, "expires_at": None, "limits": self.limits}
+        if self.spent and method == "POST" and path.split("/")[-1] in ("messages", "retry", "answer", "steer"):
+            return 402, {"detail": "The limit set for this link is reached.", "code": "budget"}
+        return None
 
 
 LIVE = LiveLinks()
@@ -2021,6 +2189,7 @@ def answer_shared(method: str, path: str, body: object = None) -> tuple[int, str
     if flowed is not None:
         return flowed[0], "application/json", json.dumps(flowed[1])
     if len(parts) >= 5 and parts[2] == "sessions" and parts[4] == "live-shares":
+        # ``…/live-shares/options`` is the window's list of roles; any other sixth part is a link's id.
         return LIVE.answer(method.upper(), parts[3], parts[5] if len(parts) > 5 else "", body)
     if path.startswith("/api/agent-talks/") or (len(parts) == 5 and parts[2] == "sessions" and parts[4] == "agent-talks"):
         answered = TALKS.answer(method, path, body)
@@ -2704,7 +2873,7 @@ def ask_turn(seq: int, call_id: str, questions: list[dict], answers: list[dict] 
     return rows
 
 
-__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "job_log", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load", "TRANSLATED_EXCHANGE", "session_translation", "translated_messages"]
+__all__ = ["ASK_KINDS", "agent_message", "ask_turn", "CALENDAR", "CalendarStub", "ComputerStub", "MEMORY", "MemoryStub", "VOICE_NOTE_PREFIX", "CAPABILITIES", "CATALOG", "CLAUDE_ALIASES", "CLAUDE_VERSIONS", "HarnessesStub", "IMPORTS", "ImportStub", "answer_batch", "question_view", "DEFAULT_APP", "DEFAULT_PORT", "ENVIRONMENTS", "EVENTS", "FOCUS_WORDS", "GATES", "NOTIFICATION_CATEGORIES", "SAMPLE_PAGE", "TOOL_GROUP_CATALOGUE", "agent_usage", "terminal_agent", "BoardStub", "FocusStub", "TeamStub", "Unhandled", "answer_shared", "LIVE", "LiveLinks", "VisitDoor", "live_options", "event_stream_hello", "expect_app", "folder", "folders", "fulfil_shared", "job_log", "notification_preferences", "serve_shared_post", "session_tasks", "session_tool_groups", "terminal_load", "TRANSLATED_EXCHANGE", "session_translation", "translated_messages"]
 
 # What the harness manager reports for the container: Claude Code installed and signed in, Codex
 # installed but signed out, the rest absent. Enough for the hiring form to show one command-line agent

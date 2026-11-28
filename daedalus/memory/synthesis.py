@@ -48,7 +48,7 @@ from protocore.contracts.llm import LLMObservabilityContext, LLMRequest
 from protocore.contracts.memory import MemoryRecord
 from protocore.contracts.types import Message, MessageRole, TextBlock
 
-from daedalus.host import task_effort
+from daedalus.host import share_tools, task_effort
 from daedalus.host.engine_factory import TENANT
 from daedalus.host.prompts import split_headline, without_host_notes
 from daedalus.memory import tidy
@@ -1742,12 +1742,18 @@ class Synthesizer:
         last = await self.db.fetchone("SELECT max(seq) AS last FROM transcript WHERE session_id = ?", (chat.id,))
         out: list[Turn] = []
         guest_runs: set[str] = set()
+        # What was said while a live link let somebody else write here is not the operator's, and is
+        # skipped for good: the watermark passes it, so a link revoked later does not release it.
+        shared = await share_tools.shared_windows(self.db, chat.id)
         for row in rows:
             try:
                 message = json.loads(row["message"])
             except ValueError:
                 continue
             metadata = message.get("metadata") or {}
+            if share_tools.within(shared, message.get("created_at")):
+                guest_runs.add(str(metadata.get("daedalus.run_id") or ""))
+                continue
             blocks = [b for b in message.get("content_blocks") or [] if isinstance(b, dict)]
             if metadata.get("daedalus.touched") or any(b.get("kind") == "tool_use" and b.get("name") == TALK_TOOL for b in blocks):
                 # From here on the run wrote with another agent's reply in front of it, and the reply
@@ -1806,10 +1812,11 @@ class Synthesizer:
 
     async def headlines(self, chat: Chat) -> list[str]:
         rows = await self.db.fetchall(
-            "SELECT headline FROM learning_records WHERE session_id = ? AND coalesce(headline, '') != '' AND at > ? ORDER BY id DESC LIMIT ?",
+            "SELECT headline, at FROM learning_records WHERE session_id = ? AND coalesce(headline, '') != '' AND at > ? ORDER BY id DESC LIMIT ?",
             (chat.id, chat.last_at or "", HEADLINES),
         )
-        return [str(r["headline"]) for r in reversed(rows)]
+        shared = await share_tools.shared_windows(self.db, chat.id)
+        return [str(r["headline"]) for r in reversed(rows) if not share_tools.within(shared, r["at"])]
 
     # -- the model --------------------------------------------------------------------------------
 

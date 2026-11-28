@@ -13,18 +13,73 @@
 
 /** Fired when the host answers that the link was revoked or has expired: the page says so and stops. */
 export const VISIT_ENDED = "daedalus-visit-ended";
+/** Fired when the host answers 401: the link has a password and this page holds no pass (or an old one,
+ *  after the operator changed it). The page shows the password screen. */
+export const VISIT_LOCKED = "daedalus-visit-locked";
+/** Fired when a send answers 402: the owner's limit for the link is reached. */
+export const VISIT_SPENT = "daedalus-visit-spent";
+
+/** Watches a door's answer for the three states the page reacts to as a whole. */
+function heard(status: number): void {
+  if (status === 410) window.dispatchEvent(new Event(VISIT_ENDED));
+  else if (status === 401) window.dispatchEvent(new Event(VISIT_LOCKED));
+  else if (status === 402) window.dispatchEvent(new Event(VISIT_SPENT));
+}
+
+export type AllowedPick = { preset: string; accounts: string[]; efforts: string[] };
+export type RoleLimit = { preset: string; effort: string; account: string; allowed: AllowedPick[] };
+export type VisitLimits = {
+  roles: Record<string, RoleLimit>;
+  budget: { usd: { limit: number; spent: number } | null; weekly_pct: { limit: number; spent: number } | null };
+  terminals: "all" | "container" | "none";
+};
+
+let limits: VisitLimits | null = null;
+
+/** What the link lets this visitor choose, as ``GET /api/share`` said; null in the operator's app. */
+export function visitLimits(): VisitLimits | null {
+  return limits;
+}
+
+export function setVisitLimits(next: VisitLimits | null): void {
+  limits = next;
+}
+
+/** The efforts a visitor may use with ``preset`` for a role: null when the role is not narrowed (any). */
+export function allowedEfforts(role: string, preset: string, from: VisitLimits | null = limits): string[] | null {
+  const kept = from?.roles?.[role];
+  if (!kept) return null;
+  const entry = kept.allowed.find((item) => item.preset === preset);
+  const own = preset === kept.preset ? [kept.effort] : [];
+  if (entry) return entry.efforts.length ? [...new Set([...entry.efforts, ...own])] : null;
+  return own;
+}
+
+/** Whether the visitor has no choice at all for a role: the link locks it to one value. */
+export function roleLocked(role: string, from: VisitLimits | null = limits): boolean {
+  const kept = from?.roles?.[role];
+  return !!kept && kept.allowed.length === 0;
+}
 
 const LINK = /^\/v\/([A-Za-z0-9_-]{40,64})(?:\/|$)/;
 const VISITOR_KEY = "daedalus.visitor.id";
 const NAME_KEY = "daedalus.visitor.name";
 
 /** The link's token when this page is a live link's, else null. */
-export function shareToken(pathname: string = window.location.pathname): string | null {
+export function shareToken(pathname: string = typeof window === "undefined" ? "" : window.location.pathname): string | null {
   return LINK.exec(pathname)?.[1] ?? null;
 }
 
 export function inShare(): boolean {
   return shareToken() !== null;
+}
+
+/** A read only the operator's own app makes: null on a live link's page, which `useQuery` takes as "do not
+ *  ask". What such a read names is not the link's session (the computer, the folders' homes, what this
+ *  installation can do, a subscription's usage), so the door answers 404 to it and the page spent its
+ *  first seconds filling the network log with refusals. Nothing the page draws waits on any of them. */
+export function ownerOnly(path: string): string | null {
+  return inShare() ? null : path;
 }
 
 /** An API or socket path as this page must ask for it: under the link's prefix on a live link's page,
@@ -97,15 +152,16 @@ export function installShareTransport(token: string): void {
     if (path === raw) return nativeFetch(input, init);
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     for (const [key, value] of Object.entries(visitorHeaders())) headers.set(key, value);
-    // No cookie and no credential of anyone else's: the link's token in the path is the only one.
+    // No credential of anyone else's: the link's token in the path, and for a link with a password the
+    // pass the door set at unlocking, a cookie scoped to this link's own path. It was "omit" before
+    // passwords existed, and with "omit" the browser both drops the pass it is given and never sends it,
+    // so a visitor who typed the right password stayed locked out.
     headers.delete("X-Daedalus-Token");
     headers.delete("Authorization");
-    const asked = nativeFetch(path, { ...(input instanceof Request ? { method: input.method, body: input.body } : {}), ...init, headers, credentials: "omit" });
+    const asked = nativeFetch(path, { ...(input instanceof Request ? { method: input.method, body: input.body } : {}), ...init, headers, credentials: "same-origin" });
     // 410 is the door's answer to a link that stopped, and the event stream's reconnect is what hears it
     // first once a revocation cut the stream: the page gives up there rather than retrying forever.
-    void asked.then((response) => {
-      if (response.status === 410) window.dispatchEvent(new Event(VISIT_ENDED));
-    }, () => undefined);
+    void asked.then((response) => heard(response.status), () => undefined);
     return asked;
   };
   const open = XMLHttpRequest.prototype.open;
@@ -120,9 +176,7 @@ export function installShareTransport(token: string): void {
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     if (marked.has(this)) {
       for (const [key, value] of Object.entries(visitorHeaders())) this.setRequestHeader(key, value);
-      this.addEventListener("load", () => {
-        if (this.status === 410) window.dispatchEvent(new Event(VISIT_ENDED));
-      });
+      this.addEventListener("load", () => heard(this.status));
     }
     return send.call(this, body);
   };

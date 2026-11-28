@@ -72,6 +72,25 @@ describe("saving attached media", () => {
     expect(save?.getAttribute("download")).toBe("back.png");
   });
 
+  it("draws a picture on a live link's page without asking to be signed in, from addresses that carry the link", async () => {
+    // The door drops cookies and opens no route that signs a browser in; the request answered 404 and the
+    // picture stopped at the retry button while the file cards, which never ask, were drawn.
+    const link = "A".repeat(43);
+    window.history.pushState({}, "", `/v/${link}/`);
+    try {
+      // Drawn at once, with no wait on a sign-in: the request is made once per page, so what shows
+      // the upgrade was asked for is the placeholder it holds the pictures behind, not the call.
+      act(() => root.render(<InlineMedia sessionId="s" presentation={album} />));
+      expect(host.querySelector(".inline-media-loading")).toBeNull();
+      expect(host.querySelector(".inline-media")).not.toBeNull();
+      await act(async () => undefined);
+      expect(host.querySelector(".inline-media-error")).toBeNull();
+      expect([...host.querySelectorAll("img")].map((img) => img.getAttribute("src"))).toEqual([`/v/${link}/api/sessions/s/media/p-album/i1/content`, `/v/${link}/api/sessions/s/media/p-album/i2/content`]);
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("saves a session file from the viewer the files tab opens, without leaving the page", async () => {
     const onPanel = vi.fn();
     await act(async () => root.render(<FileGallery sources={[{ base: "/api/sessions/s", path: "out/demo.mp4" }]} start={0} onClose={() => undefined} onPanel={onPanel} />));

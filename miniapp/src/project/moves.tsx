@@ -14,6 +14,7 @@ import { Icon } from "../icons";
 import { entryPath } from "../notifications";
 import { navigate } from "../router";
 import { invalidate, peek, useQuery } from "../store";
+import { ownerOnly } from "../visit";
 import "./newproject.css";
 
 export const MOVES_KEY = "/api/folder-moves?active=true";
@@ -25,7 +26,7 @@ type Moves = { jobs: FolderMoveJob[] };
 /** The moves running now. */
 export function useActiveMoves(): FolderMoveJob[] {
   const running = (peek<Moves>(MOVES_KEY)?.jobs ?? []).some((job) => job.active);
-  const query = useQuery<Moves>(MOVES_KEY, { pollMs: running ? MOVES_POLL_MS : 0, staleMs: 10000 });
+  const query = useQuery<Moves>(ownerOnly(MOVES_KEY), { pollMs: running ? MOVES_POLL_MS : 0, staleMs: 10000 });
   useEvent(["project.changed"], (event) => {
     const change = String(event.payload.change ?? "");
     if (change === "folder_moved" || change.startsWith("folder_move")) {

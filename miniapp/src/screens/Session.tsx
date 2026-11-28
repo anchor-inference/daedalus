@@ -79,7 +79,7 @@ import { ProjectBoard } from "../board/ProjectBoard";
 import { useMain } from "../main/data";
 import { ShareSheet } from "../share";
 import { LiveLinkChip } from "../livelink";
-import { inShare } from "../visit";
+import { inShare, visitLimits } from "../visit";
 import { AgentsTab, TalkApprovals, agentsWaiting, useAgentTalks, useAgentsAutoOpen } from "../agenttalk";
 import { GuestCard, GuestLinksSheet } from "../guestlinks";
 import { deviceSaving, useBrowsers } from "../browser/data";
@@ -665,17 +665,21 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       .then((all) => setSchedules(all.filter((x) => x.target_session === id || x.created_by_session === id || x.active_session_id === id)))
       .catch(() => undefined);
   }, [id]);
+  // Not for a live link's visitor: the list is the whole installation's, filtered here, and the door
+  // opens nothing that names no session.
   useEffect(() => {
+    if (visit) return;
     loadSchedules();
     const t = setInterval(loadSchedules, 60000);
     return () => clearInterval(t);
-  }, [loadSchedules]);
+  }, [loadSchedules, visit]);
 
   // Usage of the provider the session talks to: a subscription's windows, or the day's metered spend.
   const provider = detail?.provider ?? "";
   const activeAccount = detail?.account || detail?.account_default || "";
+  // A visitor is not shown the operator's account: its windows and spend are not the link's to read.
   useEffect(() => {
-    if (!provider) return;
+    if (!provider || visit) return;
     let gone = false;
     const qs = new URLSearchParams();
     if (activeAccount) qs.set("account", activeAccount);
@@ -692,7 +696,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
       gone = true;
       clearInterval(t);
     };
-  }, [id, provider, activeAccount, detail?.usage.c]);
+  }, [id, provider, activeAccount, detail?.usage.c, visit]);
 
   // The card's run and delete are the schedule commands the Schedules dialog sends, revision and
   // command identity included. The card used to call `/api/schedules/{id}/run` and `DELETE
@@ -1779,9 +1783,11 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
   // The workspace in the operator's own file manager, where there is one in front of them.
   const revealer = useReveal();
   const revealWorkspace = () => void revealer?.reveal({ session_id: id });
+  // A link set to no terminals: the visitor has no way in to them, and the host lists none anyway.
+  const noTerminals = visit && visitLimits()?.terminals === "none";
   const phoneTiles: SessionTile[] = phone && !pane ? [
     { id: "search", icon: "search", label: t("session.phone.search"), onSelect: () => setPhoneSheet("search") },
-    { id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) },
+    ...(noTerminals ? [] : [{ id: "terminal", icon: "terminal", label: t("session.phone.terminal"), count: sessionTerminals.running.length, disabled: !!terminalDock.reason && sessionTerminals.running.length === 0, onSelect: () => terminalDock.setSheet(true) } as SessionTile]),
     ...(computer.view !== "hidden" && !visit ? [{ id: "computer", icon: "monitor" as IconName, label: t("cu.button"), attn: computer.view === "mine" || computer.view === "paused", onSelect: () => setComputerOpen(true) }] : []),
     ...(hasBrowser ? [{ id: "browser", icon: "globe" as IconName, label: t("panel.tab.browser"), attn: !!browserShown?.needs_you, onSelect: openBrowser }] : []),
     ...(questionsShown ? [{ id: "questions", icon: "ask" as IconName, label: t("panel.tab.questions"), count: waiting, attn: waiting > 0, onSelect: () => panel.open("questions") }] : []),
@@ -2088,7 +2094,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
           {phone && browserShown && <BrowserHeadButton groups={browsers.groups} onOpen={openBrowser} streaming={panel.state.tab !== "browser"} saving={deviceSaving(true)} />}
           {!visit && !!sessionCanvases?.length && <CanvasesButton sessionId={id} count={sessionCanvases.length} />}
           {!visit && <ComputerButton view={computer.view} onOpen={() => setComputerOpen(true)} />}
-          <TerminalButton dock={terminalDock} phone={phone} />
+          {!noTerminals && <TerminalButton dock={terminalDock} phone={phone} />}
           {/* Search, the panel and the menu close the row in that order on every chat, the three a
               header always has; the buttons before them appear only when there is something to show. */}
           <ChatSearch sessionId={id} onPick={openMessage} />
@@ -2271,7 +2277,7 @@ export function SessionScreen({ id, onBack, onOpen, toast, pane, onSplit, focus,
             phone={phone}
             toast={toast}
           />}
-          {!phone && !bare && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
+          {!phone && !bare && !noTerminals && <TerminalDock dock={terminalDock} workspace={detail?.workspace} fileOpener={openTerminalFile} />}
         </div>
       </div>
       {detail && (
