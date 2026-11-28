@@ -107,6 +107,8 @@ async def test_the_door_matrix(rig: Rig) -> None:
         for method, path in (
             ("GET", "/api/sessions"), ("POST", "/api/sessions"), ("DELETE", f"/api/sessions/{mine}"), ("PATCH", f"/api/sessions/{mine}"),
             ("POST", f"/api/sessions/{mine}/share"), ("GET", f"/api/sessions/{mine}/live-shares"), ("POST", f"/api/sessions/{mine}/live-shares"),
+            ("GET", f"/api/sessions/{mine}/live-shares/options"), ("PATCH", f"/api/sessions/{mine}/live-shares/{link['id']}"),
+            ("POST", f"/api/sessions/{mine}/vision"), ("PUT", f"/api/sessions/{mine}/subagent-models"),
             ("POST", f"/api/sessions/{mine}/guest/links"), ("POST", f"/api/sessions/{mine}/fork"), ("POST", f"/api/sessions/{mine}/bypass"),
             ("POST", f"/api/sessions/{mine}/project"), ("GET", f"/api/sessions/{mine}/export/download"), ("GET", "/api/secrets"),
             ("PUT", "/api/settings"), ("GET", "/api/providers"), ("POST", "/api/terminals"), ("GET", "/api/terminals/layouts"),
