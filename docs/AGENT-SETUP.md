@@ -450,6 +450,23 @@ Settings. The dialog says whether the link can be opened from the internet, from
 from this computer only. The header shows a live link while one is open, with how many visitors used it
 and when; revoking it ends every connection it has at once, and a link can be made to expire by itself.
 
+A link can carry a name, a password and limits. With a password the visitor's page asks for it before
+anything else opens; a correct one gives that browser a pass for that link alone, a new password ends every
+pass handed out before and every open connection, and wrong guesses are slowed for the link as a whole. The
+limits choose, for each place the conversation reaches a model (the conversation itself, subagents, reading
+pictures, translation and the rest), what a visitor's turn uses and what the visitor may switch to; how much
+money, or how much of a subscription's weekly window, the visitor's turns may spend; and whether the link
+shows the conversation's terminals, only those in its container, or none. A change to any of them takes
+effect at once.
+
+For the API: `GET /api/sessions/{id}/live-shares/options` lists the roles, the place the session runs in
+and the terminal settings that mean something there; `POST …/live-shares` takes `{expires_hours, label,
+password, policy}` and `PATCH …/live-shares/{share_id}` `{label, password, clear_password, policy,
+expires_hours}`. A refused policy answers 400 naming the field. Behind a password a visitor's requests
+answer `401 {"code": "locked"}` until `POST /v/<token>/api/share/unlock {"password"}` (403 `wrong`, 429
+`slow` with `retry_after`); a pick outside the limits answers 403 `not_allowed`, and a spent budget 402
+`budget` on whatever would start a turn.
+
 The visitor's terminal and browser view are WebSockets, so a proxy in front of the door has to pass the
 upgrade: `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` in the
 nginx block above (Caddy does it by itself).

@@ -5776,6 +5776,8 @@ def build_app(app: Application, api_token: str) -> FastAPI:
         state = await manager.get_state(session_id)
         if state is None:
             raise HTTPException(404, "no such session")
+        if _.get("via") == "share" and (refused := await api_session_share.pick_refused(app, _, body)):
+            return JSONResponse({"detail": refused, "code": "not_allowed"}, status_code=403)  # type: ignore[return-value]
         account = body.get("account")
         if account is not None and not isinstance(account, str):
             raise HTTPException(400, "account must be a string")
