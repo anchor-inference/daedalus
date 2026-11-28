@@ -6144,7 +6144,7 @@ export const DICT: Record<string, Record<Lang, string>> = {
   "live.role.main.sub": { en: "The model that answers in this chat.", ru: "Модель, которая отвечает в этом чате." },
   "live.role.subagents": { en: "Subagents", ru: "Субагенты" },
   "live.role.subagents.sub": { en: "Helpers the agent starts for parts of a task.", ru: "Помощники, которых агент запускает для частей задачи." },
-  "live.role.vision": { en: "Image reading", ru: "Распознавание изображений" },
+  "live.role.vision": { en: "Picture reading", ru: "Чтение картинок" },
   "live.role.vision.sub": { en: "Describes pictures and screenshots for a model that cannot see them.", ru: "Описывает картинки и скриншоты для модели, которая их не видит." },
   "live.role.translation": { en: "Translation", ru: "Перевод" },
   "live.role.translation.sub": { en: "Translates messages between the visitor's language and the agent's.", ru: "Переводит сообщения между языком гостя и языком агента." },

@@ -1968,13 +1968,15 @@ LIVE_PROVIDERS: list[tuple[str, str, str, list[tuple[str, str]], list[tuple[str,
     ("ollama", "Ollama на этой машине", "metered", [], [("ol-qwen-4-14b", "Qwen 4 14B локально", []), ("ol-gemma-4-12b", "Gemma 4 12B локально", [])]),
     ("lmstudio", "LM Studio в локальной сети", "metered", [], [("lm-llama-5-8b", "Llama 5 8B", []), ("lm-phi-6", "Phi 6", [])]),
 ]
+# Only the conversation's own model has a control on the visitor's screen; every other role is a value the
+# link sets and the visitor cannot change, as ``share_roles.describe`` reports them.
 LIVE_ROLES: list[tuple[str, str, bool, tuple[str, str, str]]] = [
     ("main", "Conversation", True, ("claude-opus-5", "high", "")),
-    ("subagents", "Subagents", True, ("claude-sonnet-5", "medium", "")),
-    ("vision", "Image reading", True, ("gem-3-flash", "", "")),
-    ("translation", "Translation", True, ("ya-gpt-6-lite", "", "")),
-    ("quick", "Quick agent", True, ("claude-haiku-5", "", "")),
-    ("coach", "Prompt coach", True, ("gpt-6-mini", "low", "")),
+    ("subagents", "Subagents", False, ("claude-sonnet-5", "medium", "")),
+    ("vision", "Image reading", False, ("gem-3-flash", "", "")),
+    ("translation", "Translation", False, ("ya-gpt-6-lite", "", "")),
+    ("quick", "Quick agent", False, ("claude-haiku-5", "", "")),
+    ("coach", "Prompt coach", False, ("gpt-6-mini", "low", "")),
     ("review", "Action review", False, ("claude-sonnet-5", "low", "")),
     ("injection", "Injection guard", False, ("gem-3-flash-lite", "", "")),
     ("title", "Titles", False, ("claude-haiku-5", "", "")),
